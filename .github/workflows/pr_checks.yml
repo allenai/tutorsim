@@ -1,0 +1,46 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  changelog:
+    name: Check CHANGELOG
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if CHANGELOG.md was updated
+        run: |
+          if git diff --name-only origin/main..HEAD | grep -q "CHANGELOG.md"; then
+            echo "✅ CHANGELOG.md has been updated"
+          else
+            echo "❌ CHANGELOG.md has not been updated"
+            echo "Please update CHANGELOG.md with a description of your changes"
+            exit 1
+          fi
+
+  commit-message:
+    name: Check Commit Messages
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit message format
+        run: |
+          # Check that commit messages follow conventional format
+          # This is optional but helps maintain consistency
+          echo "Checking commit messages..."
+          git log --format="%s" origin/main..HEAD | while read commit; do
+            if [[ ! "$commit" =~ ^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: ]]; then
+              echo "Warning: Commit message doesn't follow conventional format: $commit"
+              echo "Consider using format: type(scope): description"
+            fi
+          done
