@@ -1,50 +1,44 @@
 # build artifacts
-
 .eggs/
-.mypy_cache
 *.egg-info/
 build/
 dist/
 pip-wheel-metadata/
 
-
-# dev tools
-
+# virtualenvs and local tooling
 .envrc
 .python-version
-.idea
+.idea/
 .venv/
 .vscode/
 /*.iml
 
-
-# jupyter notebooks
-
-.ipynb_checkpoints
-
-
-# miscellaneous
-
+# notebook and cache artifacts
+.ipynb_checkpoints/
 .cache/
-doc/_build/
+__pycache__/
+*.pyc
+*.pyo
+
+# local OS/editor noise
 *.swp
 .DS_Store
 
-
-# python
-
-*.pyc
-*.pyo
-__pycache__
-
-
-# testing and continuous integration
-
-.coverage
+# test, lint, typing artifacts
 .pytest_cache/
-.benchmarks
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage*
+htmlcov/
+.benchmarks/
 
-# documentation build artifacts
-
-docs/build
+# docs artifacts
 site/
+docs/build/
+
+# local research artifacts (keep only dev log summary)
+data/
+output/
+plans/*
+!plans/_summary.md

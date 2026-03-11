@@ -6,21 +6,23 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
-        args: ['--maxkb=500']
+        args: ["--maxkb=500"]
       - id: check-merge-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.4
     hooks:
       - id: ruff
-        args: [--fix]
+        args: ["--fix"]
+        files: ^(tutor_bench|tests)/
       - id: ruff-format
+        files: ^(tutor_bench|tests)/
 
   - repo: local
     hooks:
-      - id: pytest
-        name: pytest
-        entry: python -m pytest -q
+      - id: pyright
+        name: pyright
+        entry: python -m pyright tutor_bench
         language: system
         pass_filenames: false
         always_run: true

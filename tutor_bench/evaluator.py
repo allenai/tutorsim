@@ -133,7 +133,11 @@ class Evaluator:
 
         # Load annotations
         annotation_data = self._load_jsonlines(annotations)
-        annotation_map = {a.get("session_id"): a for a in annotation_data}
+        annotation_map: dict[str, dict[str, Any]] = {}
+        for annotation in annotation_data:
+            session_id = annotation.get("session_id")
+            if isinstance(session_id, str) and session_id:
+                annotation_map[session_id] = annotation
 
         # Compute metrics
         metrics = self._compute_metrics(transcript_ids, annotation_map)
