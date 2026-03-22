@@ -3,6 +3,7 @@ from __future__ import annotations
 from tutor_bench.toolkit.prompts import (
     PROMPT_IDS,
     build_dense_caption_prompt,
+    build_mmtutor_keystep_selector_prompt,
     build_moment_selection_pass1_prompt,
     build_moment_selection_pass2_prompt,
     build_qa_author_prompt,
@@ -11,7 +12,14 @@ from tutor_bench.toolkit.prompts import (
 
 
 def test_prompt_ids_are_present() -> None:
-    expected = {"moment_selection_pass1", "moment_selection_pass2", "dense_caption", "qa_author", "qa_solver"}
+    expected = {
+        "moment_selection_pass1",
+        "moment_selection_pass2",
+        "dense_caption",
+        "qa_author",
+        "qa_solver",
+        "mmtutor_keystep_selector",
+    }
     assert expected.issubset(set(PROMPT_IDS))
 
 
@@ -67,3 +75,14 @@ def test_build_qa_and_caption_prompts_include_fields() -> None:
     )
     assert "QUESTION (predict): Q?" in s_prompt
     assert "0) A" in s_prompt
+
+
+def test_build_mmtutor_keystep_selector_prompt() -> None:
+    prompt = build_mmtutor_keystep_selector_prompt(
+        stem="stem_y",
+        timestamp="00:12:34.500",
+        transcript_context="[00:12:30.000 - 00:12:35.000] TUTOR: factor both sides",
+    )
+    assert "Session stem: stem_y" in prompt
+    assert "Candidate timestamp: 00:12:34.500" in prompt
+    assert "is_key_step, score, reason, prev_step_timestamp, quality_flags" in prompt

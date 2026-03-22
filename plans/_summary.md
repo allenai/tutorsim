@@ -208,6 +208,28 @@ Added prompt observability in outputs:
 
 **Result:** Prompt provenance is now explicit and machine-readable, enabling later reporting by prompt version and reducing hidden prompt drift.
 
+## Plan 015: MMTutor Keyframe Baseline (Uncapped)
+
+**Plan:** `015_mmtutor_keyframe_baseline.md`
+**Results:** `015_mmtutor_keyframe_baseline_results.md`
+**Scripts:** `scripts/data/select_mmtutor_keyframes.py`, `scripts/data/run_mmtutor_diagnostics.py`, `scripts/data/plot_timeline_comparison_015.py`
+**Outputs:**
+- `output/mmtutor_keyframe_selection_015/`
+- `output/screenshot_diagnostic_015_mmtutor/`
+- `output/timeline_comparison_015/`
+
+Implemented an MMTutor-comparable baseline adapted to tutor-bench workflows:
+- SSIM boundary-based candidate discovery
+- premium multi-provider VLM semantic pruning over frame+transcript context
+- uncapped key-step extraction with quality/novelty/time-gap filtering
+- key-step + previous-step pairing metadata
+- merged set synthesis (`merged_union`, `merged_consensus`)
+- timeline comparison against 009/010 plus qualitative markdown including screenshot path, clip path, and gold transcript context
+- added async batch-mode support for OpenAI/Anthropic/Gemini provider paths
+- added monitoring helper script for long-running batch executions
+
+**Result:** End-to-end scripts and output contracts are implemented. Single-stem smoke-fast run completed with qualitative comparison outputs; 10-stem all-provider batch run launched and monitoring is in progress.
+
 ---
 
 ## Chronology
@@ -228,3 +250,4 @@ Added prompt observability in outputs:
 | 012 | Screenshot-conditioned transcript understanding benchmark | MCQ-based understanding test with/without screenshot-derived caption context | **Implemented and ready to run; quantitative benchmark pending execution** |
 | 013 | Reusable toolkit module extraction | Shared `tutor_bench/toolkit` primitives + script refactors + unit tests | **Core reusable base established for future plan velocity and consistency** |
 | 014 | Prompt registry + observability | Shared prompt builders + prompt IDs emitted in outputs | **Prompt provenance now explicit for reproducibility and reporting** |
+| 015 | MMTutor keyframe baseline (uncapped) | SSIM candidate generation + premium VLM pruning + 009/010/015 timeline + qualitative artifacts | **Implemented and ready for API-backed benchmark/inspection runs** |

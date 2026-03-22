@@ -11,6 +11,7 @@ PROMPT_IDS = {
     "dense_caption": "dense_caption_v1",
     "qa_author": "qa_author_v1",
     "qa_solver": "qa_solver_v1",
+    "mmtutor_keystep_selector": "mmtutor_keystep_selector_v1",
 }
 
 
@@ -106,4 +107,30 @@ def build_qa_solver_prompt(question: dict[str, Any], moment: dict[str, Any], cap
         f"1) {choices[1]}\n"
         f"2) {choices[2]}\n"
         f"3) {choices[3]}\n"
+    )
+
+
+def build_mmtutor_keystep_selector_prompt(
+    stem: str,
+    timestamp: str,
+    transcript_context: str,
+) -> str:
+    return (
+        "You are analyzing a tutoring session frame to decide whether it is a key instructional step.\n"
+        "Return JSON object only with fields:\n"
+        "is_key_step, score, reason, prev_step_timestamp, quality_flags.\n"
+        "Field requirements:\n"
+        "- is_key_step: boolean\n"
+        "- score: number in [0,1]\n"
+        "- reason: concise string (<=220 chars)\n"
+        "- prev_step_timestamp: HH:MM:SS.mmm or empty string if unknown\n"
+        "- quality_flags: object with booleans: clear_handwriting, stable_frame, aligns_with_explanation.\n"
+        "Selection rules:\n"
+        "- Prefer pivotal mathematical transitions that change the solving state.\n"
+        "- Exclude title writing, erasing transitions, blurry frames, and final answer states without explanation.\n"
+        "- Use both visual evidence and local transcript context.\n"
+        f"Session stem: {stem}\n"
+        f"Candidate timestamp: {timestamp}\n"
+        "TRANSCRIPT_CONTEXT:\n"
+        f"{transcript_context}\n"
     )
