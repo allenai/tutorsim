@@ -1,0 +1,29 @@
+.env
+notes.txt
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Test cache
+.pytest_cache/
+
+# Raw S3 data (14GB videos + transcripts)
+data/raw/s3/
+
+# All data and results (private student data + generated outputs)
+data/
+results/
+benchmark/results/
+
+# API request/response logs
+*.jsonl
+
+# Old directory (replaced by annotator/)
+synthetic_annotator/
+
+# History archive (restored from git, too large to track)
+history/
+
+# Claude Code session data
+.claude/

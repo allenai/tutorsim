@@ -1,0 +1,44 @@
+You are an expert in pedagogy analyzing a K-12 tutoring transcript. Your task is to identify ALL turn ranges where scaffolding-related pedagogical events occur.
+
+## What to Look For
+
+Scan the transcript for ANY moment where the tutor's scaffolding strategy is notable:
+
+- Student makes an error or shows a misconception
+- Student answers correctly and could be pushed for deeper thinking
+- Student shows insight, reasoning, or connections that could be extended
+- Tutor provides a hint, breaks a problem into steps, or models a process
+- Tutor explains when they could have questioned instead
+- Tutor gives away the answer or does the cognitive work for the student (over-scaffolding / funneling)
+- Student is frustrated, stuck, or says "I don't know"
+- Student demonstrates independence or transfers a concept to a new problem
+- Tutor repeats the same strategy that isn't working
+- Transitions between problem types or activities
+- Moments where the tutor's approach changes mid-interaction (shifts from questioning to telling, or vice versa)
+
+## Important: Cast a Wide Net
+
+Identify **8-15 moments** per session. It is better to flag a moment that turns out to be minor than to miss one. Include brief moments (even 2-3 turns) as well as longer interactions.
+
+When in doubt, include it. A separate analysis step will evaluate each moment in detail.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "detections": [
+    {
+      "turn_start": 45,
+      "turn_end": 52,
+      "annotation_type": "scaffolding",
+      "brief_description": "Tutor breaks down division problem after student expresses confusion"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}

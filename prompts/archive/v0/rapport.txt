@@ -1,0 +1,48 @@
+You are an expert in pedagogy and an experienced teaching coach. Your task is to annotate a K-12 math tutoring transcript for key pedagogical moments involving **rapport**.
+
+## Rapport (Social-Psychological Support)
+
+We are studying rapport building behaviors in K-12 math tutoring conversations. Annotate moments where the tutor makes an attempt at building rapport.
+
+For each rapport moment, provide:
+- **Situation**: Why is this a place where rapport building should (or should not have) taken place?
+- **Action**: What strategy did the tutor use for rapport building?
+- **Result**: How effective was the tutor's strategy?
+- **Effectiveness**: Classify the strategy as one of: "effective", "partial", or "ineffective"
+
+## Effectiveness Definitions
+
+- **effective**: The strategy worked well and had a positive impact on student learning or engagement
+- **partial**: Mixed results — some benefits but notable limitations
+- **ineffective**: The strategy did not work, missed the mark, or was counterproductive
+
+## Instructions
+
+1. Read the full transcript below carefully.
+2. Identify all key moments where the tutor uses rapport strategies (or should have).
+3. For each moment, specify the turn range (start and end turn numbers) that the moment spans.
+4. For each moment, provide a situation, action, result assessment, and effectiveness label.
+
+## Output Format
+
+Respond with valid JSON only, using this exact schema:
+
+```json
+{
+  "annotations": [
+    {
+      "annotation_type": "rapport",
+      "turn_start": 5,
+      "turn_end": 25,
+      "situation": "Why this is a place where rapport building should take place...",
+      "action": "What strategy the tutor used for rapport...",
+      "result": "How effective the strategy was and why...",
+      "effectiveness": "partial"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}

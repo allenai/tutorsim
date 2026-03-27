@@ -1,0 +1,154 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a scaffolding-related moment. Your task is to analyze it in detail.
+
+## Scaffolding (Push for Rigor vs. Support)
+
+You are analyzing the tradeoff tutors face between making a task accessible (scaffolding) and maintaining cognitive demand (pushing for rigor).
+
+- **Push for Rigor**: Challenging the student, asking for explanations, requiring metacognition, and removing support to foster independence.
+- **Scaffold**: Breaking problems into steps, providing hints, modeling, using visuals, or simplifying the task to address a struggle.
+
+Types of moments:
+
+1. **Effective Scaffolding/Rigor**: The tutor correctly identifies the student's need and responds with an appropriate strategy. If the student is stuck, the tutor provides just enough support. If the student is coasting, the tutor increases the challenge.
+
+2. **Missed Opportunity (Ineffective)**:
+   - **Missed Scaffold**: Student is stuck, but the tutor offers no help or repeats the same ineffective strategy.
+   - **Missed Rigor (difficulty gap)**: Student solves problems easily and independently across multiple consecutive problems, but the tutor keeps the task at the same level.
+   - **Missed Rigor (depth gap)**: Student demonstrates thinking beyond what was asked, but the tutor responds with generic praise and moves on. (Note: It is perfectly acceptable and "effective" to simply confirm a correct answer and move on for standard practice problems. Do not penalize tutors for failing to ask "why?" or "how did you get that?" after every correct answer unless the student explicitly signals a deeper insight).
+   - **Over-scaffolding (only if clear evidence)**: The tutor walks the student through every step of a task the student has already completed independently and successfully in this session. Note: A student answering a few sub-questions correctly does NOT prove they can do the whole process independently. Over-scaffolding requires clear evidence of prior independent success on the same type of problem.
+
+## Using Context
+
+The surrounding turns provide context for your analysis. Use them to understand the student's level, the task difficulty, and whether the tutor's strategy was well-matched to the situation.
+
+**Important**: Judge the quality of the tutor's *decision and approach*, not whether the student achieves full mastery by the end of the excerpt. A well-chosen scaffold is effective even if the student needs additional practice or makes errors on the next problem. A strategy is only ineffective based on subsequent turns if the student is *visibly confused, guessing randomly, or highly disengaged as a direct and immediate result of the tutor's specific move* — not simply because the student hasn't fully mastered the concept yet.
+
+Conversely, a strategy is NOT automatically effective just because it sounds pedagogically reasonable. If the student is clearly disengaged, the tutor is talking to themselves, or the student shows no evidence of processing the scaffold, factor that in.
+
+A strategy can be effective even if the student's visible response is brief — some students show understanding through correct answers rather than verbal elaboration. Conversely, a strategy can be ineffective even if the student gets the right answer — if the tutor did all the thinking.
+
+## Effectiveness Criteria
+
+- **effective**: The tutor reads the student's level correctly and responds appropriately. If the student is stuck, confused, or learning a new topic, heavy scaffolding is **Effective**. This includes:
+  - Breaking the problem down into simple micro-computations (e.g., 'What is 9 minus 4?')
+  - Explicitly directing the student's attention ('Look at the y-coordinates')
+  - Setting up the equation for them
+  - Writing steps, intermediate results, or carried digits on the board while the student follows along or provides the computations verbally
+  - Telling the student which operation to use or which numbers to focus on
+  - Narrating and demonstrating the procedure step-by-step for a new problem type
+  - Asking a series of simple guiding questions that lead the student through the process
+
+  Do not penalize the tutor for 'doing the conceptual thinking,' 'reducing the problem to basic arithmetic,' or 'writing on the board' if they are guiding a struggling student through a new or difficult process. The tutor writing a step on the board does NOT automatically make the student a 'passive observer' — the student is actively learning if they are following along, answering sub-questions, or confirming steps. Modeling and direct instruction are valid, highly effective scaffolds here.
+
+  **Key test for effectiveness**: Was this the right general approach for a student at this level on this type of problem? If yes, rate effective — even if the execution had minor imperfections. Do not downgrade to partial just because you can imagine a slightly better version of the same strategy.
+
+- **partial**: The tutor's strategy *actually helps the student to some degree* but has meaningful flaws. The student must show *some* evidence of engagement or learning for a moment to be partial rather than ineffective. Examples: (a) the tutor provides a reasonable scaffold but misses the core misconception — the student engages but is left with a gap, (b) the student arrives at the correct answer but their conceptual understanding remains unclear, (c) the tutor mixes good questioning with a bit too much telling — the student still does some thinking, or (d) the tutor provides slightly too much scaffolding on a new problem, but the student still actively engages and benefits.
+
+  **Partial vs. Ineffective**: If the tutor's approach sounds reasonable in theory but the student shows no evidence of learning, engagement, or benefit — rate it ineffective, not partial. A lengthy monologue where the student only says 'okay' is not partial just because the content was correct. A well-intentioned analogy that leaves the student more confused is not partial just because the analogy was creative.
+
+- **ineffective**: Any of the following:
+  - The tutor explicitly states or writes the final answers before the student can *on a task the student has already shown they can do*, reducing the student to a passive observer.
+  - Over-scaffolding a task the student has **already practiced successfully** in previous turns (e.g., walking them step-by-step through a process they completed independently earlier in the session).
+  - Giving away the strategy or answers immediately on a task the student already knows how to solve.
+  - Entirely missing an obvious opportunity to address a misconception or student struggle.
+  - The tutor's approach produces no discernible learning benefit — e.g., the student remains confused, passive, or disengaged throughout, even if the tutor's intention was sound.
+  - The tutor tells the student information without checking whether the student needed it, and the student shows no engagement beyond saying 'okay' or 'yeah.'
+
+  **Note on 'passive observer'**: A student is a passive observer when they have NO meaningful cognitive role — they are simply watching, confirming, or reading back what the tutor wrote. A student who answers sub-questions, provides computations, or makes choices (even if heavily guided) is NOT a passive observer.
+
+## Common Rating Traps to Avoid
+
+1. **Don't penalize effective strategies for hypothetical improvements.** If the tutor's approach was well-matched to the student's level and the student engaged productively, rate it effective — even if you can imagine asking one more follow-up question, giving slightly less help, or phrasing something differently. The standard is 'appropriate and beneficial,' not 'optimal.'
+
+2. **Don't conflate 'the tutor wrote on the board' with 'the student was passive.'** Writing steps, carrying digits, or setting up equations on a shared whiteboard is standard tutoring practice, not over-scaffolding. Only flag it if the student had clearly demonstrated they could do that specific step independently.
+
+3. **Don't rate a strategy ineffective just because it has a flaw.** If the approach fundamentally served the student's needs but had an imperfection (e.g., the tutor could have verified understanding, or provided one hint too many), that's partial — not ineffective. Reserve ineffective for moments where the student derived essentially no benefit or the approach was fundamentally mismatched.
+
+4. **Don't rate a strategy effective just because it sounds pedagogically correct.** If the student is visibly disengaged, the tutor is monologuing, or the student shows no sign of processing the scaffold, the strategy failed regardless of its theoretical merit.
+
+5. **Don't assume a student needs to be pushed just because they answered a few problems correctly.** Students may still be learning the procedure and benefit from continued scaffolding. Only flag over-scaffolding if there is clear evidence of independent mastery across multiple similar problems in the current session.
+
+## Examples
+
+### Example 1: Effective — concept connection with transfer
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 45,
+  "turn_end": 48,
+  "situation": "Student was intimidated by large numbers in division (5600 / 70).",
+  "action": "Tutor connected the problem to a known fact (56 / 7 = 8) and the strategy of canceling zeros.",
+  "result": "Effective. The tutor correctly identified that the student's block was intimidation, not lack of knowledge, and chose a strategy that built on existing skills. The student articulated the simplified problem.",
+  "effectiveness": "effective"
+}
+```
+
+### Example 2: Partial — good start, no verification
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 76,
+  "turn_end": 86,
+  "situation": "Student added denominators incorrectly (1/4 + 1/4 = 2/8).",
+  "action": "Tutor explained the rule, used a hands analogy. Student self-corrected. But the tutor confirmed with 'perfect' and moved on without verifying understanding.",
+  "result": "Partial. The analogy was well-chosen and the student self-corrected, but the tutor never checked if the student internalized the rule — a follow-up question or new example would have strengthened this.",
+  "effectiveness": "partial"
+}
+```
+
+### Example 3: Ineffective — missed depth opportunity
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 29,
+  "turn_end": 41,
+  "situation": "Student shared academic success and mentioned using 'strategies' — signaling metacognitive awareness.",
+  "action": "Tutor asked who taught the strategies but never asked what they were. Gave generic praise and pivoted to an unrelated topic.",
+  "result": "Ineffective. The student was ready to explain their reasoning. Asking 'What strategies did you use?' would have pushed for metacognition. The opportunity was dropped entirely.",
+  "effectiveness": "ineffective"
+}
+```
+
+### Example 4: Partial — over-scaffolding with some student engagement
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 50,
+  "turn_end": 58,
+  "situation": "The student made an error on a problem type they had been practicing. The tutor intervened to walk them through it.",
+  "action": "The tutor broke the problem into steps and wrote intermediate results on the board, but the student was still answering sub-questions and doing computations verbally.",
+  "result": "Partial. The tutor provided more scaffolding than necessary given the student's prior practice with this problem type. However, the student remained actively engaged — answering questions and performing calculations — so the interaction was not without learning value.",
+  "effectiveness": "partial"
+}
+```
+
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript.
+2. Determine the situation, action, result, and effectiveness.
+3. If later turns provide evidence of the strategy's impact, you may cite them. Focus your analysis on the quality of the tutor's strategy.
+4. If the detected moment does not contain a meaningful scaffolding event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "...",
+  "effectiveness": "effective"
+}
+```

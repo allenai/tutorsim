@@ -1,0 +1,120 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a rapport-related moment. Your task is to analyze it in detail.
+
+## Rapport (Social-Psychological Support)
+
+Rapport is the connection that creates a safe, conducive learning environment. It involves showing interest in the student as a person, managing emotions, and celebrating success.
+
+- **Goal**: Rapport should **support learning**, not displace it.
+- **Positive Rapport**: Checking in on feelings, validating frustration, using student interests, authentic praise, specific follow-up questions.
+- **Negative/Ineffective Rapport**: Ignoring frustration (missed cue), allowing social chat to consume academic time (displacement), generic/robotic praise, offering open-ended choices without structure.
+
+## Using Context
+
+The surrounding turns provide context for your analysis. If the turns after the detected moment show the rapport strategy's impact (student opens up, becomes more engaged, or remains withdrawn), you may reference this. However, the primary question is whether the tutor's rapport strategy was appropriate and well-executed for the situation.
+
+Some students are naturally reserved — a brief or polite response doesn't automatically make the tutor's strategy poor. However, if the student gives consistently minimal responses throughout a long rapport sequence, the tutor should be adapting their approach rather than continuing the same strategy.
+
+## Effectiveness Criteria
+
+- **effective**: The tutor makes a reasonable, positive attempt to support the student or build connection. This includes standard but well-meaning actions like: polite session wrap-ups, providing a safe space to think ('you're good,' 'take your time'), sharing brief personal anecdotes to model conversation, or standard icebreakers. The interaction does not need to be perfect or deeply reflective to be effective; it just needs to serve a positive social-psychological function in the session.
+
+- **partial**: The tutor shows good intent, but the execution has noticeable flaws OR the impact is uncertain or mixed. This includes: (a) execution with noticeable flaws that hinder the connection; (b) outcomes that are ambiguous — e.g., the student has not yet responded, gives only flat or minimal responses that make impact hard to gauge, or the strategy is too new to assess; (c) a reasonable approach with clear missed opportunities that a typical tutor would have pursued. Examples include: relying strictly on generic filler ('good,' 'perfect') instead of authentic engagement, dragging out a one-sided conversation excessively when the student is disengaged, mildly clumsy communication that causes slight confusion but no real harm, or a well-intentioned strategy whose impact cannot be confirmed from the available evidence. If you find yourself thinking 'it's hard to tell if this worked' or 'the results seem mixed,' partial is likely the right rating.
+
+- **ineffective**: The tutor's actions actively harm rapport or miss glaring emotional cues. Examples include: being abrasive, confrontational, or visibly frustrated; ignoring a student's explicit excitement or explicit distress; or delivering completely robotic, strictly transactional dialogue when the student is clearly seeking connection.
+
+  **Calibration**: Directly asking a student about their approach or behavior (e.g., 'Are you guessing?') is not automatically confrontational — it can be a reasonable, civil redirect. Judge tone by the overall exchange, not by flagging individual phrases. Conversely, in **high-stakes rapport moments** (substitute tutor introductions, first sessions, moments of clear student emotion), simply being polite is not sufficient — failing to make any rapport attempt when one is clearly called for can itself be ineffective, even if nothing harmful was said.
+
+## Critical Check: Real-World Expectations
+
+Tutoring is a real-time, human interaction. Do not demand pedagogical perfection. Standard, functional rapport strategies are typically **effective** even if they are not perfectly executed or lack deep reflection.
+
+- **Rate as effective** if the tutor makes a genuine, reasonable attempt to connect, encourage, or smoothly manage the session AND the attempt shows evidence of serving its purpose (e.g., the student responds warmly, the session transitions smoothly, or the moment is brief and standard enough that impact is naturally assumed). Good intent alone is not sufficient — there should be at least some signal that the strategy landed or functioned as intended.
+- Standard wrap-ups, patient encouragement, and modeling friendly conversation are effective when they function normally. However, if the student's response to the strategy is absent, ambiguous, or flat across the interaction, consider whether partial is more appropriate.
+- **Rate as partial** only if the attempt is notably clumsy, extends too long without student buy-in, or if the tutor relies heavily on generic filler praise without any authentic connection.
+- **Rate as ineffective** if the tutor is actively dismissive, confrontational, ignores clear signs of student frustration, or fails completely to acknowledge a student's attempt to connect.
+
+## Examples
+
+### Example 1: Effective — recalled detail sparks connection
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 5,
+  "turn_end": 8,
+  "situation": "Session start — tutor recalled the student's baseball award.",
+  "action": "Asked an open-ended follow-up about what the award was for.",
+  "result": "Effective. The tutor demonstrated genuine attentiveness by remembering a personal detail and asking a specific follow-up. The student shared unprompted detail about their values — going beyond a simple answer. No clearly better alternative exists.",
+  "effectiveness": "effective"
+}
+```
+
+### Example 2: Partial — warm but one-sided
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 85,
+  "turn_end": 89,
+  "situation": "Transition point — appropriate time for check-in.",
+  "action": "Tutor asked about the student's day, responded warmly to a flat answer, but moved on without probing.",
+  "result": "Partial. The timing was appropriate but the execution was formulaic. The student gave a one-word answer and the tutor didn't follow up. A better approach: share something about their own day first, or ask a more specific question ('Did anything funny happen at school today?').",
+  "effectiveness": "partial"
+}
+```
+
+### Example 3: Ineffective — missed emotional cue
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 145,
+  "turn_end": 158,
+  "situation": "Student resisting the session duration.",
+  "action": "Tutor engaged in a lengthy negotiation about time rather than acknowledging frustration or redirecting to an engaging activity.",
+  "result": "Ineffective. The student clearly signaled frustration, but the tutor responded to logistics rather than emotion. A better approach: acknowledge the frustration ('I hear you, this is tough'), then offer a choice ('Want to try something different, or power through the last problem?'). Instead, 14 turns were consumed without resolution.",
+  "effectiveness": "ineffective"
+}
+```
+
+### Example 4: Effective — indirect rapport through academic approach
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 19,
+  "turn_end": 26,
+  "situation": "Tutor begins a review of previously covered material before introducing new content.",
+  "action": "The tutor told the student they didn't have to do anything yet and walked through a review of concepts from the last session, setting the student up for today's practice.",
+  "result": "Effective. Although there is no explicit rapport-building dialogue, the tutor's approach of starting with familiar material implicitly builds confidence and eases the student into the session. The student confirms understanding ('Yeah'), and the review serves a positive social-psychological function by creating a low-pressure entry point. This is standard, functional pedagogy that supports the learning environment.",
+  "effectiveness": "effective"
+}
+```
+
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript. Consider ALL significant behaviors within the flagged range — including what was omitted or handled poorly — not just the most positive or most negative action. If the moment involves multiple actors (e.g., a tutor handoff) or contains both positive and problematic behaviors, weigh the net impact rather than focusing only on the best part.
+2. Determine the situation, action, result, and effectiveness.
+3. Before rating, consider whether the tutor made a reasonable, real-world attempt to support the student, rather than demanding perfection.
+4. If later turns provide evidence of the strategy's impact, you may cite them. Focus on the quality of the tutor's strategy.
+5. If the detected moment does not contain a meaningful rapport event, still provide your analysis but note this in the situation field. **Important**: A moment with no clear rapport event is NOT automatically ineffective. Normal academic exchanges — tutor-led reviews, problem walkthroughs with minimal student verbal input, brief 'Mhm' or 'Perfect' acknowledgments during problem chains — are standard pedagogy, not rapport failures. These may represent missed opportunities (partial) but are only ineffective if the student was clearly signaling a need for emotional connection or encouragement that was ignored. Do not conflate 'the tutor could have done more' with 'the tutor actively harmed rapport.'
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "...",
+  "effectiveness": "effective"
+}
+```
