@@ -26,11 +26,11 @@ Scan the transcript for moments where the tutor's scaffolding or rigor decisions
 - Transitions between problem types or activities
 - Tutor shifts approach mid-interaction (from questioning to telling, or vice versa)
 
-## Important: Cast a Wide Net
+## What Makes a Moment "Key"
 
-Identify **8-15 moments** per session. It is better to flag a moment that turns out to be minor than to miss one. Include brief moments (even 2-3 turns) as well as longer interactions.
+A key moment is one where the tutor's scaffolding or rigor choice meaningfully shapes the student's learning trajectory — and where a different tutor might reasonably have made a different choice. Not every instance of teaching is a key moment. Routine instruction (introducing a topic, reading a problem aloud, giving a standard explanation) is just teaching — it becomes a key moment only when there is a genuine fork: the tutor could have scaffolded more or less, pushed harder or eased off, and the choice matters.
 
-When in doubt, include it. A separate analysis step will evaluate each moment in detail.
+Ask yourself: if I swapped in a different tutor at this exact point, would there be meaningfully different approaches they might take? If yes, it's a key moment. If any competent tutor would do roughly the same thing, it's routine.
 
 ## How to Define Moment Boundaries
 

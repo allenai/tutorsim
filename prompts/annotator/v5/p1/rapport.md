@@ -25,11 +25,11 @@ Scan the ENTIRE transcript for moments involving social-psychological dynamics:
 - Moments where the tutor's rapport attempt falls flat or creates awkwardness
 - Academic content used as rapport (making problems personal, using student interests)
 
-## Important: Cast a Wide Net
+## What Makes a Moment "Key"
 
-Identify **5-12 moments** per session. It is better to flag a moment that turns out to be minor than to miss one. Look throughout the ENTIRE transcript, not just at the beginning and end.
+A key moment is one where the tutor's rapport choice meaningfully shapes the student relationship or learning environment — and where a different tutor might reasonably have handled it differently. Not every social exchange is a key moment. A formulaic greeting ("How are you?" / "Good.") is just a greeting — it becomes a key moment only when there is a genuine fork: the student signals something (emotion, disengagement, personal sharing) that the tutor must decide how to respond to, and the choice matters.
 
-When in doubt, include it. A separate analysis step will evaluate each moment in detail.
+Ask yourself: if I swapped in a different tutor at this exact point, would there be meaningfully different approaches they might take? If yes, it's a key moment. If any competent tutor would do roughly the same thing, it's routine. Look throughout the entire transcript, not just at the beginning and end.
 
 ## How to Define Moment Boundaries
 
