@@ -1,0 +1,68 @@
+You are an expert in educational assessment and NLP prompt engineering. You are helping iterate on a prompt used to detect pedagogical key moments in K-12 tutoring transcripts.
+
+## Task Context
+
+An LLM reads full tutoring transcripts and identifies turn ranges where notable {ann_type} events occur. These detections are compared against human expert annotations using IoU >= 0.3 matching.
+
+## Optimization Goal
+
+We want to maximize BOTH cluster recall (catching all human-annotated moments) and moment precision (not flagging things humans didn't annotate), with recall weighted slightly higher. Mean IoU measures boundary quality of matched detections.
+
+## Current Metrics ({ann_type})
+
+{current_metrics}
+
+## Current Prompt
+
+```
+{current_prompt}
+```
+
+## Error Counts
+
+- Correct matches: {good_matches} human-annotated moments the LLM correctly detected (IoU >= 0.3)
+- Complete misses: {complete_misses} human-annotated moments the LLM entirely missed
+- Near-misses: {near_misses} moments where LLM detected nearby but wrong turn range (IoU < 0.3)
+- False positives: {false_positives} LLM detections with no matching human annotation
+
+## Examples
+
+Below are examples of correct detections, misses, near-misses, and false positives, each with transcript excerpts and human annotations. Lines marked with <<< are within the annotated moment.
+
+{error_examples}
+
+## Your Task
+
+Analyze the error examples above and identify:
+
+1. **Semantic patterns**: What types of moments does the LLM consistently miss or misdetect? Group errors by underlying cause, not surface features. Read the actual transcript excerpts carefully.
+
+2. **Root causes**: For each pattern, explain WHY the current prompt fails to catch it. Is the pattern not described? Described ambiguously? Actively excluded by other instructions?
+
+3. **Proposed changes**: For each root cause, propose a SPECIFIC edit to the prompt. Quote the exact text to change and provide the replacement. You may add new sections, modify existing text, remove text, restructure, add new bullets, adjust counts, or anything else -- whatever you think will work best based on the error patterns.
+
+4. **Risk assessment**: For each proposed change, estimate the risk of regression on currently-correct detections.
+
+Respond in JSON:
+{{
+  "patterns": [
+    {{
+      "name": "pattern name",
+      "share_of_errors": "approximate % of errors this explains",
+      "description": "what the LLM misses and why",
+      "examples_referenced": ["Miss 1", "Miss 3", "FP 2"]
+    }}
+  ],
+  "proposed_changes": [
+    {{
+      "target_pattern": "which pattern this addresses",
+      "change_type": "short description of the type of edit (e.g. modify bullet, add section, remove text, restructure, adjust count target)",
+      "current_text": "exact text in prompt to replace (or null for additions)",
+      "proposed_text": "replacement text (or null for deletions)",
+      "rationale": "why this specific change helps",
+      "regression_risk": "low | medium | high",
+      "risk_explanation": "why this might hurt existing detections"
+    }}
+  ],
+  "overall_assessment": "1-2 sentence summary of whether prompt changes are likely to help or if the ceiling is architectural"
+}}

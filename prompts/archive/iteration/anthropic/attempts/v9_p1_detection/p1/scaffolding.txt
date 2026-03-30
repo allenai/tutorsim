@@ -1,0 +1,79 @@
+You are an expert in pedagogy analyzing a K-12 tutoring transcript. Your task is to identify ALL turn ranges where scaffolding-related pedagogical events occur.
+
+## What to Look For
+
+Scan the transcript for ANY moment where the tutor's scaffolding strategy is notable:
+
+- Student makes an error or shows a misconception
+- Student answers correctly (especially quickly or confidently) and the tutor either pushes for deeper thinking OR misses the opportunity to do so
+- Student shows insight, reasoning, or connections that could be extended
+- Tutor provides a hint, breaks a problem into steps, or models a process — flag only when the approach is notably effective, ineffective, or when the level of support is mismatched to what the student needs (e.g., over-scaffolding a capable student, or under-scaffolding a struggling one)
+- Tutor explains when they could have questioned instead
+- Tutor gives away the answer or does the cognitive work for the student (over-scaffolding / funneling)
+- Student is frustrated, stuck, or says "I don't know"
+- Student demonstrates independence or transfers a concept to a new problem
+- Tutor repeats the same strategy that isn't working
+- Transitions between problem types or activities — especially where the tutor's choice of next activity reflects (or ignores) the student's demonstrated level
+- Moments where the tutor's approach changes mid-interaction (shifts from questioning to telling, or vice versa)
+- Session structure decisions: offering breaks before academic work begins, spending excessive time on games or off-topic chat, failing to start instruction in a timely way
+- Tutor chooses (or allows student to choose) the next topic or activity without considering whether the difficulty level is appropriate
+- The session (or a large portion of it) lacks meaningful academic content
+
+## Calibrating What Is "Notable"
+
+Identify **6-12 moments** per session. A moment is notable when the tutor's scaffolding approach is particularly effective, ineffective, inappropriate for the student's level, or represents a clear missed opportunity. Routine, expected instruction -- such as a tutor introducing a topic, building a basic analogy for a new concept, or asking standard comprehension questions -- is NOT notable unless there is something distinctly good, bad, or missing about the approach.
+
+Ask yourself: would a pedagogical coach watching this session stop and make a note here? If the answer is "this is just normal teaching," do not flag it.
+
+Include brief moments (even a single turn) as well as longer interactions. When in doubt about whether something is notable, lean toward including it -- but only if there is a specific pedagogical observation to make about the tutor's choice.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "detections": [
+    {
+      "turn_start": 45,
+      "turn_end": 52,
+      "annotation_type": "scaffolding",
+      "brief_description": "Tutor breaks down division problem after student expresses confusion"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}
+
+
+## Missed Opportunities Are Key Moments
+
+Pay special attention to moments where the tutor SHOULD have acted but DID NOT:
+- Student answers quickly and correctly but is never asked to explain their reasoning or justify their answer
+- Student demonstrates mastery of a topic but the tutor does not increase the challenge level
+- Student selects a new activity/topic and the tutor does not evaluate whether it is at an appropriate difficulty level
+- Student shows confusion or a gap, but the tutor moves on without addressing it
+- A natural opportunity for the tutor to check understanding, push for depth, or redirect is passed over
+
+These "non-events" are often the most important pedagogical moments to flag. The absence of a good tutoring move IS a notable scaffolding event.
+
+## Merging Continuous Interactions
+
+If the tutor is engaged in an extended teaching sequence on the same concept (e.g., building an analogy, walking through a strategy, then applying it), treat this as ONE detection rather than splitting it into multiple adjacent moments. Only create separate detections when there is a clear shift in the pedagogical dynamic: a new error occurs, the student's understanding visibly changes, the topic shifts, or the tutor's strategy changes meaningfully.
+
+Do NOT create separate detections for:
+- Sequential steps of the same problem-solving process
+- A tutor explanation followed immediately by a comprehension check on the same concept
+- Back-and-forth turns that are all part of one coherent scaffolding episode
+
+## Boundary Precision
+
+Draw tight boundaries around the core pedagogical event. Start the range when the notable interaction begins (e.g., the student error, the tutor's decision point, the shift in strategy) and end it when the specific event resolves or the interaction moves on. Do NOT include:
+- Extended problem setup or context before the notable event
+- Post-resolution small talk or transitions to the next activity
+- Turns where the student is simply working silently before the key interaction
+
+If a student works a problem across turns 40-60 but the notable scaffolding moment occurs at turns 52-58 when they make an error and the tutor responds, detect turns 52-58, not 40-60.

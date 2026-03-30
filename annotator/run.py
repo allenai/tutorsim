@@ -1,0 +1,144 @@
+"""
+Unified pipeline runner: detect -> annotate -> label.
+
+Runs all three passes in sequence with a single command.
+Supports per-phase model selection via profiles (e.g., openai_claude
+uses gpt-5.4 for detection and claude-opus-4-6 for annotation).
+
+Usage:
+    python -m pipeline.run --version v1
+    python -m pipeline.run --version v1 --profile openai --mode sync
+    python -m pipeline.run --version v1 --skip-detect       # annotate+label only
+    python -m pipeline.run --version v1 --gold               # annotate gold moments
+    python -m pipeline.run --version v1 --test 3 --mode sync # quick test
+"""
+
+import argparse
+from pathlib import Path
+
+from .core.config import get_phase_config
+from .core.detect import run_detect
+from .core.annotate import run_annotate
+from .core.label import run_label
+
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts" / "annotator"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run full annotation pipeline")
+
+    parser.add_argument("--version", required=True,
+                        help="Results version directory (e.g. v1, v3_gemini)")
+    parser.add_argument("--model", default=None,
+                        help="Override model for all phases")
+    parser.add_argument("--profile", default=None,
+                        help="Config profile (gemini, openai, anthropic, openai_claude)")
+    parser.add_argument("--mode", choices=["batch", "sync"], default=None,
+                        help="Execution mode for all phases")
+    parser.add_argument("--prompt-version", default=None,
+                        help="Prompt version (defaults to --version)")
+    parser.add_argument("--target", nargs="+", choices=["scaffolding", "rapport"],
+                        default=["scaffolding", "rapport"],
+                        help="Annotation targets")
+    parser.add_argument("--test", type=int, default=0,
+                        help="Test on N conversations (0 = all)")
+    parser.add_argument("--dialogue-only", action="store_true",
+                        help="Exclude non-dialogue turns from transcripts")
+
+    parser.add_argument("--skip-detect", action="store_true",
+                        help="Skip detection; use existing detections.json")
+    parser.add_argument("--skip-annotate", action="store_true",
+                        help="Skip annotation; use existing annotations.json")
+    parser.add_argument("--gold", action="store_true",
+                        help="Use gold truth moments (skips detect automatically)")
+
+    parser.add_argument("--style", choices=["generous", "balanced", "demanding"],
+                        default=None,
+                        help="Annotator style: use per-style prompts for annotation and labeling")
+    parser.add_argument("--context", type=int, default=None,
+                        help="Context window for annotation excerpts")
+    args = parser.parse_args()
+    prompt_version = args.prompt_version or args.version
+
+    if args.gold:
+        args.skip_detect = True
+
+    # When --style is set, override prompts to per-style profiles (if they exist)
+    annotation_prompt_version = prompt_version
+    detection_prompt_version = prompt_version
+    if args.style:
+        annotation_prompt_version = f"profiles/{args.style}"
+        # Use per-style detection prompts if p1/ dir exists for this style
+        style_p1_dir = PROMPTS_DIR / "profiles" / args.style / "p1"
+        if style_p1_dir.exists():
+            detection_prompt_version = f"profiles/{args.style}"
+
+    # --- Pass 1: Detect ---
+    detections_data = None
+    if not args.skip_detect:
+        print("=" * 60)
+        print("  PASS 1: Detection")
+        print("=" * 60)
+        detect_cfg = get_phase_config("detect", args.profile)
+        detect_output = run_detect(
+            version=args.version,
+            model=args.model or detect_cfg["model"],
+            mode=args.mode or detect_cfg.get("mode", "batch"),
+            prompt_version=detection_prompt_version,
+            targets=args.target,
+            phase_cfg=detect_cfg,
+            test=args.test,
+            dialogue_only=args.dialogue_only,
+        )
+        detections_data = detect_output["results"]
+
+    # --- Pass 2: Annotate ---
+    annotations_data = None
+    if not args.skip_annotate:
+        print("\n" + "=" * 60)
+        print("  PASS 2: Annotation")
+        print("=" * 60)
+        annotate_cfg = get_phase_config("annotate", args.profile)
+        context_window = (args.context if args.context is not None
+                          else annotate_cfg.get("context_window", 20))
+        annotations_data = run_annotate(
+            version=args.version,
+            model=args.model or annotate_cfg["model"],
+            mode=args.mode or annotate_cfg.get("mode", "batch"),
+            prompt_version=annotation_prompt_version,
+            targets=args.target,
+            phase_cfg=annotate_cfg,
+            dialogue_only=args.dialogue_only,
+            context_window=context_window,
+            gold=args.gold,
+            annotator_style=args.style,
+            detections_by_conv=detections_data,
+        )
+        if annotations_data is None:
+            print("Annotation failed. Aborting.")
+            return
+
+    # --- Pass 3: Label ---
+    print("\n" + "=" * 60)
+    print("  PASS 3: Labeling")
+    print("=" * 60)
+    label_cfg = get_phase_config("label", args.profile)
+    run_label(
+        version=args.version,
+        model=args.model or label_cfg["model"],
+        mode=args.mode or label_cfg.get("mode", "batch"),
+        phase_cfg=label_cfg,
+        gold=args.gold,
+        annotator_style=args.style,
+        annotations_data=annotations_data,
+    )
+
+    print("\n" + "=" * 60)
+    print("  Pipeline complete!")
+    style_flag = f" --annotator-style {args.style}" if args.style else ""
+    print(f"  Next: python -m annotator.eval.eval --version {args.version}{style_flag}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

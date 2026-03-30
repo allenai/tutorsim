@@ -1,0 +1,148 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a scaffolding-related moment. Your task is to analyze it in detail.
+
+## Research Context
+
+We are studying how tutors in K-12 math tutoring conversations decide to push for rigor in a session by asking students to do harder tasks or tasks that involve more metacognition, versus when they choose to introduce scaffolds that make problems more accessible for students. For each flagged moment, you will analyze the situation, the tutor's strategy, and how well it worked.
+
+### Scaffolding
+
+Scaffolding is temporary, calibrated support that helps a student accomplish a task they cannot yet do independently. It is gradually removed as the student gains competence. The goal is to keep the student in their zone of proximal development -- challenged but not overwhelmed.
+
+Common scaffolding strategies:
+- **Breaking down**: Decomposing a complex problem into smaller, manageable steps
+- **Hinting**: Providing a cue that points the student toward the answer without giving it away
+- **Modeling**: Demonstrating a process or worked example for the student to follow
+- **Simplifying**: Reducing the complexity of the task while preserving the core concept
+- **Visual/concrete aids**: Using diagrams, manipulatives, or real-world analogies
+
+Over-scaffolding occurs when the tutor provides substantially more support than the student needs -- doing all the cognitive work for them, giving away answers directly, or funneling toward a solution with no student reasoning at any step. Note: mild over-scaffolding (e.g., giving one extra hint, being slightly more directive than necessary) is common in tutoring and does not make an interaction ineffective if the student still engages in thinking. Reserve the label 'over-scaffold' for cases where the student's role was genuinely reduced to passive compliance.
+
+Important nuance about scaffolding strategies: Modeling and direct instruction (explaining a concept, demonstrating a worked example) are legitimate scaffolding strategies, especially when the student explicitly says they don't know how to do something or has just demonstrated a clear gap. A tutor who models a procedure and then has the student apply it is not over-scaffolding — they are teaching. Evaluate scaffolding effectiveness primarily by what the student does AFTER the scaffold: if the student can apply the concept correctly on a subsequent problem, or articulate understanding they didn't have before, the scaffold was effective regardless of how directive the initial explanation was.
+
+### Rigor (Pushing for Depth)
+
+Rigor means maintaining or increasing the cognitive demand on the student. It fosters independence and deeper understanding.
+
+Common rigor strategies:
+- **Requiring explanation**: "How did you know that?" or "Why does that work?"
+- **Extending problems**: Adding complexity, edge cases, or transfer to new contexts
+- **Fading support**: Deliberately removing scaffolds to see if the student can work independently
+- **Challenging correct answers**: Asking students to generalize, prove, or find alternative approaches
+- **Metacognition prompts**: Asking the student to reflect on their own thinking process
+
+### The Core Tradeoff
+
+At each moment, the tutor decides how much support to provide. Too much support robs the student of productive struggle. Too little support leaves the student floundering. The right choice depends on reading the student's current state -- their understanding, confidence, and engagement.
+
+Note: Not every single correct answer requires a rigor push — a tutor who confirms one answer and moves on is not automatically failing. However, when a student answers multiple problems quickly and correctly with no sign of struggle, and the tutor never asks for reasoning, explanation, or increased challenge across the entire detected range, this pattern of inaction is a meaningful pedagogical gap. The question is not whether any one moment needed a rigor push, but whether the tutor recognized and responded to the student's readiness for more challenge at any point during the detected range.
+
+### Calibration Guidance
+
+When evaluating the result, anchor your assessment on the overall outcome rather than comparing to an ideal.
+
+- A strategy is **effective** if it achieved its primary pedagogical goal: the student engaged in meaningful thinking, corrected a misconception, demonstrated understanding, or made progress. Minor imperfections -- such as the tutor could have asked one more follow-up, could have let the student struggle slightly longer, or provided one hint that wasn't strictly necessary -- do not make an otherwise successful interaction merely partial. Most real tutoring has rough edges; evaluate whether the approach was reasonable and productive, not whether it was optimal. When you find yourself writing 'the core scaffolding was effective, however...' — stop and ask whether the 'however' describes something that visibly harmed the student's learning in THIS interaction, or merely describes a way the moment could have been better. If the latter, the rating should be effective.
+
+- A strategy is **partially effective** if it had meaningful positive impact but also had significant shortcomings that clearly and visibly limited learning during the interaction. Examples: the student got the right answer but clearly doesn't understand why; the tutor addressed part of a misconception but left the core confusion unresolved; the scaffold helped but was substantially over- or under-calibrated in a way that visibly reduced the student's learning opportunity. The shortcoming must be evident in the student's behavior (confusion, passivity, inability to apply the concept) — not merely a hypothetical improvement the tutor could have made. If the student demonstrates understanding and engagement, the interaction is effective even if the tutor's approach was imperfect.
+
+- A strategy is **ineffective** if it failed to achieve its pedagogical goal or was fundamentally misaligned with the student's needs. Examples: the tutor did all the cognitive work and the student passively followed without evidence of understanding; the tutor completely missed the student's actual confusion; the student shows no evidence of learning or engagement; or the tutor missed an obvious and important opportunity with no compensating action.
+
+  Importantly: when a student is clearly coasting — answering quickly, correctly, with no hesitation or challenge — and the tutor simply confirms answers and moves on without ever asking for explanation, reasoning, or increasing difficulty, this IS missing an obvious and important opportunity. Do not soften this to partial merely because the student answered correctly or because the tutor said something encouraging. Correct answers without cognitive challenge are the problem, not evidence against it. Similarly, when a tutor's scaffold is misaligned with the student's actual confusion (e.g., scaffolding computation when the student misunderstands the task), the fact that the tutor tried something does not make the interaction partially effective — rate based on whether the student's actual need was addressed.
+
+Important: When the tutor actively scaffolds (asks questions, gives hints, breaks down the problem) and the student engages in some genuine thinking, this is generally at least partially effective even if the questioning was somewhat directive. However, this floor does NOT apply when the tutor's main action is inaction — simply confirming correct answers and moving on. In those cases, the student's correct answers are not evidence of the tutor's effectiveness; they are evidence that the student was ready for more challenge that the tutor failed to provide. A strategy should be rated ineffective if the student was essentially a passive participant, if the approach was clearly wrong for the situation, or if the tutor failed to act when action was clearly needed.
+
+## Using Context
+
+The surrounding turns provide context for your analysis. If the turns after the detected moment show evidence of the strategy's impact (student applies the concept, or remains stuck), you may reference this. However, the primary question is whether the tutor's choice of strategy was well-calibrated to the student's need at that moment.
+
+## Your Task
+
+For the flagged moment, provide:
+
+- **Situation**: Why is or is not this an appropriate time to push for rigor or scaffold? What is the student's state (stuck, confused, succeeding, coasting)? What pedagogical context makes this moment notable?
+- **Action**: What strategy did the tutor use to push for rigor or scaffold? Describe concretely what the tutor said or did. Name the strategy type (breaking down, hinting, modeling, requiring explanation, etc.) where applicable.
+- **Result**: How well did the tutor's strategy work? Start with the outcome: did the student demonstrate understanding, correct a misconception, or engage in meaningful thinking as a result of the tutor's action? Then assess calibration: was the level of support well-matched to the student's need? If the strategy achieved its goal and the student did meaningful cognitive work, say so clearly -- do not undercut a positive assessment with minor caveats. Only flag missed opportunities if they represent a significant pedagogical gap, not merely a way the moment could have been slightly better.
+
+Focus your analysis on the overall effectiveness of what the tutor did. Lead your result with a clear overall assessment -- was this fundamentally effective, mixed, or unsuccessful? Commit to your assessment. Do not soften a negative evaluation with hedging language like 'a mild missed opportunity,' 'the consequences were mild,' or 'a minor missed opportunity, though understandable in context.' If the tutor missed an important opportunity, state that it was a significant gap and assess accordingly. Conversely, do not undercut a positive evaluation with extensive caveats. Then provide supporting details. When a strategy was fundamentally misaligned with the student's needs, do not soften that assessment by highlighting minor incidental positives (e.g., the student happened to get the right answer through elimination, or one sub-move was reasonable). Do not credit the tutor for good intentions or reasonable-sounding approaches if the actual impact on the student was negligible or negative. Rate based on what the student actually did and understood, not on what the tutor was trying to accomplish. Conversely, when a strategy achieved its core goal, do not undermine that by listing every way it could have been marginally better.
+
+## Examples
+
+### Example 1: Tutor connects to prior knowledge
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 45,
+  "turn_end": 48,
+  "situation": "The student was intimidated by large numbers in division (5600 / 70) and said 'I don't know how to do this.' This is an appropriate time to scaffold -- the student's block is intimidation, not lack of knowledge.",
+  "action": "The tutor used hinting -- connecting the problem to a known fact (56 / 7 = 8) and asking the student to apply the strategy of canceling zeros.",
+  "result": "The scaffold was well-calibrated. The tutor correctly identified that the student already knew the underlying fact and just needed a bridge to see it. The student recognized 56 / 7 from memory and articulated the simplified problem on their own. The tutor provided minimal support and the student did the reasoning."
+}
+```
+
+### Example 2: Tutor explains without checking understanding
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 76,
+  "turn_end": 86,
+  "situation": "The student added denominators incorrectly (1/4 + 1/4 = 2/8), revealing a misconception about fraction addition. This is an appropriate time to scaffold the specific misconception.",
+  "action": "The tutor explained the rule ('the bottom number stays the same') and used a hands analogy. When the student self-corrected to 2/4, the tutor said 'perfect' and moved on without a follow-up problem.",
+  "result": "The analogy was well-chosen and addressed the misconception directly -- the student corrected the error. However, the tutor did not check whether the student understood why the denominator stays the same. There was no follow-up question or transfer problem, so it is unclear whether the student learned a rule or understood the concept."
+}
+```
+
+### Example 3: Tutor doesn't push when student is coasting
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 55,
+  "turn_end": 63,
+  "situation": "The student solved three single-digit multiplication problems quickly and correctly with no hesitation. This signals readiness for more challenge -- an appropriate time to push for rigor.",
+  "action": "The tutor praised each answer ('Good job!') and gave another problem at the same difficulty level. No attempt to extend, require explanation, or increase complexity.",
+  "result": "The student was coasting and the tutor maintained the same level. No productive struggle or growth occurred in this segment. The tutor could have asked 'How did you figure that out so fast?' to push for metacognition, or introduced a harder problem to find where the student's understanding breaks down."
+}
+```
+
+### Example 4: Tutor tells the student the answer with incidental correct diagnosis
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 32,
+  "turn_end": 38,
+  "situation": "The student subtracted 15 - 8 and got 13, suggesting a counting error. This is an appropriate time to scaffold.",
+  "action": "The tutor said 'Not quite -- remember, 15 minus 8. Count back from 15: fourteen, thirteen, twelve, eleven, ten, nine, eight, seven. So it's 7.' The tutor counted aloud for the student.",
+  "result": "Although the tutor correctly identified the error type (counting), the tutor did all the cognitive work -- counting back from 15 while the student listened passively. The student then wrote 7 and moved on, but there is no evidence they understood why their original answer was wrong or practiced the counting themselves. The correct diagnosis does not salvage the fact that the student did no thinking."
+}
+```
+
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+Read the excerpt carefully, then take it step by step:
+
+1. First, understand the student's state at this moment -- what do they know, where are they struggling, what are they ready for?
+2. Then, identify exactly what the tutor chose to do and what strategy that represents.
+3. Finally, evaluate the overall result. Did the student make progress, demonstrate understanding, or engage in reasoning they weren't doing before? Then consider calibration -- was the strategy well-suited to the student's state? A strategy that works (produces student learning or engagement) but could have been better is still a success, not a failure.
+
+For each field (situation, action, result), provide substantive analysis -- not just a summary of what was said. If later turns provide evidence of the strategy's impact, you may cite them. If the detected moment does not contain a meaningful scaffolding event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "..."
+}
+```

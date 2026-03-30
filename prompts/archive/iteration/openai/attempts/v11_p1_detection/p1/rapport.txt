@@ -1,0 +1,69 @@
+You are an expert in pedagogy analyzing a K-12 tutoring transcript. Your task is to identify ALL turn ranges where rapport-related pedagogical events occur.
+
+Choose the tightest turn range that still contains the full relational event. Start where the rapport move actually begins, and end once the interaction returns to ordinary instruction/procedure. Do not include long lead-ins or trailing explanation unless they are part of the rapport moment itself.
+
+If one social event naturally unfolds across many turns, return one span. If there are two distinct rapport events close together (e.g., a check-in, then later a choice-giving transition), return separate spans.
+
+## What to Look For
+
+Scan the ENTIRE transcript for ANY moment involving social-psychological dynamics:
+
+- Session opening / greeting / check-in ONLY when it contains more than a bare greeting or procedural start (e.g., personal check-in, follow-up, warmth, choice, humor, emotional attunement, or meaningful small talk)
+- Session closing / goodbye / wrap-up ONLY when it contains more than a routine sign-off (e.g., praise, reflection, future planning, warmth, student choice, or emotional acknowledgment)
+- Transitions between activities ONLY when the transition has relational significance (e.g., offering choice, easing resistance, inviting readiness, validating feelings, or connecting to student interests)
+- Student expresses emotion (frustration, excitement, tiredness, boredom, anxiety)
+- Tutor acknowledges OR fails to acknowledge student emotional state, confusion, frustration, distraction, or communication difficulty
+- Small talk, personal sharing, off-topic conversation, or student-led tangents that temporarily shift away from the lesson
+- Praise or affirmation (generic or specific), including very short moments such as "good job," "perfect," "you did really well," or warm acknowledgment after a correct answer
+- Humor, playfulness, teasing, joking, or light banter, including moments where the tutor follows the student's tangent and then gently returns to the task
+- Student resistance, refusal, disengagement, off-task behavior, or signs of not hearing/not following
+- Tutor builds on student interests or remembers personal details
+- Power dynamics (tutor flexibility or rigidity about rules, posture, time)
+- Student shares personal information unprompted
+- Moments where rapport should have been supported but the tutor responds flatly, rigidly, dismissively, or misses the opportunity
+- Academic content used as rapport: making problems personal, using student interests, connecting concepts to the student's life, offering motivating formats/rewards, doing a confidence-building review, giving the student meaningful choice/control, or adjusting the task to meet the student's comfort level
+
+## Important: Rapport Can Be Embedded Inside Teaching
+
+Do not limit rapport to greetings, praise, or small talk. Also detect instructional moves that serve a relational function, such as:
+- checking what the student already knows before introducing new content
+- reviewing prior material to create comfort or confidence
+- offering the student choice about what to work on or how to work
+- adapting an example to the student's interests/preferences
+- using drawing, games, or other motivating formats to support engagement
+- gently scaffolding after an error in a way that protects the student's confidence
+
+## Important: Be Comprehensive but Selective
+
+Identify all clearly notable rapport moments, but do NOT force a quota. Most sessions will contain roughly **3-8** rapport moments, though some may have fewer or more.
+
+Prefer moments that a human annotator would judge as a distinct relational event. Do **not** include routine procedural talk, bare acknowledgments, or generic instruction unless they carry clear relational significance.
+
+When in doubt, ask: "Is there a meaningful social, emotional, motivational, or relational move here, beyond ordinary tutoring flow?" If not, do not include it.
+
+## Do NOT Include
+- bare greetings like "hi" / "hello" with no meaningful follow-up
+- routine screen-sharing, loading, or platform navigation
+- generic directions, comprehension checks, or procedural transitions by themselves
+- every instance of "right," "okay," "good," or "perfect" unless it functions as a distinct relational move
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "detections": [
+    {
+      "turn_start": 1,
+      "turn_end": 25,
+      "annotation_type": "rapport",
+      "brief_description": "Session opening with check-in about student's weekend"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}

@@ -1,0 +1,44 @@
+You are an expert in pedagogy analyzing a K-12 tutoring transcript. Your task is to identify ALL turn ranges where scaffolding-related pedagogical events occur.
+
+## What to Look For
+
+Scan the transcript for ANY moment where the tutor's scaffolding strategy is notable:
+
+- Student makes an error or shows a misconception
+- Missed opportunities for rigor: Student answers correctly or shows insight, but the tutor fails to push for deeper thinking (e.g., just saying "good job" and moving on)
+- Missed opportunities for support: Student struggles, but the tutor allows them to give up or changes the topic without addressing the gap
+- Tutor provides a hint, breaks a problem into steps, or models a process
+- Tutor explains when they could have questioned instead
+- Tutor gives away the answer or does the cognitive work for the student (over-scaffolding / funneling)
+- Student is frustrated, stuck, or says "I don't know"
+- Student demonstrates independence or transfers a concept to a new problem
+- Tutor repeats the same strategy that isn't working
+- Transitions between problem types, selecting task difficulty, or session management (e.g., offering breaks, setting expectations, praising aptitude to set up a challenge)
+- Moments where the tutor's approach changes mid-interaction (shifts from questioning to telling, or vice versa)
+
+## Important: Cast a Wide Net
+
+Identify **8-15 moments** per session. Capture the FULL arc of a pedagogical interaction (from the initial struggle or setup to the final resolution). Group continuous or closely related pedagogical moves on the same problem into a single, comprehensive turn range rather than breaking them into multiple tiny detections. You may include brief, isolated moments, but prefer encompassing the whole episode.
+
+When in doubt, include it. A separate analysis step will evaluate each moment in detail.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "detections": [
+    {
+      "turn_start": 45,
+      "turn_end": 52,
+      "annotation_type": "scaffolding",
+      "brief_description": "Tutor breaks down division problem after student expresses confusion"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}

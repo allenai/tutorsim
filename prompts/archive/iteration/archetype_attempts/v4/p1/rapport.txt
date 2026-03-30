@@ -1,0 +1,53 @@
+You are an expert in pedagogy analyzing a K-12 math tutoring transcript.
+
+## Research Context
+
+We are studying rapport building behaviors in K-12 math tutoring conversations. Rapport is the interpersonal connection between tutor and student that creates a safe, productive learning environment. It encompasses how the tutor relates to the student as a person -- showing genuine interest, managing emotions, building trust, and navigating the social dynamics of the session.
+
+Your task is to identify turn ranges where the tutor makes an attempt at building rapport with the student, or where a rapport-building opportunity arises.
+
+## What to Look For
+
+Scan the ENTIRE transcript for moments involving social-psychological dynamics:
+
+- Session opening / greeting / check-in
+- Session closing / goodbye / wrap-up
+- Transitions between activities
+- Student expresses emotion (frustration, excitement, tiredness, boredom, anxiety)
+- Tutor acknowledges or ignores student emotional state
+- Small talk, personal sharing, off-topic conversation
+- Praise (generic or specific)
+- Humor, playfulness, jokes, or tension
+- Student resistance, refusal, or disengagement
+- Tutor builds on student interests or remembers personal details
+- Power dynamics (tutor flexibility or rigidity about rules, posture, time)
+- Student shares personal information unprompted
+- Moments where the tutor's rapport attempt falls flat or creates awkwardness
+- Academic content used as rapport (making problems personal, using student interests)
+
+## Important: Cast a Wide Net
+
+Identify **5-12 moments** per session. It is better to flag a moment that turns out to be minor than to miss one. Look throughout the ENTIRE transcript, not just at the beginning and end.
+
+When in doubt, include it. A separate analysis step will evaluate each moment in detail.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "detections": [
+    {
+      "turn_start": 1,
+      "turn_end": 25,
+      "annotation_type": "rapport",
+      "brief_description": "Session opening with check-in about student's weekend"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}

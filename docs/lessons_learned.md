@@ -1,0 +1,121 @@
+# Lessons Learned
+
+Running log of hard-won lessons from building and maintaining this project.
+
+---
+
+## 2026-03-24: Never gitignore results without preserving them first
+
+**What happened:** During the repo restructuring, `results/` was added to `.gitignore` and the old `synthetic_annotator/results/` directory was deleted as part of collapsing `synthetic_annotator/` into `annotator/`. The results were copied to the new `results/annotator/` location first, but a `git checkout HEAD -- .` command (used to recover from a failed `history/` restore) reverted tracked files and could have wiped results if they'd been in tracked paths.
+
+**Why it matters:** Results contain token usage data from every pipeline and benchmark run -- input_tokens, output_tokens, total_tokens per API call. This is the only record of cumulative spend across the project. Losing results means losing the ability to track total cost.
+
+**Rule:** Before any destructive git operation (`git checkout -- .`, `git reset --hard`, `git clean`), verify that `results/` exists at its expected location and is not at risk. Results are gitignored and exist only on disk -- there is no backup in git history for the new location.
+
+**Where results live:**
+- `results/annotator/{version}/` -- detections.json, annotations.json (with token usage per conversation), eval_*.json
+- `results/benchmark/{version}/` -- exchanges, annotations, scores, leaderboard (with token usage per scenario)
+- `history/` -- archived iteration results from earlier prompt versions (also gitignored, restored from git commit 6ace505)
+
+---
+
+## 2026-03-24: Windows MAX_PATH breaks git operations on deeply nested files
+
+**What happened:** `git checkout 6ace505 -- synthetic_annotator/history/` failed with hundreds of "Filename too long" errors. The history directory contains JSONL files with paths like `synthetic_annotator/history/archive/data/annotations/rapport_annotations/stepup/Forbes/2025-t27975_2024-s8239_3b070869-730b-49a5-a6a6-c22380166d93/rapport_phase_1_incremental.jsonl` -- well over 260 characters when combined with the repo's already-long base path on OneDrive.
+
+**Fix:** `git config core.longpaths true` in the repo. This tells git to use the Windows long-path API (\\?\) which supports up to 32,767 characters.
+
+**Rule:** Always set `core.longpaths true` on Windows repos that may contain deeply nested files, especially when the repo lives under OneDrive (which adds ~80 characters to every path).
+
+---
+
+## 2026-03-24: git checkout HEAD -- . is a sledgehammer
+
+**What happened:** After the failed history restore left partially-extracted files in the staging area, `git checkout HEAD -- .` was used to clean up. This correctly removed the partial files, but also reverted ALL other tracked file edits (benchmark imports, .gitignore, CLAUDE.md) that hadn't been committed yet.
+
+**Rule:** Never use `git checkout HEAD -- .` (or `git restore .`) when you have uncommitted edits to tracked files that you want to keep. Instead:
+- Use `git checkout HEAD -- <specific-path>` to target only the files you want to revert
+- Or commit your work-in-progress first, then clean up, then amend if needed
+
+---
+
+## Prompt Iteration: v3 to v4 Transition (Lessons from 19+ batch runs)
+
+The v3-to-v4 rewrite was the single biggest quality improvement in the project. v3 was built by accumulating advisor-suggested patches over multiple rounds. v4 was a ground-up rewrite that incorporated what we learned from those failures. These lessons apply to any future prompt iteration work.
+
+Full details are in [annotator/iteration/ITERATION_INSTRUCTIONS.md](../annotator/iteration/ITERATION_INSTRUCTIONS.md) (the "Lessons Learned" section). The iteration logs are in `history/claude_annotation_iteration/annotation_iteration.md` and `history/claude_key_moment_iteration/key_moment_iteration.md`.
+
+### 1. Internal consistency beats metric chasing
+
+v3 was full of contradictory nudges: "be balanced" alongside "Critical Check: What Could Be Better?" and "Before rating, ask yourself..." Each one targeted a specific metric weakness but together they made the prompt incoherent. The model couldn't follow conflicting instructions, so it defaulted to noise.
+
+**Rule:** Before adding any instruction, check if it contradicts existing instructions. If it does, rewrite the section -- don't append a nudge.
+
+### 2. Separation of concerns between pipeline passes
+
+Each pass has one job:
+- **Pass 1 (Detector)**: Find turn ranges. Cast a wide net. Don't judge.
+- **Pass 2 (Annotator)**: Analyze the moment (situation/action/result). Don't classify.
+- **Pass 3 (Labeller)**: Read the full S/A/R analysis and classify (effective/partial/ineffective). Don't re-analyze.
+
+v3 violated this: the annotator prompt included full effectiveness criteria and examples with labels, making the labeller a rubber stamp. When we removed the overlap and let each pass do its own job, metrics improved.
+
+**What went wrong when we tried the opposite:** We tried removing ALL effectiveness language from the annotator (v3 of the annotation iteration) and having the labeller independently classify from balanced text. Kappa dropped 3pp -- when every annotation mentions both strengths and weaknesses, the labeller can't distinguish true "partial" from "effective-with-minor-notes." The labeller needs the annotator to take a stance, just not to produce the final label.
+
+### 3. Prompts need real definitions, not just instructions
+
+v3 said "identify scaffolding-related pedagogical events" without defining what scaffolding means in the context of this study. The model used its general training knowledge, which didn't match the research constructs.
+
+v4 added: research context (what we're studying and why), construct definitions (what scaffolding/rigor/rapport mean here), strategy taxonomies (named strategies the annotator can reference), and the core tradeoff the tutor faces.
+
+### 4. Check the full pipeline, not just the prompt you're iterating
+
+The biggest v4 win came from fixing the labeller -- it was only reading the `result` field, not the full annotation. This had nothing to do with Pass 1 or Pass 2 prompts. We also found a bug where the in-memory pipeline ran Pass 3 successfully but never saved labels to disk -- eval was reading stale data.
+
+**Rule:** Before starting any iteration cycle, run the full pipeline end-to-end and spot-check every pass. Read actual outputs in `annotations.json`, check label distributions, verify the labeller reads enough context.
+
+### 5. The advisor is good at diagnosis, bad at prescription
+
+The LLM advisor identifies error patterns well (it reads 40+ error examples with full transcript context). But its proposed prompt edits are often directional nudges that create the consistency problems from lesson 1.
+
+**Updated rule:** Use the advisor to understand *what's going wrong* (error patterns), but write the fixes yourself. Don't blindly apply all proposed changes.
+
+### 6. Examples are more powerful than instructions
+
+v3's examples included `"effectiveness": "effective"` in the JSON output, so the model produced effectiveness labels regardless of what the instructions said. The examples set the tone, voice, level of detail, and output format more strongly than any instruction paragraph.
+
+**Rule:** When changing prompt behavior, update the examples to match. The model follows examples over instructions when they conflict.
+
+### 7. Changing one pass's output breaks downstream passes
+
+When we removed effectiveness labels from Pass 2's output, the labeller (designed for evaluative text like "Effective. The tutor correctly...") suddenly received analytical text with mixed strengths/weaknesses. It defaulted to "partial" for everything.
+
+**Rule:** When you change a pass's output format or style, re-check that downstream passes still work with the new input.
+
+### 8. Don't patch -- rewrite after 3 rounds
+
+After 3 rounds of advisor-driven patches, the prompt becomes incoherent. Stop patching. Read it end-to-end, then rewrite from scratch incorporating what you learned. This is exactly what the v3-to-v4 transition was.
+
+### 9. Detection has a hard ceiling that prompt iteration can't break
+
+We ran 12 detection iterations (v1-v11). Every content change either regressed or was within the +/-1pp variance band. The only marginal gain came from raising count targets (v10: +1.7pp recall at -5.5pp precision cost).
+
+Why content changes fail:
+- Any evaluative language makes the model more selective (even "especially when X")
+- New sections create priority signals that displace existing correct detections
+- The v1 prompt's simplicity (11 neutral bullets) is its strength
+
+40% of remaining misses are theoretically fixable micro-moments, but every attempt to add them causes regression because the model reallocates "detection attention" from proven patterns to new criteria.
+
+**Conclusion:** Detection ceiling is model-limited, not prompt-limited. Improvements will come from better models or multi-pass detection, not prompt iteration.
+
+### 10. Batch-to-batch variance is large -- always measure it
+
+- Detection: +/-1pp overall, +/-3pp per type
+- Annotation: +/-7pp kappa (!)
+
+We confirmed this with variance checks (rerunning identical prompts). A +4pp annotation gain could be noise. After finding a promising change, always re-run to confirm before declaring victory.
+
+### 11. Go back to the source material
+
+When a prompt has drifted through iteration, don't patch further. Go back to the original research instructions and rewrite from scratch. The original research framing ("We are studying how tutors decide to push for rigor versus introduce scaffolds...") was clear and well-scoped. v3 had drifted away from it. Going back improved the prompts more than any advisor cycle.

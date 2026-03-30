@@ -1,0 +1,202 @@
+# Storage backend config (Factor IV: backing services as attached resources)
+#
+# Config provides defaults for local development.
+# All values overridable by env vars for deployment -- see .env.example.
+storage:
+  backend: local          # Override: STORAGE_BACKEND
+  bucket: kylel-alexisr-edu  # Override: S3_BUCKET
+  prefix: synth-students/tutor-bench  # Override: S3_PREFIX
+  root: ""                # Override: STORAGE_ROOT (local only, empty = repo root)
+  paths:
+    transcripts:
+      - data/transcripts
+    ground_truth:
+      - data/ground_truth
+    annotator_results: results/annotator
+    benchmark_results: results/benchmark
+
+# Annotator model config
+
+profile: anthropic
+
+profiles:
+  gemini:
+    tutor:
+      model: gemini-3.1-pro-preview
+      max_tokens: 65536
+    detect:
+      model: gemini-3.1-pro-preview
+      mode: batch
+      max_tokens: 65536
+      poll_interval: 30
+      thinking: true
+      thinking_budget: 16384
+    annotate:
+      model: gemini-3.1-pro-preview
+      mode: batch
+      max_tokens: 65536
+      context_window: 20
+      poll_interval: 30
+      thinking: true
+      thinking_budget: 16384
+    label:
+      model: gemini-3.1-pro-preview
+      mode: batch
+      max_tokens: 65536
+      poll_interval: 30
+      thinking: true
+      thinking_budget: 16384
+    advisor:
+      model: gemini-3.1-pro-preview
+      max_tokens: 65536
+      timeout: 300
+      thinking: true
+      thinking_budget: 16384
+
+  openai:
+    tutor:
+      model: gpt-5.4
+      max_tokens: 65536
+    detect:
+      model: gpt-5.4
+      mode: batch
+      max_tokens: 128000
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    annotate:
+      model: gpt-5.4
+      mode: batch
+      max_tokens: 128000
+      context_window: 20
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    label:
+      model: gpt-5.4
+      mode: batch
+      max_tokens: 128000
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    advisor:
+      model: gpt-5.4
+      max_tokens: 128000
+      timeout: 300
+      thinking: true
+      thinking_budget: 16384
+
+  anthropic:
+    tutor:
+      model: claude-opus-4-6
+      max_tokens: 65536
+    detect:
+      model: claude-opus-4-6
+      mode: batch
+      max_tokens: 128000
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    annotate:
+      model: claude-opus-4-6
+      mode: batch
+      max_tokens: 128000
+      context_window: 20
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    label:
+      model: claude-opus-4-6
+      mode: batch
+      max_tokens: 128000
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    advisor:
+      model: claude-opus-4-6
+      max_tokens: 128000
+      timeout: 300
+      thinking: true
+      thinking_budget: 16384
+
+  openai_claude:
+    tutor:
+      model: gpt-5.4
+      max_tokens: 65536
+    detect:
+      model: gpt-5.4
+      mode: batch
+      max_tokens: 128000
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    annotate:
+      model: claude-opus-4-6
+      mode: batch
+      max_tokens: 128000
+      context_window: 20
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    label:
+      model: claude-opus-4-6
+      mode: batch
+      max_tokens: 128000
+      poll_interval: 60
+      thinking: true
+      thinking_budget: 16384
+    advisor:
+      model: claude-opus-4-6
+      max_tokens: 128000
+      timeout: 300
+      thinking: true
+      thinking_budget: 16384
+
+# Retry settings
+retry:
+  max_retries: 5
+  base_delay: 5
+
+# Benchmark model config
+benchmark:
+  scenarios:
+    mode: detected                # detected | random | both
+    max_scenarios: 0
+    random_count: 50
+    random_seed: 42
+    min_turn: 10
+
+  exchange:
+    num_turns: 5
+    poll_interval: 60
+
+  tutor_profiles:
+    - anthropic
+
+  student:
+    profile: anthropic
+
+  detect:
+    profile: anthropic
+    prompt_version: v5
+
+  annotator:
+    profile: anthropic
+    prompt_version: profiles
+    styles:
+      - generous
+      - balanced
+      - demanding
+    context_window: 20
+    mode: batch
+    poll_interval: 60
+
+  aggregation:
+    label_weights:
+      effective: 1.0
+      partial: 0.5
+      ineffective: 0.0
+    style_weights:
+      generous: 0.25
+      balanced: 0.50
+      demanding: 0.25
