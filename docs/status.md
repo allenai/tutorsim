@@ -1,6 +1,6 @@
 # Project Status
 
-*Last updated: 2026-03-26*
+*Last updated: 2026-03-31*
 
 ## Current State
 
@@ -21,8 +21,8 @@ The 3-pass annotation pipeline is stable and validated:
 
 | Version | Model | Detection | Annotation | Eval | Notes |
 |---------|-------|-----------|------------|------|-------|
-| v4 | Gemini | Yes | Yes | Yes | Current canonical detection prompts |
-| v5 | Claude | Yes | -- | -- | v4 detection + cut point guidance for benchmark |
+| v4 | Gemini | Yes | Yes | Yes | Previous canonical detection prompts |
+| v5 | Claude | Yes | -- | -- | Iterated detection (51.5% recall, 32.3% precision) + cut point guidance for benchmark |
 | v3_gemini | Gemini | Yes | Yes | Yes | Previous best |
 | v3_claude | Claude | Yes | Yes | Yes | Best recall (64.9%) |
 
@@ -42,7 +42,7 @@ The benchmark is now fully ground-truth-free. It uses synthetic detection to fin
 4. 3-style annotation (generous/balanced/demanding profiles)
 5. Per-style scoring (no composite aggregation -- user picks their perspective)
 
-**First run** (`claude-opus-4-6_2026-03-26`): in progress. ~2,468 scenarios, Claude tutor, Claude annotator.
+**First run** (`claude-opus-4-6_2026-03-26`): detection complete (2,608 detections from old v5 prompts, avg 25.1/conv). Exchange phase stalled (0 completed rounds). Needs re-run with updated v5 prompts.
 
 **Results naming**: `{tutor_model}_{date}` with `config.json` capturing all run conditions (resolved model names, prompt versions, turn counts).
 
@@ -58,6 +58,28 @@ The benchmark is now fully ground-truth-free. It uses synthetic detection to fin
 ---
 
 ## Completed Work
+
+### 2026-03-31: v5 Detection Prompt Iteration
+
+Iterated v5 detection prompts through 4 rounds (3 advisor patches + 1 mandatory rewrite). The original v5 prompts replaced v4's "cast a wide net" with a 3-criteria "key moment" test that cratered recall (64.2% -> 22.8%).
+
+**Results progression:**
+
+| Version | Recall | Precision | IoU | Avg/conv |
+|---------|--------|-----------|-----|----------|
+| v4 (baseline) | 64.2% | 23.4% | 0.616 | 16.6 |
+| v5 (pre-iteration) | 22.8% | 24.6% | 0.588 | 5.3 |
+| v5r1 | 39.6% | 39.1% | 0.676 | 5.6 |
+| v5r3 (limit=30) | 45.9% | 35.3% | 0.660 | 7.5 |
+| **v5r4 (winner)** | **51.5%** | **32.3%** | **0.657** | **9.2** |
+
+**Key findings:**
+- The 3-criteria test was the structural recall bottleneck. Replacing it with "cast a wide net" + count targets recovered the most recall.
+- Advisor `--limit 30` (vs default 10) surfaced patterns that 10 examples missed: academic scaffolding as rapport (30% of rapport misses), rigor-push on correct answers (25% of scaffolding misses).
+- v5r4 keeps all v5 improvements (definitions, boundary guidance, cut points, false positive list, consolidation rules) while restoring v4-style broad detection.
+- Detection count reduced from 25/conv (original v5) to 9.2/conv (v5r4) -- 63% reduction while maintaining 51.5% recall.
+
+Full iteration log: `history/v5_detection_iteration/iteration_log.md`
 
 ### 2026-03-26: Storage Layer (Factor IV)
 
