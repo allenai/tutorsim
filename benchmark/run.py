@@ -53,6 +53,8 @@ def load_config(overrides: dict | None = None) -> dict:
             config["scenarios"]["mode"] = overrides["scenario_mode"]
         if overrides.get("max_scenarios"):
             config["scenarios"]["max_scenarios"] = overrides["max_scenarios"]
+        if overrides.get("max_per_conv"):
+            config["scenarios"]["max_per_conv"] = overrides["max_per_conv"]
         if overrides.get("tutor_profile"):
             config["tutor_profiles"] = [overrides["tutor_profile"]]
         if overrides.get("mode"):
@@ -346,6 +348,8 @@ def main():
     parser.add_argument("--scenario-mode", choices=["key_moment", "random", "both"],
                         help="Override scenario extraction mode")
     parser.add_argument("--max-scenarios", type=int, help="Limit number of scenarios")
+    parser.add_argument("--max-per-conv", type=int,
+                        help="Max scenarios per conversation (randomly sampled)")
     parser.add_argument("--test", type=int, default=0,
                         help="Limit detection to N transcripts (0 = all)")
     parser.add_argument("--mode", choices=["batch", "sync"],
@@ -355,6 +359,7 @@ def main():
     overrides = {
         "scenario_mode": args.scenario_mode,
         "max_scenarios": args.max_scenarios,
+        "max_per_conv": args.max_per_conv,
         "tutor_profile": args.tutor_profile,
         "mode": args.mode,
         "test_transcripts": args.test,

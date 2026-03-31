@@ -183,7 +183,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
   font-size: 14px; color: #555; margin-bottom: 12px; padding-bottom: 8px;
   border-bottom: 2px solid #e0e0e0; position: sticky; top: 0; background: #fff; z-index: 1;
 }}
-.sidebar h3.ground-truth {{ border-bottom-color: #4a90d9; }}
+.sidebar h3.ground-truth {{ border-bottom-color: #ff9800; }}
 .sidebar h3.ai-ann {{ border-bottom-color: #9c27b0; }}
 
 .style-group {{
@@ -281,7 +281,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 
 <div class="main">
   <div class="sidebar" id="gt-sidebar">
-    <h3 class="ground-truth">Ground Truth</h3>
+    <h3 class="ground-truth">Detection (trigger)</h3>
     <div id="gt-cards"></div>
   </div>
   <div class="transcript" id="transcript"></div>

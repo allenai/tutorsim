@@ -159,6 +159,27 @@ def extract_random_scenarios(
     return scenarios
 
 
+def _sample_per_conversation(
+    scenarios: list[Scenario],
+    max_per_conv: int,
+    seed: int = 42,
+) -> list[Scenario]:
+    """Randomly sample up to max_per_conv scenarios per conversation."""
+    rng = random.Random(seed)
+    by_conv: dict[str, list[Scenario]] = {}
+    for s in scenarios:
+        by_conv.setdefault(s.conv_id, []).append(s)
+
+    sampled = []
+    for conv_id, conv_scenarios in by_conv.items():
+        if len(conv_scenarios) <= max_per_conv:
+            sampled.extend(conv_scenarios)
+        else:
+            sampled.extend(rng.sample(conv_scenarios, max_per_conv))
+
+    return sampled
+
+
 def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list[Scenario]:
     """Load scenarios based on config settings.
 
@@ -173,6 +194,7 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
 
     mode = config.get("mode", "detected")
     max_scenarios = config.get("max_scenarios", 0)
+    max_per_conv = config.get("max_per_conv", 0)
 
     scenarios = []
 
@@ -193,6 +215,13 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
         rnd_scenarios = extract_random_scenarios(transcripts, count, seed, min_turn)
         print(f"Random scenarios: {len(rnd_scenarios)}")
         scenarios.extend(rnd_scenarios)
+
+    if max_per_conv > 0:
+        before = len(scenarios)
+        scenarios = _sample_per_conversation(
+            scenarios, max_per_conv, seed=config.get("random_seed", 42),
+        )
+        print(f"Sampled {max_per_conv}/conv: {before} -> {len(scenarios)} scenarios")
 
     if max_scenarios > 0:
         scenarios = scenarios[:max_scenarios]

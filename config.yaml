@@ -167,7 +167,7 @@ benchmark:
     min_turn: 10
 
   exchange:
-    num_turns: 5
+    num_turns: 2
     poll_interval: 60
 
   tutor_profiles:
