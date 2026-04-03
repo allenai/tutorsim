@@ -12,7 +12,8 @@ __pycache__/
 data/raw/s3/
 
 # All data and results (private student data + generated outputs)
-data/
+data/*
+!data/*.py
 results/
 benchmark/results/
 
