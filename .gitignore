@@ -28,3 +28,4 @@ history/
 
 # Claude Code session data
 .claude/
+*.html
