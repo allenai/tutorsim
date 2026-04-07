@@ -140,9 +140,14 @@ def read_annotations(conv_id: str, snapshot_entries):
                         # transcripts use 1-based turn_number. Convert here.
                         raw_start = ann.get("turn_start")
                         raw_end = ann.get("turn_end")
+                        # Normalize annotator ID casing (EC2 data has
+                        # lowercase dirs like 'gerber', 'stobbe')
+                        raw_aid = ann.get("annotator_id", annotator_id)
+                        normalized_aid = raw_aid[0].upper() + raw_aid[1:] if raw_aid else raw_aid
+
                         annotations.append({
                             "annotation_type": ann_type,
-                            "annotator_id": ann.get("annotator_id", annotator_id),
+                            "annotator_id": normalized_aid,
                             "turn_start": raw_start + 1 if raw_start is not None else None,
                             "turn_end": raw_end + 1 if raw_end is not None else None,
                             "situation": data.get("situation", ""),

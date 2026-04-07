@@ -31,6 +31,7 @@ load_dotenv()
 REPO_ROOT = Path(__file__).parent.parent.parent
 
 _cache: dict[str, object] = {}
+_jsonl_indexes: dict[str, dict[str, dict]] = {}  # path -> {conv_id: transformed_record}
 
 
 # ===================================================================
@@ -239,42 +240,206 @@ def _get_backend() -> StorageBackend:
 
 
 # ===================================================================
+# JSONL transcript support
+# ===================================================================
+
+def _transform_normalized_record(rec: dict) -> dict:
+    """Transform an S3 normalized JSONL record to our internal transcript format.
+
+    S3 format: turns[] (dialogue only) + enrichments[] (non-dialogue, with before_turn).
+    Our format: turns[] (all interleaved, with turn_number, role, text, type).
+    """
+    sess = rec.get("session", {})
+    source_id = rec.get("source_id", "")
+    tutor_id = sess.get("source_tutor_id", "")
+    student_id = sess.get("source_student_id", "")
+
+    # source_id format varies by batch:
+    #   older batches: UUID only (e.g. "69b80b21-...")
+    #   newer batches: full conv_id (e.g. "2025-t27247_2025-s12069_69b80b21-...")
+    if tutor_id and tutor_id in source_id:
+        conv_id = source_id  # already includes tutor_student prefix
+    else:
+        conv_id = f"{tutor_id}_{student_id}_{source_id}"
+
+    # Build unified turn list: dialogue turns + enrichments merged by position
+    dialogue_turns = []
+    for t in rec.get("turns", []):
+        dialogue_turns.append({
+            "_sort_key": (t["turn_number"], 1),  # dialogue after enrichments at same position
+            "role": t["role"].upper(),
+            "text": t["text"],
+            "type": "DIALOGUE",
+            "timestamp": f"{t.get('start_seconds', 0)}s",
+        })
+
+    enrichment_turns = []
+    for e in rec.get("enrichments", []):
+        etype = e.get("type", "").upper().replace(" ", "_")
+        role = "TUTOR"  # enrichments are typically tutor actions
+        label = e.get("label", "")
+        content = e.get("content", "")
+        text = f"[{etype}]"
+        if label:
+            text = f"[{etype}: {label}]"
+        if content:
+            text = f"{text} {content}"
+
+        enrichment_turns.append({
+            "_sort_key": (e.get("before_turn") or 0, 0),  # enrichments before their turn
+            "role": role,
+            "text": text,
+            "type": etype,
+            "timestamp": f"{e.get('start_seconds', 0)}s",
+        })
+
+    # Merge and sort: enrichments come before their associated turn
+    all_turns = dialogue_turns + enrichment_turns
+    all_turns.sort(key=lambda t: t["_sort_key"])
+
+    # Assign sequential turn numbers, strip sort keys
+    numbered = []
+    for i, t in enumerate(all_turns, start=1):
+        numbered.append({
+            "turn_number": i,
+            "role": t["role"],
+            "text": t["text"],
+            "type": t["type"],
+            "timestamp": t["timestamp"],
+        })
+
+    # Build context from demographics if available
+    demo = rec.get("demographics", {})
+    student = demo.get("student", {})
+    context_parts = []
+    if student.get("grade"):
+        context_parts.append(f"Grade {student['grade']}")
+    if student.get("subject"):
+        context_parts.append(student["subject"])
+    context = ", ".join(context_parts)
+
+    return {
+        "conversation_id": conv_id,
+        "tutor_id": sess.get("source_tutor_id", ""),
+        "student_id": sess.get("source_student_id", ""),
+        "context": context,
+        "platform": rec.get("source", "step_up"),
+        "num_turns": len(numbered),
+        "turns": numbered,
+    }
+
+
+def _load_jsonl_index(path: str) -> dict[str, dict]:
+    """Load a JSONL file from the backend, transform each record, index by conv_id.
+
+    Cached in _jsonl_indexes so the file is only loaded once per process.
+    """
+    if path in _jsonl_indexes:
+        return _jsonl_indexes[path]
+
+    be = _get_backend()
+    print(f"Loading JSONL transcript index from {path}...")
+
+    import io
+
+    stream = None
+
+    # Try local file first
+    if isinstance(be, LocalBackend):
+        full_path = be.root / path
+        if full_path.exists():
+            stream = open(full_path, "r", encoding="utf-8")
+
+    # Try S3 (either as primary backend or fallback for JSONL paths not found locally)
+    if stream is None:
+        bucket = _get_bucket()
+        if bucket:
+            try:
+                import boto3
+                s3_client = boto3.client("s3")
+                prefix = _get_prefix()
+                key = f"{prefix}/{path}" if prefix else path
+                resp = s3_client.get_object(Bucket=bucket, Key=key)
+                stream = io.TextIOWrapper(resp["Body"], encoding="utf-8")
+            except Exception as e:
+                print(f"  Failed to load JSONL from S3: {e}")
+
+    if stream is None:
+        print(f"  JSONL file not found: {path}")
+        _jsonl_indexes[path] = {}
+        return {}
+
+    index = {}
+    errors = 0
+    try:
+        for line in stream:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                transformed = _transform_normalized_record(rec)
+                conv_id = transformed["conversation_id"]
+                index[conv_id] = transformed
+            except Exception:
+                errors += 1
+    finally:
+        stream.close()
+
+    print(f"  Indexed {len(index)} transcripts ({errors} parse errors)")
+    _jsonl_indexes[path] = index
+    return index
+
+
+# ===================================================================
 # Public API -- Transcripts
 # ===================================================================
 
 def load_transcript(conv_id: str) -> dict | None:
     """Load a single transcript JSON by conversation ID.
-    Searches all configured transcript paths."""
+    Searches all configured transcript paths. Supports JSONL sources."""
     be = _get_backend()
-    for rel_dir in _get_path_list("transcripts"):
-        data = be.read_json(f"{rel_dir}/{conv_id}.json")
-        if data is not None:
-            return data
+    for rel_path in _get_path_list("transcripts"):
+        if rel_path.endswith(".jsonl"):
+            index = _load_jsonl_index(rel_path)
+            if conv_id in index:
+                return index[conv_id]
+        else:
+            data = be.read_json(f"{rel_path}/{conv_id}.json")
+            if data is not None:
+                return data
     return None
 
 
 def load_all_transcripts() -> dict[str, dict]:
     """Load all transcripts from all configured transcript paths, merged into one pool.
-    Returns {conv_id: conversation_dict}."""
+    Returns {conv_id: conversation_dict}. Supports JSONL sources."""
     be = _get_backend()
     transcripts = {}
-    for rel_dir in _get_path_list("transcripts"):
-        for fname in be.list_files(rel_dir):
-            data = be.read_json(f"{rel_dir}/{fname}")
-            if data and "conversation_id" in data:
-                transcripts[data["conversation_id"]] = data
-            elif data:
-                transcripts[fname.replace(".json", "")] = data
+    for rel_path in _get_path_list("transcripts"):
+        if rel_path.endswith(".jsonl"):
+            transcripts.update(_load_jsonl_index(rel_path))
+        else:
+            for fname in be.list_files(rel_path):
+                data = be.read_json(f"{rel_path}/{fname}")
+                if data and "conversation_id" in data:
+                    transcripts[data["conversation_id"]] = data
+                elif data:
+                    transcripts[fname.replace(".json", "")] = data
     return transcripts
 
 
 def list_transcript_ids() -> list[str]:
-    """List all available conversation IDs across all configured transcript paths."""
+    """List all available conversation IDs across all configured transcript paths.
+    Supports JSONL sources."""
     be = _get_backend()
     ids = set()
-    for rel_dir in _get_path_list("transcripts"):
-        for fname in be.list_files(rel_dir):
-            ids.add(fname.replace(".json", ""))
+    for rel_path in _get_path_list("transcripts"):
+        if rel_path.endswith(".jsonl"):
+            ids.update(_load_jsonl_index(rel_path).keys())
+        else:
+            for fname in be.list_files(rel_path):
+                ids.add(fname.replace(".json", ""))
     return sorted(ids)
 
 

@@ -5,7 +5,7 @@
 storage:
   backend: local          # Override: STORAGE_BACKEND
   bucket: kylel-alexisr-edu  # Override: S3_BUCKET
-  prefix: synth-students/tutor-bench  # Override: S3_PREFIX
+  prefix: ""  # Override: S3_PREFIX (empty = paths are relative to bucket root)
   root: ""                # Override: STORAGE_ROOT (local only, empty = repo root)
   paths:
     transcripts:
