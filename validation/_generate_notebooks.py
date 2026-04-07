@@ -202,6 +202,37 @@ print(f'v5 Detection Performance (IoU >= {IOU})\\n')
 df
 """))
 
+    c.append(md("""
+### By Annotation Type
+
+Scaffolding/rigor moments and rapport moments may have different detection difficulty — scaffolding events often have clearer textual signals (errors, corrections) while rapport moments can be subtler (tone, missed opportunities).
+"""))
+
+    c.append(code("""
+type_results = []
+for ann_type in ANNOTATION_TYPES:
+    for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+        gt_sub = {c: gt_by_conv[c] for c in ids}
+        llm_sub = {c: v5_det.get(c, []) for c in ids}
+        gt_typed = filter_moments_by_type(gt_sub, ann_type)
+        llm_typed = filter_moments_by_type(llm_sub, ann_type)
+        m = compute_detection_metrics(gt_typed, llm_typed, iou_threshold=IOU)
+        if m['total_human_clusters'] > 0:
+            type_results.append({
+                'Type': ann_type.title(),
+                'Split': label,
+                'Clusters': m['total_human_clusters'],
+                'LLM Dets': m['total_llm_annotations'],
+                'Recall': f"{m['cluster_recall']:.1%}",
+                'Precision': f"{m['moment_precision']:.1%}",
+                'Mean IoU': f"{m['mean_iou']:.3f}",
+            })
+
+df_type = pd.DataFrame(type_results)
+print(f'Detection by Annotation Type (IoU >= {IOU})\\n')
+df_type
+"""))
+
     # ---- IoU sensitivity ----
 
     c.append(md("""
@@ -448,6 +479,80 @@ else:
     df_gold
 """))
 
+    c.append(md("""
+### Gold Mode by Annotation Type
+"""))
+
+    c.append(code("""
+if v5_gold:
+    type_rows = []
+    for ann_type in ANNOTATION_TYPES:
+        matches = []
+        for cid in sorted(all_eval_ids):
+            hm = [m for m in ground_truth['conversations'][cid]['key_moments']
+                  if m.get('annotation_type') == ann_type]
+            llm = [a for a in v5_gold.get(cid, []) if a.get('annotation_type') == ann_type]
+            matches.extend(match_gold_direct(hm, llm))
+        if matches:
+            eff = compute_effectiveness_metrics(matches)
+            type_rows.append({
+                '': ann_type.title(),
+                'N': eff['total_matched'],
+                '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
+                'Binary Kappa': f"{eff['binary_kappa']:.4f}",
+            })
+    df_gold_type = pd.DataFrame(type_rows).set_index('')
+    print('Gold Mode by Type (combined dev + held-out)\\n')
+    df_gold_type
+"""))
+
+    c.append(md("""
+### Gold Mode by Annotator Profile
+
+Human annotators cluster into three profiles by labeling tendency. The LLM was calibrated with per-profile prompts. How well does it agree with each group?
+
+- **Generous** (Gerber, Jones, Shields, Stobbe, Trujillo): more likely to rate effective
+- **Balanced** (Forbes, Mann, Padgett): middle ground
+- **Demanding** (Flick): more likely to rate ineffective (n=79, too thin for stable metrics)
+"""))
+
+    c.append(code("""
+from annotator.eval.eval import load_annotator_archetype_ids, filter_ground_truth_by_archetype
+ARCH_NAMES = ['generous', 'balanced', 'demanding']
+
+if v5_gold:
+    arch_rows = []
+    for arch in ARCH_NAMES:
+        try:
+            arch_ids = load_annotator_archetype_ids(arch)
+            arch_gt = filter_ground_truth_by_archetype(
+                {'conversations': {c: ground_truth['conversations'][c] for c in all_eval_ids}},
+                arch_ids)
+        except Exception:
+            continue
+
+        matches = []
+        for cid, conv_data in arch_gt['conversations'].items():
+            hm = conv_data['key_moments']
+            llm = v5_gold.get(cid, [])
+            # Filter LLM annotations to only those matching archetype annotator moments
+            matches.extend(match_gold_direct(hm, llm))
+
+        if matches:
+            eff = compute_effectiveness_metrics(matches)
+            arch_rows.append({
+                '': arch.title(),
+                'N': eff['total_matched'],
+                '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
+                'Binary Kappa': f"{eff['binary_kappa']:.4f}",
+            })
+
+    if arch_rows:
+        df_arch = pd.DataFrame(arch_rows).set_index('')
+        print('Gold Mode by Annotator Profile (combined dev + held-out)\\n')
+        df_arch
+"""))
+
     # ---- Full pipeline ----
 
     c.append(md("""
@@ -485,6 +590,33 @@ else:
     df_full = pd.DataFrame(rows).set_index('')
     print(f'v5 Full Pipeline: LLM labels vs human labels on overlapping moments (IoU >= {IOU})\\n')
     df_full
+"""))
+
+    c.append(md("""
+### Full Pipeline by Annotation Type
+"""))
+
+    c.append(code("""
+if v5_anns:
+    type_rows = []
+    for ann_type in ANNOTATION_TYPES:
+        matches = []
+        for cid in sorted(all_eval_ids):
+            hm = [m for m in ground_truth['conversations'][cid]['key_moments']
+                  if m.get('annotation_type') == ann_type]
+            llm = [a for a in v5_anns.get(cid, []) if a.get('annotation_type') == ann_type]
+            matches.extend(match_for_effectiveness(hm, llm, iou_threshold=IOU))
+        if matches:
+            eff = compute_effectiveness_metrics(matches)
+            type_rows.append({
+                '': ann_type.title(),
+                'N': eff['total_matched'],
+                '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
+                'Binary Kappa': f"{eff['binary_kappa']:.4f}",
+            })
+    df_full_type = pd.DataFrame(type_rows).set_index('')
+    print(f'Full Pipeline by Type (combined, IoU >= {IOU})\\n')
+    df_full_type
 """))
 
     # ---- Comparison summary ----
