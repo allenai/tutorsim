@@ -524,11 +524,13 @@ if v5_gold:
     c.append(md("""
 ### Human-Detected Moments by Annotator Profile
 
-Human annotators cluster into three profiles by labeling tendency. The LLM uses **different annotation prompts calibrated to each profile** — the generous prompt was iterated to match generous annotators' standards, etc. This is not filtering the same output; each profile has its own prompt that was tuned to that group's labeling patterns.
+Human annotators cluster into three profiles by labeling tendency:
 
 - **Generous** (Gerber, Jones, Shields, Stobbe, Trujillo): more likely to rate effective
 - **Balanced** (Forbes, Mann, Padgett): middle ground
-- **Demanding** (Flick): more likely to rate ineffective (n=118, thin sample — interpret with caution)
+- **Demanding** (Flick): more likely to rate ineffective (n=118, thin sample)
+
+We show two LLM results for each profile: **generic** (the standard v5 prompt, same for all profiles) and **calibrated** (a prompt specifically iterated to match that annotator group's labeling standards). This shows whether per-profile calibration improves agreement.
 """))
 
     c.append(code("""
@@ -538,53 +540,64 @@ GOLD_STYLE_VERSION = 'v5_gold'
 
 arch_rows = []
 for arch in ARCH_NAMES:
-    # Load the style-specific gold annotations (run with profile-calibrated prompts)
-    style_anns, style_gold = load_annotations(GOLD_STYLE_VERSION, f'annotations_gold_{arch}.json')
-    if style_anns is None:
-        print(f'{arch}: no style-specific gold annotations found')
-        continue
-
     try:
         arch_ids = load_annotator_archetype_ids(arch)
         arch_gt = filter_ground_truth_by_archetype(
             {'conversations': {c: ground_truth['conversations'][c] for c in all_eval_ids}},
             arch_ids)
-    except Exception as e:
-        print(f'{arch}: could not load archetype GT: {e}')
+    except Exception:
         continue
 
-    # Match style-specific LLM annotations against archetype-filtered ground truth
-    matches = []
-    for cid, conv_data in arch_gt['conversations'].items():
-        hm = conv_data['key_moments']
-        llm = style_anns.get(cid, [])
-        if style_gold:
-            matches.extend(match_gold_direct(hm, llm))
-        else:
-            matches.extend(match_for_effectiveness(hm, llm, iou_threshold=IOU))
+    # Load both generic and calibrated annotations
+    generic_anns = v5_gold  # generic v5 prompt
+    style_anns, _ = load_annotations(GOLD_STYLE_VERSION, f'annotations_gold_{arch}.json')
 
-    if matches:
-        eff = compute_effectiveness_metrics(matches)
-        # Human ceiling for this archetype
-        arch_ceil = compute_human_ceiling(arch_gt)
-        ceil_str = f"{arch_ceil['three_way_kappa']:.4f} ({arch_ceil['overlapping_pairs']} pairs)"
-        if arch_ceil['overlapping_pairs'] == 0:
-            ceil_str = 'N/A (single annotator)'
+    # Human ceiling for this archetype
+    arch_ceil = compute_human_ceiling(arch_gt)
 
-        arch_rows.append({
-            '': arch.title(),
-            'N moments': eff['total_matched'],
-            'N convs': len([c for c in arch_gt['conversations']]),
-            '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
-            'Binary Kappa': f"{eff['binary_kappa']:.4f}",
-            'Human Ceiling (3W)': ceil_str,
-        })
-        print(f'{arch}: 3way={eff["three_way_kappa"]:.4f}, n={eff["total_matched"]}')
+    for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+        for mode_label, anns in [('Generic', generic_anns), ('Calibrated', style_anns)]:
+            if anns is None:
+                continue
+            matches = []
+            for cid in sorted(ids):
+                hm = arch_gt['conversations'].get(cid, {}).get('key_moments', [])
+                if not hm:
+                    continue
+                matches.extend(match_gold_direct(hm, anns.get(cid, [])))
+            if matches:
+                eff = compute_effectiveness_metrics(matches)
+                arch_rows.append({
+                    'Profile': arch.title(),
+                    'Prompt': mode_label,
+                    'Split': label,
+                    'N': eff['total_matched'],
+                    '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
+                    'Binary Kappa': f"{eff['binary_kappa']:.4f}",
+                })
 
 if arch_rows:
-    df_arch = pd.DataFrame(arch_rows).set_index('')
-    print('\\nHuman-Detected Moments by Annotator Profile (profile-calibrated prompts)\\n')
-    df_arch
+    df_arch = pd.DataFrame(arch_rows)
+    print('Human-Detected Moments by Annotator Profile')
+    print('Generic = standard v5 prompt | Calibrated = profile-specific iterated prompt\\n')
+    display(df_arch)
+
+    # Also show ceiling
+    print('\\nHuman inter-annotator ceiling per profile:')
+    for arch in ARCH_NAMES:
+        try:
+            arch_ids = load_annotator_archetype_ids(arch)
+            arch_gt = filter_ground_truth_by_archetype(
+                {'conversations': {c: ground_truth['conversations'][c] for c in all_eval_ids}},
+                arch_ids)
+            ceil = compute_human_ceiling(arch_gt)
+            if ceil['overlapping_pairs'] > 0:
+                print(f'  {arch.title():12s}: 3-way kappa = {ceil[\"three_way_kappa\"]:.4f} '
+                      f'({ceil[\"overlapping_pairs\"]} pairs)')
+            else:
+                print(f'  {arch.title():12s}: N/A (single annotator)')
+        except Exception:
+            pass
 """))
 
     # ---- Full pipeline ----
@@ -666,49 +679,6 @@ if v5_anns:
     df_full_type = pd.DataFrame(type_rows).set_index('')
     print(f'Full Pipeline by Type (combined, IoU >= {IOU})\\n')
     df_full_type
-"""))
-
-    c.append(md("""
-### Full Pipeline by Annotator Profile
-
-Unlike the human-detected moments section above (where each profile has its own calibrated LLM prompt), the full pipeline used a **single generic prompt** for all annotations. Here we compare that same LLM output against each annotator group's ground truth separately. This answers: "how does the end-to-end pipeline's output look from each annotator group's perspective?" — it's not a claim about per-profile calibration.
-"""))
-
-    c.append(code("""
-if v5_anns:
-    from annotator.eval.eval import load_annotator_archetype_ids, filter_ground_truth_by_archetype
-    ARCH_NAMES = ['generous', 'balanced', 'demanding']
-
-    arch_rows = []
-    for arch in ARCH_NAMES:
-        try:
-            arch_ids = load_annotator_archetype_ids(arch)
-            arch_gt = filter_ground_truth_by_archetype(
-                {'conversations': {c: ground_truth['conversations'][c] for c in all_eval_ids}},
-                arch_ids)
-        except Exception:
-            continue
-
-        matches = []
-        for cid, conv_data in arch_gt['conversations'].items():
-            hm = conv_data['key_moments']
-            ht = {m.get('annotation_type') for m in hm}
-            llm = [a for a in v5_anns.get(cid, []) if a.get('annotation_type') in ht]
-            matches.extend(match_for_effectiveness(hm, llm, iou_threshold=IOU))
-
-        if matches:
-            eff = compute_effectiveness_metrics(matches)
-            arch_rows.append({
-                '': arch.title(),
-                'N': eff['total_matched'],
-                '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
-                'Binary Kappa': f"{eff['binary_kappa']:.4f}",
-            })
-
-    if arch_rows:
-        df_full_arch = pd.DataFrame(arch_rows).set_index('')
-        print(f'Full Pipeline by Annotator Profile (generic prompt, IoU >= {IOU})\\n')
-        df_full_arch
 """))
 
     # ---- Comparison summary ----
