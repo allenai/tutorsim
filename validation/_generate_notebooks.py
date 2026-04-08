@@ -421,13 +421,9 @@ The IoU threshold for finding overlapping human moments is the same 0.3 used eve
 """))
 
     c.append(code("""
-# Human ceiling: where two annotators overlap on the same moment
-for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
-    scoped = {'conversations': {c: ground_truth['conversations'][c] for c in ids}}
-    ceil = compute_human_ceiling(scoped)
-
-    # Count contributing conversations
-    ceil_convs = 0
+def _count_ceiling_convs(ids):
+    \"\"\"Count conversations that contribute to the ceiling (have overlapping annotator pairs).\"\"\"
+    count = 0
     for cid in ids:
         moments = ground_truth['conversations'][cid]['key_moments']
         by_type = defaultdict(list)
@@ -445,11 +441,26 @@ for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_
             if found:
                 break
         if found:
-            ceil_convs += 1
+            count += 1
+    return count
 
-    print(f'{label:10s}: 3-way kappa = {ceil["three_way_kappa"]:.4f}, '
-          f'n = {ceil["overlapping_pairs"]} pairs '
-          f'from {ceil_convs}/{len(ids)} conversations')
+ceil_rows = []
+for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+    scoped = {'conversations': {c: ground_truth['conversations'][c] for c in ids}}
+    ceil = compute_human_ceiling(scoped)
+    ceil_convs = _count_ceiling_convs(ids)
+    ceil_rows.append({
+        '': label,
+        'Transcripts': len(ids),
+        'Transcripts with overlap': ceil_convs,
+        'Annotator pairs': ceil['overlapping_pairs'],
+        '3-Way Kappa': f"{ceil['three_way_kappa']:.4f}",
+        'Binary Kappa': f"{ceil['binary_kappa']:.4f}",
+    })
+
+df_ceil = pd.DataFrame(ceil_rows).set_index('')
+print('Human Inter-Annotator Agreement (IoU >= 0.3)\\n')
+df_ceil
 """))
 
     # ---- Human-detected moments ----
@@ -558,56 +569,46 @@ for arch in ARCH_NAMES:
     except Exception:
         continue
 
-    # Load both generic and calibrated annotations
-    generic_anns = v5_gold  # generic v5 prompt
+    generic_anns = v5_gold
     style_anns, _ = load_annotations(GOLD_STYLE_VERSION, f'annotations_gold_{arch}.json')
 
-    # Human ceiling for this archetype
-    arch_ceil = compute_human_ceiling(arch_gt)
+    # Compute generic and calibrated kappa on combined set
+    generic_matches, calibrated_matches = [], []
+    for cid in sorted(all_eval_ids):
+        hm = arch_gt['conversations'].get(cid, {}).get('key_moments', [])
+        if not hm:
+            continue
+        if generic_anns:
+            generic_matches.extend(match_gold_direct(hm, generic_anns.get(cid, [])))
+        if style_anns:
+            calibrated_matches.extend(match_gold_direct(hm, style_anns.get(cid, [])))
 
-    for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
-        for mode_label, anns in [('Generic', generic_anns), ('Calibrated', style_anns)]:
-            if anns is None:
-                continue
-            matches = []
-            for cid in sorted(ids):
-                hm = arch_gt['conversations'].get(cid, {}).get('key_moments', [])
-                if not hm:
-                    continue
-                matches.extend(match_gold_direct(hm, anns.get(cid, [])))
-            if matches:
-                eff = compute_effectiveness_metrics(matches)
-                arch_rows.append({
-                    'Profile': arch.title(),
-                    'Prompt': mode_label,
-                    'Split': label,
-                    'N': eff['total_matched'],
-                    '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
-                    'Binary Kappa': f"{eff['binary_kappa']:.4f}",
-                })
+    gen_eff = compute_effectiveness_metrics(generic_matches) if generic_matches else {}
+    cal_eff = compute_effectiveness_metrics(calibrated_matches) if calibrated_matches else {}
 
-if arch_rows:
-    df_arch = pd.DataFrame(arch_rows)
-    print('Human-Detected Moments by Annotator Profile')
-    print('Generic = standard v5 prompt | Calibrated = profile-specific iterated prompt\\n')
-    display(df_arch)
+    # Human ceiling
+    ceil = compute_human_ceiling(arch_gt)
+    ceil_str = f"{ceil['three_way_kappa']:.4f} ({ceil['overlapping_pairs']} pairs)"
+    if ceil['overlapping_pairs'] == 0:
+        ceil_str = 'N/A (1 annotator)'
 
-    # Also show ceiling
-    print('\\nHuman inter-annotator ceiling per profile:')
-    for arch in ARCH_NAMES:
-        try:
-            arch_ids = load_annotator_archetype_ids(arch)
-            arch_gt = filter_ground_truth_by_archetype(
-                {'conversations': {c: ground_truth['conversations'][c] for c in all_eval_ids}},
-                arch_ids)
-            ceil = compute_human_ceiling(arch_gt)
-            if ceil['overlapping_pairs'] > 0:
-                print(f'  {arch.title():12s}: 3-way kappa = {ceil[\"three_way_kappa\"]:.4f} '
-                      f'({ceil[\"overlapping_pairs\"]} pairs)')
-            else:
-                print(f'  {arch.title():12s}: N/A (single annotator)')
-        except Exception:
-            pass
+    gen_3w = gen_eff.get('three_way_kappa', 0)
+    cal_3w = cal_eff.get('three_way_kappa', 0)
+    delta = cal_3w - gen_3w
+
+    arch_rows.append({
+        '': arch.title(),
+        'N': gen_eff.get('total_matched', 0),
+        'Generic 3W Kappa': f"{gen_3w:.4f}",
+        'Calibrated 3W Kappa': f"{cal_3w:.4f}",
+        'Delta': f"{delta*100:+.1f}pp",
+        'Human Ceiling (3W)': ceil_str,
+    })
+
+df_arch = pd.DataFrame(arch_rows).set_index('')
+print('Human-Detected Moments by Annotator Profile')
+print('Generic = standard v5 prompt | Calibrated = profile-specific iterated prompt\\n')
+df_arch
 """))
 
     # ---- Full pipeline ----
