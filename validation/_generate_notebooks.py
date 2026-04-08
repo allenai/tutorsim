@@ -611,6 +611,10 @@ print('Generic = standard v5 prompt | Calibrated = profile-specific iterated pro
 df_arch
 """))
 
+    c.append(md("""
+**Interpretation**: Per-profile prompt calibration improves agreement for annotator groups whose standards diverge from the generic prompt. The generous profile shows a clear gain (+13.5pp, n=524) — the generic prompt systematically under-matches generous annotators' tendency to rate strategies as effective, and the calibrated prompt corrects this. The balanced profile shows no change, which is expected: the generic prompt was implicitly calibrated toward balanced-like standards since balanced annotators contributed the most ground truth data. The demanding profile shows a large delta, but with only 118 moments from a single annotator (Flick) across 10 conversations, this estimate is unstable and should be interpreted with caution.
+"""))
+
     # ---- Full pipeline ----
 
     c.append(md("""
