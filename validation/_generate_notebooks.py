@@ -372,14 +372,14 @@ Human experts made the same judgments on the same moments. **The question: does 
 
 We present two measurements, because they answer different questions:
 
-| | **Gold mode** | **Full pipeline** |
+| | **Human-detected moments** | **Full pipeline** |
 |---|---|---|
-| **What it is** | LLM annotates the *exact same moments* humans marked | LLM detects its own moments, then annotates those |
-| **What it measures** | Annotation quality in isolation | End-to-end pipeline quality |
+| **What it is** | LLM annotates the *exact same moments* humans marked (same turn ranges) | LLM detects its own moments, then annotates those |
+| **What it measures** | Annotation quality in isolation — no detection noise | End-to-end pipeline quality |
 | **IoU matching** | None needed (turn ranges are identical) | IoU >= 0.3 to match LLM detections to human clusters |
 | **N (moments compared)** | All human moments (~1,600) | Only moments the LLM also found (~600) |
 
-Gold mode is the clean measurement — it isolates annotation quality from detection accuracy. Full pipeline is the real-world measurement — what you'd actually get if you ran the system end to end.
+**Human-detected moments** is the clean measurement — it tells us how good the LLM is at judging effectiveness when it's looking at the right moment. **Full pipeline** is the real-world measurement — what you'd actually get if you ran the system end to end, including detection errors.
 
 ## How we measure agreement
 
@@ -442,12 +442,12 @@ for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval
           f'from {ceil_convs}/{len(ids)} conversations')
 """))
 
-    # ---- Gold mode ----
+    # ---- Human-detected moments ----
 
     c.append(md("""
-## Gold Mode: Annotation Quality in Isolation
+## Human-Detected Moments: Annotation Quality in Isolation
 
-In gold mode, the LLM annotates the *exact same moments* that humans marked — same turn ranges, same annotation types. There's no detection step and no IoU matching needed. This isolates annotation quality from detection accuracy.
+In human-detected moments, the LLM annotates the *exact same moments* that humans marked — same turn ranges, same annotation types. There's no detection step and no IoU matching needed. This isolates annotation quality from detection accuracy.
 
 Every human-annotated moment gets an LLM label, so N is the full ground truth count.
 """))
@@ -474,18 +474,19 @@ else:
         })
 
     df_gold = pd.DataFrame(rows).set_index('')
-    print(f'v5 Gold Mode: LLM labels vs human labels on identical moments\\n')
+    print(f'v5 Human-Detected Moments: LLM labels vs human labels on identical moments\\n')
     print(f'No IoU matching — turn ranges are the same.\\n')
     df_gold
 """))
 
     c.append(md("""
-### Gold Mode by Annotation Type
+### Human-Detected Moments by Annotation Type
 """))
 
     c.append(code("""
 if v5_gold:
     type_rows = []
+    # Per-type
     for ann_type in ANNOTATION_TYPES:
         matches = []
         for cid in sorted(all_eval_ids):
@@ -501,13 +502,27 @@ if v5_gold:
                 '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
                 'Binary Kappa': f"{eff['binary_kappa']:.4f}",
             })
+    # Combined row
+    all_gold_matches = []
+    for cid in sorted(all_eval_ids):
+        all_gold_matches.extend(match_gold_direct(
+            ground_truth['conversations'][cid]['key_moments'],
+            v5_gold.get(cid, [])))
+    if all_gold_matches:
+        eff_all = compute_effectiveness_metrics(all_gold_matches)
+        type_rows.append({
+            '': 'Combined',
+            'N': eff_all['total_matched'],
+            '3-Way Kappa': f"{eff_all['three_way_kappa']:.4f}",
+            'Binary Kappa': f"{eff_all['binary_kappa']:.4f}",
+        })
     df_gold_type = pd.DataFrame(type_rows).set_index('')
-    print('Gold Mode by Type (combined dev + held-out)\\n')
+    print('Human-Detected Moments by Type (combined dev + held-out)\\n')
     df_gold_type
 """))
 
     c.append(md("""
-### Gold Mode by Annotator Profile
+### Human-Detected Moments by Annotator Profile
 
 Human annotators cluster into three profiles by labeling tendency. The LLM uses **different annotation prompts calibrated to each profile** — the generous prompt was iterated to match generous annotators' standards, etc. This is not filtering the same output; each profile has its own prompt that was tuned to that group's labeling patterns.
 
@@ -568,7 +583,7 @@ for arch in ARCH_NAMES:
 
 if arch_rows:
     df_arch = pd.DataFrame(arch_rows).set_index('')
-    print('\\nGold Mode by Annotator Profile (profile-calibrated prompts)\\n')
+    print('\\nHuman-Detected Moments by Annotator Profile (profile-calibrated prompts)\\n')
     df_arch
 """))
 
@@ -633,9 +648,67 @@ if v5_anns:
                 '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
                 'Binary Kappa': f"{eff['binary_kappa']:.4f}",
             })
+    # Combined row
+    all_full_matches = []
+    for cid in sorted(all_eval_ids):
+        hm = ground_truth['conversations'][cid]['key_moments']
+        ht = {m.get('annotation_type') for m in hm}
+        llm = [a for a in v5_anns.get(cid, []) if a.get('annotation_type') in ht]
+        all_full_matches.extend(match_for_effectiveness(hm, llm, iou_threshold=IOU))
+    if all_full_matches:
+        eff_all = compute_effectiveness_metrics(all_full_matches)
+        type_rows.append({
+            '': 'Combined',
+            'N': eff_all['total_matched'],
+            '3-Way Kappa': f"{eff_all['three_way_kappa']:.4f}",
+            'Binary Kappa': f"{eff_all['binary_kappa']:.4f}",
+        })
     df_full_type = pd.DataFrame(type_rows).set_index('')
     print(f'Full Pipeline by Type (combined, IoU >= {IOU})\\n')
     df_full_type
+"""))
+
+    c.append(md("""
+### Full Pipeline by Annotator Profile
+
+Unlike the human-detected moments section above (where each profile has its own calibrated LLM prompt), the full pipeline used a **single generic prompt** for all annotations. Here we compare that same LLM output against each annotator group's ground truth separately. This answers: "how does the end-to-end pipeline's output look from each annotator group's perspective?" — it's not a claim about per-profile calibration.
+"""))
+
+    c.append(code("""
+if v5_anns:
+    from annotator.eval.eval import load_annotator_archetype_ids, filter_ground_truth_by_archetype
+    ARCH_NAMES = ['generous', 'balanced', 'demanding']
+
+    arch_rows = []
+    for arch in ARCH_NAMES:
+        try:
+            arch_ids = load_annotator_archetype_ids(arch)
+            arch_gt = filter_ground_truth_by_archetype(
+                {'conversations': {c: ground_truth['conversations'][c] for c in all_eval_ids}},
+                arch_ids)
+        except Exception:
+            continue
+
+        matches = []
+        for cid, conv_data in arch_gt['conversations'].items():
+            hm = conv_data['key_moments']
+            ht = {m.get('annotation_type') for m in hm}
+            llm = [a for a in v5_anns.get(cid, []) if a.get('annotation_type') in ht]
+            matches.extend(match_for_effectiveness(hm, llm, iou_threshold=IOU))
+
+        if matches:
+            eff = compute_effectiveness_metrics(matches)
+            arch_rows.append({
+                '': arch.title(),
+                'N': eff['total_matched'],
+                '3-Way Kappa': f"{eff['three_way_kappa']:.4f}",
+                'Binary Kappa': f"{eff['binary_kappa']:.4f}",
+            })
+
+    if arch_rows:
+        df_full_arch = pd.DataFrame(arch_rows).set_index('')
+        print(f'Full Pipeline by Annotator Profile (generic prompt, IoU >= {IOU})\\n')
+        df_full_arch
 """))
 
     # ---- Comparison summary ----
@@ -656,7 +729,7 @@ ceil = compute_human_ceiling({'conversations': {
     c: ground_truth['conversations'][c] for c in all_eval_ids
 }})
 
-# Gold mode combined
+# Human-detected moments combined
 gold_matches = []
 if v5_gold:
     for cid in sorted(all_eval_ids):
@@ -680,7 +753,7 @@ rows = [
      '3-Way Kappa': f"{ceil['three_way_kappa']:.4f}",
      'N': f"{ceil['overlapping_pairs']} pairs (from 34/195 convs)",
      'Matching': 'IoU >= 0.3 between annotators'},
-    {'': 'LLM (gold mode)',
+    {'': 'LLM (human-detected moments)',
      '3-Way Kappa': f"{gold_eff.get('three_way_kappa', 0):.4f}",
      'N': f"{gold_eff.get('total_matched', 0)} moments",
      'Matching': 'Exact (same turn ranges)'},
@@ -702,7 +775,7 @@ df_summary
 
 The confusion matrix shows which labels get confused. Disagreements at the effective/partial boundary are expected ambiguity. Effective/ineffective confusion would indicate fundamental miscalibration.
 
-Using gold mode (n is larger and there's no detection noise).
+Using human-detected moments (n is larger and there's no detection noise).
 """))
 
     c.append(code("""
@@ -724,7 +797,7 @@ if gold_matches:
                     ax=ax, vmin=0, vmax=1, cbar=False)
         ax.set_xlabel('LLM Label')
         ax.set_ylabel('Human Label')
-        ax.set_title(f'Gold Mode Confusion Matrix (n={eff["three_way_n"]})')
+        ax.set_title(f'Human-Detected Moments Confusion Matrix (n={eff["three_way_n"]})')
         plt.tight_layout()
         fig.savefig(FIGURES_DIR / 'confusion_matrices.png')
         fig.savefig(FIGURES_DIR / 'confusion_matrices.pdf')
@@ -742,7 +815,7 @@ The prompts were iterated on the development set. If held-out performance is com
     c.append(code("""
 rows = []
 for mode_label, match_fn, data_source in [
-    ('Gold mode', 'gold', v5_gold),
+    ('Human-detected moments', 'gold', v5_gold),
     ('Full pipeline', 'full', v5_anns),
 ]:
     if data_source is None:
@@ -779,7 +852,7 @@ df_splits
 
 All results use v5 prompts. IoU threshold is 0.3 everywhere it's used.
 
-**Gold mode** (clean measurement, n~1,600): The LLM's effectiveness labels agree with human labels at 3-way kappa ~0.34. This is computed on every human-annotated moment with no detection noise.
+**Human-detected moments** (clean measurement, n~1,600): The LLM's effectiveness labels agree with human labels at 3-way kappa ~0.34. This is computed on every human-annotated moment with no detection noise.
 
 **Full pipeline** (end-to-end, n~600): The LLM detects and labels moments, achieving 3-way kappa ~0.32 on the subset of moments both the LLM and humans found.
 
