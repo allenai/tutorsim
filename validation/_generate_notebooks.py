@@ -2,7 +2,7 @@
 """Generate validation notebooks for the synthetic annotator pipeline.
 
 All results use v5 prompts. All IoU matching uses the same 0.3 threshold.
-Dev/held-out splits are explicit throughout.
+Train/held-out splits are explicit throughout.
 
 Usage:
     python validation/_generate_notebooks.py
@@ -108,7 +108,7 @@ if v5_det is None:
     raise FileNotFoundError(f'No detections.json for {VERSION}')
 
 all_eval_ids = set(ground_truth['conversations'].keys()) & set(v5_det.keys()) - EXAMPLE_CONV_IDS
-dev_ids = all_eval_ids & _v4_ids
+train_ids = all_eval_ids & _v4_ids
 ho_ids = all_eval_ids - _v4_ids
 
 # Type-filter LLM detections per conversation
@@ -121,7 +121,7 @@ for cid in all_eval_ids:
 
 print(f'Pipeline version: {VERSION} (all results use v5 prompts)')
 print(f'IoU threshold:    {IOU} (same for detection, effectiveness matching, and ceiling)')
-print(f'Dev set:          {len(dev_ids)} conversations (used during prompt iteration)')
+print(f'Train set:          {len(train_ids)} conversations (used during prompt iteration)')
 print(f'Held-out set:     {len(ho_ids)} conversations (prompts never saw these)')
 print(f'Total:            {len(all_eval_ids)} conversations')
 """
@@ -158,9 +158,9 @@ Our dataset contains **201 tutoring transcripts** with **291 annotation passes**
 
 We use **Intersection over Union (IoU)**: if a human marked turns 45-62 and the LLM marked turns 43-60, IoU measures how much those ranges overlap relative to their combined span. We count a **match** when IoU >= 0.3 (at least 30% overlap). Before comparing, we merge overlapping human annotations into **clusters** — when multiple annotators flag the same event with slightly different boundaries.
 
-## Dev vs. held-out
+## Train vs. held-out
 
-- **Development** (98 transcripts): the prompts were iterated using error examples from these
+- **Train** (98 transcripts): the prompts were iterated using error examples from these
 - **Held-out** (97 transcripts): the prompts have never seen these
 
 All results use **v5 prompts** (our best and final detection prompts).
@@ -183,7 +183,7 @@ All results use **v5 prompts** (our best and final detection prompts).
 
     c.append(code("""
 results = []
-for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
     gt_sub = {c: gt_by_conv[c] for c in ids}
     llm_sub = {c: v5_det.get(c, []) for c in ids}
     m = compute_detection_metrics(gt_sub, llm_sub, iou_threshold=IOU)
@@ -209,27 +209,37 @@ Scaffolding/rigor moments and rapport moments may have different detection diffi
 """))
 
     c.append(code("""
+gt_all = {c: gt_by_conv[c] for c in all_eval_ids}
+llm_all = {c: v5_det.get(c, []) for c in all_eval_ids}
+
 type_results = []
 for ann_type in ANNOTATION_TYPES:
-    for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
-        gt_sub = {c: gt_by_conv[c] for c in ids}
-        llm_sub = {c: v5_det.get(c, []) for c in ids}
-        gt_typed = filter_moments_by_type(gt_sub, ann_type)
-        llm_typed = filter_moments_by_type(llm_sub, ann_type)
-        m = compute_detection_metrics(gt_typed, llm_typed, iou_threshold=IOU)
-        if m['total_human_clusters'] > 0:
-            type_results.append({
-                'Type': ann_type.title(),
-                'Split': label,
-                'Clusters': m['total_human_clusters'],
-                'LLM Dets': m['total_llm_annotations'],
-                'Recall': f"{m['cluster_recall']:.1%}",
-                'Precision': f"{m['moment_precision']:.1%}",
-                'Mean IoU': f"{m['mean_iou']:.3f}",
-            })
+    gt_typed = filter_moments_by_type(gt_all, ann_type)
+    llm_typed = filter_moments_by_type(llm_all, ann_type)
+    m = compute_detection_metrics(gt_typed, llm_typed, iou_threshold=IOU)
+    if m['total_human_clusters'] > 0:
+        type_results.append({
+            '': ann_type.title(),
+            'Clusters': m['total_human_clusters'],
+            'LLM Dets': m['total_llm_annotations'],
+            'Recall': f"{m['cluster_recall']:.1%}",
+            'Precision': f"{m['moment_precision']:.1%}",
+            'Mean IoU': f"{m['mean_iou']:.3f}",
+        })
 
-df_type = pd.DataFrame(type_results)
-print(f'Detection by Annotation Type (IoU >= {IOU})\\n')
+# Combined row
+m_all = compute_detection_metrics(gt_all, llm_all, iou_threshold=IOU)
+type_results.append({
+    '': 'Combined',
+    'Clusters': m_all['total_human_clusters'],
+    'LLM Dets': m_all['total_llm_annotations'],
+    'Recall': f"{m_all['cluster_recall']:.1%}",
+    'Precision': f"{m_all['moment_precision']:.1%}",
+    'Mean IoU': f"{m_all['mean_iou']:.3f}",
+})
+
+df_type = pd.DataFrame(type_results).set_index('')
+print(f'Detection by Annotation Type (IoU >= {IOU}, all {len(all_eval_ids)} transcripts)\\n')
 df_type
 """))
 
@@ -288,8 +298,8 @@ Five conversations shown, spanning low to high recall.
 """))
 
     c.append(code("""
-gt_dev = {c: gt_by_conv[c] for c in dev_ids}
-llm_dev = {c: v5_det.get(c, []) for c in dev_ids}
+gt_dev = {c: gt_by_conv[c] for c in train_ids}
+llm_dev = {c: v5_det.get(c, []) for c in train_ids}
 metrics_dev = compute_detection_metrics(gt_dev, llm_dev, iou_threshold=IOU)
 per_conv = metrics_dev['per_conversation']
 with_clusters = {cid: v for cid, v in per_conv.items() if v['clusters'] > 0}
@@ -389,7 +399,7 @@ We use **Cohen's weighted kappa** — a standard statistic that measures agreeme
 
 Our dataset contains **201 tutoring transcripts** with **291 annotation passes** producing **1,688 individual moment annotations** from 9 expert annotators. An annotation pass is one annotator labeling one transcript for one type (scaffolding or rapport). Most transcripts were annotated once; 54 received multiple passes. Six transcripts used as few-shot examples are excluded, leaving **195 transcripts** for evaluation.
 
-- **Development** (98 transcripts): prompts were iterated using error examples from these
+- **Train** (98 transcripts): prompts were iterated using error examples from these
 - **Held-out** (97 transcripts): prompts have never seen these
 
 All results use **v5 prompts**.
@@ -412,7 +422,7 @@ The IoU threshold for finding overlapping human moments is the same 0.3 used eve
 
     c.append(code("""
 # Human ceiling: where two annotators overlap on the same moment
-for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
     scoped = {'conversations': {c: ground_truth['conversations'][c] for c in ids}}
     ceil = compute_human_ceiling(scoped)
 
@@ -458,7 +468,7 @@ if v5_gold is None:
     print(f'No gold annotations found for {GOLD_VERSION}')
 else:
     rows = []
-    for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+    for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
         matches = []
         for cid in sorted(ids):
             hm = ground_truth['conversations'][cid]['key_moments']
@@ -555,7 +565,7 @@ for arch in ARCH_NAMES:
     # Human ceiling for this archetype
     arch_ceil = compute_human_ceiling(arch_gt)
 
-    for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+    for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
         for mode_label, anns in [('Generic', generic_anns), ('Calibrated', style_anns)]:
             if anns is None:
                 continue
@@ -618,7 +628,7 @@ if v5_anns is None:
     print(f'No annotations found for {VERSION}')
 else:
     rows = []
-    for label, ids in [('Dev', dev_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
+    for label, ids in [('Train', train_ids), ('Held-out', ho_ids), ('Combined', all_eval_ids)]:
         matches = []
         for cid in sorted(ids):
             hm = ground_truth['conversations'][cid]['key_moments']
@@ -774,12 +784,12 @@ if gold_matches:
         plt.show()
 """))
 
-    # ---- Dev vs held-out ----
+    # ---- Train vs held-out ----
 
     c.append(md("""
-## Dev vs. Held-Out: Does the Pipeline Generalize?
+## Train vs. Held-Out: Does the Pipeline Generalize?
 
-The prompts were iterated on the development set. If held-out performance is comparable, the prompts generalize to unseen data.
+The prompts were iterated on the train set. If held-out performance is comparable, the prompts generalize to unseen data.
 """))
 
     c.append(code("""
@@ -790,7 +800,7 @@ for mode_label, match_fn, data_source in [
 ]:
     if data_source is None:
         continue
-    for split, ids in [('Dev', dev_ids), ('Held-out', ho_ids)]:
+    for split, ids in [('Train', train_ids), ('Held-out', ho_ids)]:
         matches = []
         for cid in sorted(ids):
             hm = ground_truth['conversations'][cid]['key_moments']
@@ -811,7 +821,7 @@ for mode_label, match_fn, data_source in [
         })
 
 df_splits = pd.DataFrame(rows)
-print('Dev vs. Held-Out Comparison (v5 prompts)\\n')
+print('Train vs. Held-Out Comparison (v5 prompts)\\n')
 df_splits
 """))
 
@@ -828,7 +838,7 @@ All results use v5 prompts. IoU threshold is 0.3 everywhere it's used.
 
 **Human ceiling** (~0.22, n=212 pairs from 34 conversations): Humans agree with each other at a lower rate than the LLM agrees with humans — but this ceiling is estimated from a small subset of conversations where two annotators overlapped, so the comparison is approximate.
 
-**Dev vs. held-out**: Performance is comparable across both splits in both modes, indicating the prompts generalize to unseen conversations.
+**Train vs. held-out**: Performance is comparable across both splits in both modes, indicating the prompts generalize to unseen conversations.
 """))
 
     nb.cells = c
