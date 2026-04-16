@@ -14,9 +14,9 @@ Both `p1/scaffolding.md` and `p1/rapport.md` now ask the detector to identify a 
 - New prompt section: "Cut Point Guidance" defining what makes a good cut point
 - Hard constraint: must be a STUDENT turn within [turn_start - 2, turn_end]
 
-### Annotation (p2): No changes
+### Annotation (p2): Removed
 
-v5 p2 prompts are identical to v4 p2 (copied, not modified).
+v5 p2 prompts were originally identical to v4 p2. They have been removed because the canonical annotation prompts now live in `profiles/{balanced,generous,demanding}/p2/`, which were iterated independently and are significantly more evolved. When running with `--style`, the pipeline uses profile prompts directly. The v4/p2 base prompts serve as the fallback for non-styled runs.
 
 ### File extension change
 
