@@ -1,6 +1,6 @@
 # Project Status
 
-*Last updated: 2026-03-31*
+*Last updated: 2026-04-16*
 
 ## Current State
 
@@ -8,7 +8,7 @@
 
 - `annotator/` -- 3-pass annotation pipeline (detect, annotate, label)
 - `benchmark/` -- tutor evaluation pipeline (detect, scenarios, exchange, annotate, score)
-- `prompts/` -- all prompt templates (annotator v4/v5, profiles, labeller, benchmark)
+- `prompts/` -- all prompt templates (annotator v4 base, v5 detection, profiles, labeller, benchmark)
 - `config.yaml` -- unified config (model profiles, benchmark settings, storage)
 - `data/` -- private student data (gitignored)
 - `results/` -- all pipeline outputs (gitignored)
@@ -55,9 +55,50 @@ The benchmark is now fully ground-truth-free. It uses synthetic detection to fin
 - **Scores are per-style, not composite.** No weighted aggregation across styles. Each annotator perspective is a separate result.
 - **Storage layer is Factor IV compliant.** Backend ABC pattern, env var overrides for all paths. `STORAGE_BACKEND=s3` for production, `local` for development.
 
+### Prompt Organization (cleaned up 2026-04-16)
+
+- `v4/p1/` + `v4/p2/` -- base detection + annotation prompts (fallback for non-styled runs)
+- `v5/p1/` -- detection with cut point guidance (for benchmark). No p2 -- annotation prompts live in profiles.
+- `profiles/{balanced,generous,demanding}/p2/` -- **canonical annotation prompts** (most evolved, used by all `--style` runs)
+- `profiles/{balanced,generous,demanding}/p1/` -- per-style detection prompts
+
+### Current Gold Results (`v5_gold/`)
+
+All regenerated 2026-04-16 with updated profile prompts (inappropriate-timing example added):
+
+| Style | Convs | Annotations | Effective | Partial | Ineffective |
+|-------|-------|-------------|-----------|---------|-------------|
+| No style | 201 | 1688 | 21.6% | 38.7% | 39.3% |
+| Generous | 110 | 756 | 40.7% | 28.0% | 31.2% |
+| Balanced | 161 | 1176 | 43.3% | 28.1% | 28.6% |
+| Demanding | 16 | 172 | 20.3% | 26.2% | 53.5% |
+
+Gemini balanced results also regenerated in `annotator_profiles/balanced/`.
+
 ---
 
 ## Completed Work
+
+### 2026-04-16: Qualitative Review + Prompt Fix + Full Regeneration
+
+**Qualitative review** of "Human vs AI annotation comparison" PDF (external expert comparison of human vs AI annotations). The PDF compared against v3_gemini results. Key findings:
+
+1. **AI never evaluated whether timing was appropriate for rapport** -- 0% of v3_gemini situation fields flagged bad timing, vs human annotators doing this routinely
+2. **AI judged rapport by strategy quality, not student engagement** -- v3 prompt literally said "focus on the quality of the tutor's strategy"
+3. **Human label-narrative inconsistency** -- humans sometimes labeled "effective" but wrote narratives describing partial effectiveness. Strengthens case for AI annotation.
+
+**Prompt changes** (applied to all 3 profiles + v4 base):
+- Added "poorly timed rapport" example showing tutor interrupting focused student mid-problem. Based on real human annotator patterns (Padgett, Mann, Flick, Forbes). Calibrated per profile style.
+- Strengthened situation field instruction to explicitly require timing evaluation before describing context.
+
+**Results after prompt fix** (balanced profile, anthropic):
+- Situation mentions timing: 25.6% -> 89.6%
+- Situation flags BAD timing: 0.0% -> 1.4%
+- Rapport ineffective rate: 16.8% -> 17.9% (slight increase, as intended)
+
+**Cleanup**: Deleted stale `v5/p2/` prompts (duplicated v4 base, never iterated). Archived duplicate result directories. Fixed version naming. All `v5_gold/` results regenerated with updated prompts.
+
+### 2026-03-31: v5 Detection Prompt Iteration
 
 ### 2026-03-31: v5 Detection Prompt Iteration
 
