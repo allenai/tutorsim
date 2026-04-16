@@ -57,7 +57,7 @@ When evaluating the tutor's approach, consider whether the tutor created the con
 
 For the flagged moment, provide:
 
-- **Situation**: Why is this a place where rapport building should (or should not have) taken place? What is the student's emotional or social state? What makes this moment notable?
+- **Situation**: First, evaluate whether this was an appropriate moment for rapport building. Consider where you are in the session flow (opening, mid-task, transition, closing) and what the student is currently doing (on-task, idle, struggling, distracted). If the timing was poor -- for example, the tutor interrupted a student who was actively engaged in problem-solving -- say so directly. Then describe the student's emotional or social state and what makes this moment notable.
 - **Action**: What strategy did the tutor use for rapport building? Describe concretely what the tutor said or did. If the tutor missed a rapport opportunity, describe what happened instead.
 - **Result**: Was the tutor's approach effective, partially effective, or ineffective for building a productive learning relationship? Make a clear overall judgment -- do not simply list pros and cons. If the fundamental approach was misguided (e.g., praising innate ability, displacing learning time, not listening to the student), it is ineffective even if some surface-level elements were positive. Incidental positives do not upgrade an ineffective approach: the fact that a tutor showed relational continuity, noticed something about the student's environment, or included a warm tone does not make a misguided core action 'partially effective.' Ask yourself: was the tutor's *primary action* in this moment pedagogically sound? If not, the rating is ineffective.
 
@@ -124,6 +124,18 @@ Focus your analysis on whether the tutor's approach served the student's learnin
   "situation": "The student mentioned an upcoming medical appointment. The tutor already knew about it from a previous session, demonstrating relational continuity.",
   "action": "The tutor acknowledged the appointment and confirmed the date, showing they remembered. However, the tutor then spent 15 turns discussing scheduling logistics -- which days to reschedule tutoring, whether Monday or Tuesday would work -- rather than asking how the student felt about the appointment.",
   "result": "The approach was ineffective. While the tutor demonstrated relational continuity by remembering the appointment, this incidental positive does not redeem the core action: spending the moment on adult logistics rather than addressing the student's emotional experience. The student needed to feel that the tutor cared about them, not about the tutoring schedule. The relational continuity was a foundation the tutor failed to build on -- knowing about the appointment is not the same as using that knowledge to connect with the student."
+}
+```
+
+### Example 6: Poorly timed rapport -- student actively on task
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 502,
+  "turn_end": 507,
+  "situation": "The student is in the middle of working through a math solution, focused and on task. They are not showing signs of distraction, boredom, or frustration. This is not an appropriate time for rapport building.",
+  "action": "The tutor, inspired by the topic of the math problem, asked the student about their personal likes and dislikes, interrupting the student's problem-solving flow.",
+  "result": "The approach was ineffective. The tutor interrupted a focused student to initiate a social tangent that was neither needed nor wanted in that moment. The student answered briefly and redirected back to the solution on their own -- a clear signal that the rapport move was unwelcome. Timing is not incidental to rapport; it is fundamental. A well-intentioned question at the wrong moment teaches the student that the tutor does not respect their focus. This question belonged at a transition point, not mid-problem."
 }
 ```
 

@@ -54,7 +54,7 @@ Also actively consider the session trajectory. Before writing your result, check
 
 For the flagged moment, provide:
 
-- **Situation**: Why is this a place where rapport building should (or should not have) taken place? What is the student's emotional or social state? What makes this moment notable?
+- **Situation**: First, evaluate whether this was an appropriate moment for rapport building. Consider where you are in the session flow (opening, mid-task, transition, closing) and what the student is currently doing (on-task, idle, struggling, distracted). If the timing was poor -- for example, the tutor interrupted a student who was actively engaged in problem-solving -- say so directly. Then describe the student's emotional or social state and what makes this moment notable.
 - **Action**: What strategy did the tutor use for rapport building? Describe concretely what the tutor said or did. If the tutor missed a rapport opportunity, describe what happened instead.
 - **Result**: How well did the tutor's rapport strategy work? Assess the net impact on the student-tutor relationship. What did the tutor's approach accomplish? What were its weaknesses or costs? Was the approach appropriate for this student and this moment? Did the rapport support the learning or displace it? Be honest about what you observe: if the impact was clearly positive, say so; if it was ambiguous or unclear, say that; if the net impact was negative, say that — even if some individual elements were reasonable. Avoid speculating about alternatives unless the tutor's approach actively caused harm or the student visibly needed something different.
 
@@ -119,6 +119,18 @@ Focus your analysis on the specific strengths and weaknesses of what the tutor d
   "situation": "Mid-lesson. The student has just confirmed understanding of a concept. The tutor and student are working through problems.",
   "action": "The tutor said 'Perfect' after the student confirmed understanding with 'Yeah,' then continued with the next instructional step.",
   "result": "The tutor's acknowledgment was brief and routine — a standard affirmation that functions as normal instructional flow rather than a distinct rapport-building move. The student showed no visible reaction beyond continuing to listen. While the exchange was pleasant and not harmful, its impact on the student-tutor relationship is indiscernible from ordinary instruction."
+}
+```
+
+### Example 6: Poorly timed rapport -- student actively on task
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 502,
+  "turn_end": 507,
+  "situation": "The student is in the middle of working through a math solution, focused and on task. They are not showing signs of distraction, boredom, or frustration. This is not an appropriate time for rapport building.",
+  "action": "The tutor, inspired by the topic of the math problem, asked the student about their personal likes and dislikes, interrupting the student's problem-solving flow.",
+  "result": "The tutor's interest was genuine, but the timing undermined the interaction. The student answered briefly and redirected back to the math on their own, signaling they were in problem-solving mode. The rapport move interrupted focus without producing meaningful connection. This question would have landed better at a natural transition -- between problems or at session close -- where it would not displace the student's working momentum."
 }
 ```
 

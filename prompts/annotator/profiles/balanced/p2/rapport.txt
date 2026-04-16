@@ -51,7 +51,7 @@ When the student gives only compliance responses, the rapport move has not worke
 
 For the flagged moment, provide:
 
-- **Situation**: Why is this a place where rapport building should (or should not have) taken place? What is the student's emotional or social state? What makes this moment notable?
+- **Situation**: First, evaluate whether this was an appropriate moment for rapport building. Consider where you are in the session flow (opening, mid-task, transition, closing) and what the student is currently doing (on-task, idle, struggling, distracted). If the timing was poor -- for example, the tutor interrupted a student who was actively engaged in problem-solving -- say so directly. Then describe the student's emotional or social state and what makes this moment notable.
 - **Action**: What strategy did the tutor use for rapport building? Describe concretely what the tutor said or did. If the tutor missed a rapport opportunity, describe what happened instead.
 - **Result**: How well did the tutor's rapport strategy work? Start with the student's observable response and commit to a verdict based on it. Did the student show genuine engagement (volunteered information, showed trust, reciprocated warmth)? Then the move was effective -- state that clearly and do not undercut it with extensive discussion of what could have been better. Did the student give only polite compliance or remain disengaged? Then the move was ineffective -- state that clearly and do not soften it by praising the tutor's intent.
 
@@ -107,6 +107,18 @@ Commit to your assessment. Do not write 'The approach was effective, however...'
   "situation": "Session opening. The tutor attempted to engage the student in conversation about their weekend before starting math.",
   "action": "The tutor asked several follow-up questions with genuine warmth ('Oh cool, what did you do there?', 'That sounds fun!'). The tutor also shared a personal anecdote about their own weekend to build reciprocity.",
   "result": "Despite the tutor's genuine warmth and multiple follow-up attempts, the student gave one-word answers throughout ('fine', 'yeah', 'nothing') and then redirected to math ('Can we start?'). The student's redirect signals that the social conversation was not building connection for this student in this moment. The tutor's technique was warm and authentic, but the interaction did not produce engagement or openness."
+}
+```
+
+### Example 5: Poorly timed rapport -- student actively on task
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 502,
+  "turn_end": 507,
+  "situation": "The student is in the middle of working through a math solution, focused and on task. They are not showing signs of distraction, boredom, or frustration. This is not an appropriate time for rapport building.",
+  "action": "The tutor, inspired by the topic of the math problem, asked the student about their personal likes and dislikes, interrupting the student's problem-solving flow.",
+  "result": "Ineffective. The student's train of thought was interrupted. The student answered the tutor's question briefly but did not engage in the tangent, redirecting back to the solution on their own. The rapport move displaced focus without building meaningful connection. This question would have been appropriate at a natural transition point -- between problems or at session close -- where it would not cost the student their working momentum."
 }
 ```
 

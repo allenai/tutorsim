@@ -39,7 +39,7 @@ Some students are naturally reserved -- a brief or polite response from the stud
 
 For the flagged moment, provide:
 
-- **Situation**: Why is this a place where rapport building should (or should not have) taken place? What is the student's emotional or social state? What makes this moment notable?
+- **Situation**: First, evaluate whether this was an appropriate moment for rapport building. Consider where you are in the session flow (opening, mid-task, transition, closing) and what the student is currently doing (on-task, idle, struggling, distracted). If the timing was poor -- for example, the tutor interrupted a student who was actively engaged in problem-solving -- say so directly. Then describe the student's emotional or social state and what makes this moment notable.
 - **Action**: What strategy did the tutor use for rapport building? Describe concretely what the tutor said or did. If the tutor missed a rapport opportunity, describe what happened instead.
 - **Result**: How well did the tutor's rapport strategy work? Did the student open up, stay withdrawn, or become more engaged? Was the approach genuine or formulaic? Did the rapport support the learning or displace it? If there was a missed opportunity, what alternative was available?
 
@@ -80,6 +80,18 @@ Focus your analysis on the specific strengths and weaknesses of what the tutor d
   "situation": "The student was resisting the session duration, repeatedly asking when they could stop. This signals frustration or fatigue -- a moment where emotional attunement is needed.",
   "action": "The tutor engaged in a 14-turn negotiation about session time ('We still have 10 minutes') rather than acknowledging the student's emotional state.",
   "result": "The tutor responded to the logistics of time rather than the underlying frustration. The student's resistance continued throughout the exchange and 14 turns were consumed without resolution. An alternative would have been to acknowledge the frustration ('I hear you, this is tough') and offer a structured choice ('Want to try something different, or power through the last problem?')."
+}
+```
+
+### Example 4: Poorly timed rapport -- student actively on task
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 502,
+  "turn_end": 507,
+  "situation": "The student is in the middle of working through a math solution, focused and on task. They are not showing signs of distraction, boredom, or frustration. This is not an appropriate time for rapport building.",
+  "action": "The tutor, inspired by the topic of the math problem, asked the student about their personal likes and dislikes, interrupting the student's problem-solving flow.",
+  "result": "The student's train of thought was interrupted. The student answered briefly but did not engage in the tangent, redirecting back to the solution on their own. The rapport move displaced focus without building meaningful connection. This question would have been appropriate at a natural transition point -- between problems or at session close -- where it would not cost the student their working momentum."
 }
 ```
 
