@@ -20,7 +20,7 @@ from .client import (
 )
 from .config import get_phase_config
 from .storage import load_all_transcripts, save_annotator_result, get_annotator_result_path
-from .utils import format_transcript, TRANSCRIPTS_DIR, RESULTS_DIR
+from .utils import format_transcript
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "annotator"
 

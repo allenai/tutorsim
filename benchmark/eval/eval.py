@@ -16,13 +16,10 @@ Usage:
 import argparse
 import json
 from collections import Counter, defaultdict
-from pathlib import Path
 
 from annotator.core.storage import (
     load_benchmark_result, save_benchmark_result, list_benchmark_result_files,
 )
-
-BENCHMARK_RESULTS_DIR = Path(__file__).parent.parent.parent / "results" / "benchmark"
 
 
 def load_benchmark_data(version: str, profile: str) -> dict:

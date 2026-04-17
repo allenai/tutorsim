@@ -28,7 +28,7 @@ from .storage import (
     load_all_transcripts, load_annotator_result, save_annotator_result,
     annotator_result_exists, get_annotator_result_path,
 )
-from .utils import format_excerpt, TRANSCRIPTS_DIR, RESULTS_DIR, load_ground_truth
+from .utils import format_excerpt, load_ground_truth
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "annotator"
 

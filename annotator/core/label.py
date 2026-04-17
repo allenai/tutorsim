@@ -26,8 +26,6 @@ from .storage import (
     load_annotator_result, save_annotator_result, annotator_result_exists,
     get_annotator_result_path,
 )
-from .utils import RESULTS_DIR
-
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "annotator" / "labeller"
 
 

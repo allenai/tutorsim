@@ -28,6 +28,7 @@ def local_storage(temp_data, monkeypatch):
     """Configure storage for local backend against temp dir."""
     monkeypatch.setenv("STORAGE_BACKEND", "local")
     monkeypatch.setenv("STORAGE_ROOT", str(temp_data))
+    monkeypatch.setenv("STORAGE_GROUND_TRUTH", "data/ground_truth")
     import annotator.core.config as cfg_mod
     cfg_mod._loaded_config = None
     import annotator.core.storage as st

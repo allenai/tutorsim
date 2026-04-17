@@ -13,10 +13,9 @@ Usage:
 
 import argparse
 import json
-import html
 from pathlib import Path
 
-from ..core.utils import DATA_DIR, RESULTS_DIR, TRANSCRIPTS_DIR, load_ground_truth
+from ..core.utils import load_ground_truth
 from ..core.storage import (
     load_annotator_result, annotator_result_exists, load_transcript,
     save_annotator_result, get_annotator_result_path,
@@ -107,10 +106,6 @@ def load_data(version: str, gold: bool = False):
         })
 
     return conversations
-
-
-def escape(text: str) -> str:
-    return html.escape(str(text)) if text else ""
 
 
 def build_html(conversations: list, version: str) -> str:

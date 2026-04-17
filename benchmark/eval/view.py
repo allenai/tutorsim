@@ -14,15 +14,11 @@ Usage:
 import argparse
 import json
 import html
-from pathlib import Path
 
 from annotator.core.storage import (
     load_transcript, load_benchmark_result,
     list_benchmark_result_files, get_benchmark_result_path,
 )
-
-REPO_ROOT = Path(__file__).parent.parent.parent
-BENCHMARK_RESULTS_DIR = REPO_ROOT / "results" / "benchmark"
 
 
 def load_data(version: str, profile: str):
