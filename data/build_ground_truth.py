@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh ground truth files from consolidated, preserving existing labels.
+"""Build ground truth files from consolidated annotations.
 
 For each conversation in data/raw/consolidated/:
   - Reuse strategy_label for moments unchanged from the existing ground_truth file
@@ -10,9 +10,9 @@ For each conversation in data/raw/consolidated/:
 Also writes transcript files for any conversations in consolidated that are missing one.
 
 Usage:
-    python data/refresh_ground_truth.py
-    python data/refresh_ground_truth.py --dry-run
-    python data/refresh_ground_truth.py --labeller v2
+    python data/build_ground_truth.py
+    python data/build_ground_truth.py --dry-run
+    python data/build_ground_truth.py --labeller v2
 """
 import argparse
 import hashlib

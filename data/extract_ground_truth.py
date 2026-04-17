@@ -5,7 +5,7 @@ Reads consolidated JSON files from data/consolidated/ and produces
 a single data/raw/ground_truth.json with structured labels for evaluation.
 
 Note: The pipeline reads per-conversation files from data/ground_truth*/
-produced by refresh_ground_truth.py. This script produces a legacy single-file
+produced by build_ground_truth.py. This script produces a legacy single-file
 format. Both now use classify_v2.txt for consistent labelling.
 
 Usage:

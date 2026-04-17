@@ -81,11 +81,11 @@ Gemini balanced results also regenerated in `annotator_profiles/balanced/`.
 
 ### 2026-04-17: Labeller V2 — Unified Prompt + Outcome-Anchored Criteria
 
-**Problem**: Found 4 divergent labeller prompts with different criteria and different inputs. Ground truth script (`refresh_ground_truth.py`) only passed result text; pipeline labeller (`classify.txt`) passed situation+action+result. The v1 labeller overused "partial" for anything with hedged language (~690/2115 = 32.6%), masking real disagreement.
+**Problem**: Found 4 divergent labeller prompts with different criteria and different inputs. Ground truth script (`build_ground_truth.py`) only passed result text; pipeline labeller (`classify.txt`) passed situation+action+result. The v1 labeller overused "partial" for anything with hedged language (~690/2115 = 32.6%), masking real disagreement.
 
 **Changes**:
 - New `classify_v2.txt` prompt: outcome-anchored criteria, all 4 fields (annotation_type, situation, action, result), explicit guidance that situation context is not evidence, specific partial signals
-- `refresh_ground_truth.py`, `extract_ground_truth.py`, `label.py` all load the shared prompt
+- `build_ground_truth.py`, `extract_ground_truth.py`, `label.py` all load the shared prompt
 - Ground truth versioned: `data/ground_truth_v1/` (baseline), `data/ground_truth_v2/` (v2 labeller)
 
 **Ground truth label shifts (v1 -> v2)**:

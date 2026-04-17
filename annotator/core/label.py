@@ -1,7 +1,7 @@
 """
 Pass 3 -- Label annotations for effectiveness.
 
-Uses classify_v2.txt -- the same prompt used by data/refresh_ground_truth.py
+Uses classify_v2.txt -- the same prompt used by data/build_ground_truth.py
 for ground truth labelling. This ensures labels are on a consistent scale
 regardless of which model produced the annotations.
 
