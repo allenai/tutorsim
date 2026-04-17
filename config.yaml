@@ -11,7 +11,7 @@ storage:
     transcripts:
       - data/transcripts
     ground_truth:
-      - data/ground_truth
+      - data/ground_truth_v1
     annotator_results: results/annotator
     benchmark_results: results/benchmark
 
