@@ -19,9 +19,10 @@ from pathlib import Path
 
 from ..core.client import ModelClient
 from ..core.config import get_phase_config, load_config
+from ..core.storage import load_annotator_result, save_annotator_result
 from ..core.utils import (
     compute_iou, merge_overlapping_ranges, load_transcripts, get_excerpt,
-    load_ground_truth, REPO_ROOT, DATA_DIR, RESULTS_DIR, IOU_THRESHOLD,
+    load_ground_truth, REPO_ROOT, DATA_DIR, IOU_THRESHOLD,
     EXAMPLE_CONV_IDS,
 )
 
@@ -34,11 +35,9 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
     """Collect detection errors and correct matches for comprehensive analysis."""
     gt = load_ground_truth()
 
-    det_path = RESULTS_DIR / version / "detections.json"
-    if not det_path.exists():
-        raise FileNotFoundError(f"No detections at {det_path}")
-    with open(det_path, "r", encoding="utf-8") as f:
-        det_data = json.load(f)
+    det_data = load_annotator_result(version, "detections.json")
+    if det_data is None:
+        raise FileNotFoundError(f"No detections found for version {version}")
 
     complete_misses = []
     near_misses = []
@@ -184,20 +183,20 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
         gt = ground_truth
 
     # Try style-specific gold annotations, then gold, then regular
-    version_dir = RESULTS_DIR / version
     style_suffix = f"_{annotator_style}" if annotator_style else ""
-    ann_path = version_dir / f"annotations_gold{style_suffix}.json"
-    if not ann_path.exists():
-        ann_path = version_dir / "annotations_gold.json"
-    if not ann_path.exists():
-        ann_path = version_dir / f"annotations{style_suffix}.json"
-    if not ann_path.exists():
-        ann_path = version_dir / "annotations.json"
-    if not ann_path.exists():
-        raise FileNotFoundError(f"No annotations in {version_dir}")
-
-    with open(ann_path, "r", encoding="utf-8") as f:
-        llm_data = json.load(f)
+    candidates = [
+        f"annotations_gold{style_suffix}.json",
+        "annotations_gold.json",
+        f"annotations{style_suffix}.json",
+        "annotations.json",
+    ]
+    llm_data = None
+    for candidate in candidates:
+        llm_data = load_annotator_result(version, candidate)
+        if llm_data is not None:
+            break
+    if llm_data is None:
+        raise FileNotFoundError(f"No annotations found for version {version}")
 
     agreements = []
     disagreements = []
@@ -307,12 +306,9 @@ def load_eval_metrics(version, mode, ann_type=None):
 
     Returns a dict with key metrics, or empty dict if not found.
     """
-    eval_path = RESULTS_DIR / version / f"eval_{mode}.json"
-    if not eval_path.exists():
+    data = load_annotator_result(version, f"eval_{mode}.json")
+    if data is None:
         return {}
-
-    with open(eval_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
 
     # If requesting per-type metrics
     if ann_type and "by_type" in data:
@@ -564,13 +560,10 @@ def main():
         advice = {"raw_text": response.text}
 
     # Save to results directory
-    output_dir = RESULTS_DIR / args.version
-    output_dir.mkdir(parents=True, exist_ok=True)
     style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
-    output_path = output_dir / f"advisor_{args.pass_type}_{args.type}{style_suffix}.json"
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(advice, f, indent=2, ensure_ascii=False)
-    print(f"\nSaved: {output_path}")
+    filename = f"advisor_{args.pass_type}_{args.type}{style_suffix}.json"
+    save_annotator_result(args.version, filename, advice)
+    print(f"\nSaved: {filename} (version: {args.version})")
 
     # Pretty-print summary
     print(f"\n{'=' * 70}")
@@ -597,7 +590,7 @@ def main():
     if "overall_assessment" in advice:
         print(f"\n  OVERALL: {advice['overall_assessment']}".encode('ascii', 'replace').decode())
 
-    print(f"\n  Full output: {output_path}")
+    print(f"\n  Full output: {filename} (version: {args.version})")
 
 
 # ===================================================================
@@ -763,13 +756,10 @@ def analyze_main():
     # Load data
     gt = load_ground_truth()
 
-    det_path = RESULTS_DIR / args.version / "detections.json"
-    if not det_path.exists():
-        print(f"ERROR: No detections found at {det_path}")
+    det_data = load_annotator_result(args.version, "detections.json")
+    if det_data is None:
+        print(f"ERROR: No detections found for version {args.version}")
         return
-
-    with open(det_path, "r", encoding="utf-8") as f:
-        det_data = json.load(f)
 
     transcripts = load_transcripts()
 
