@@ -14,8 +14,12 @@ Usage:
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from annotator.core.label import JUNK_TEXTS
 
 RAW_DIR = Path(__file__).parent / "raw"
 CONSOLIDATED_DIR = RAW_DIR / "consolidated"
@@ -58,7 +62,7 @@ def classify_effectiveness(annotations: list[dict]) -> list[str]:
         result_text = ann.get("result", "")
         # Skip empty/garbage texts
         stripped = result_text.strip().lower()
-        if not stripped or stripped in ("n/a", "test", "sdf", "this is a test annotation"):
+        if stripped in JUNK_TEXTS:
             labels.append("unclear")
             continue
 

@@ -24,6 +24,8 @@ DATA_DIR = Path(__file__).parent
 REPO_ROOT = DATA_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from annotator.core.label import JUNK_TEXTS
+
 CONSOLIDATED_DIR = DATA_DIR / "raw" / "consolidated"
 GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"
 TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
@@ -37,7 +39,6 @@ def _load_prompt(name: str) -> str:
         return f.read()
 
 VALID_LABELS = {"effective", "partial", "ineffective"}
-JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 
 
 def moment_key(m):
