@@ -191,6 +191,11 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
     """
     transcripts = load_transcripts()
     print(f"Loaded {len(transcripts)} transcripts")
+    if not transcripts:
+        raise FileNotFoundError(
+            "No transcripts found. Ensure data/transcripts/ contains JSON files, "
+            "or configure transcript paths in config.yaml under storage.paths.transcripts."
+        )
 
     mode = config.get("mode", "detected")
     max_scenarios = config.get("max_scenarios", 0)

@@ -31,6 +31,11 @@ VALID_ANNOTATION_TYPES = {"scaffolding", "rapport"}
 def load_conversations(limit: int = 0) -> list[dict]:
     """Load all consolidated transcript JSON files via storage layer."""
     transcripts = load_all_transcripts()
+    if not transcripts:
+        raise FileNotFoundError(
+            "No transcripts found. Ensure data/transcripts/ contains JSON files, "
+            "or configure transcript paths in config.yaml under storage.paths.transcripts."
+        )
     conversations = sorted(transcripts.values(), key=lambda c: c.get("conversation_id", ""))
     if limit > 0:
         conversations = conversations[:limit]
