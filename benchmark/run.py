@@ -78,11 +78,11 @@ def run_benchmark(version: str, config: dict):
     for profile_name in config.get("tutor_profiles", []):
         resolved_models[f"tutor_{profile_name}"] = get_phase_config("tutor", profile_name)["model"]
     student_profile = config.get("student", {}).get("profile", "gemini")
+    # Student uses the base model from its profile (no separate "student" phase in config)
     resolved_models["student"] = get_phase_config("tutor", student_profile)["model"]
     ann_profile = config.get("annotator", {}).get("profile", "gemini")
     resolved_models["annotator"] = get_phase_config("annotate", ann_profile)["model"]
     resolved_models["labeler"] = get_phase_config("label", ann_profile)["model"]
-    config["resolved_models"] = resolved_models
     config["run_version"] = version
 
     # Resolve detect model
@@ -102,7 +102,7 @@ def run_benchmark(version: str, config: dict):
         print("\n=== Step 0: Key Moment Detection ===")
         detect_phase_cfg = get_phase_config("detect", detect_profile)
         detect_model = detect_phase_cfg["model"]
-        detect_mode = config.get("annotator", {}).get("mode", "batch")
+        detect_mode = detect_phase_cfg.get("mode", "batch")
 
         detect_output = run_detect(
             version=f"benchmark_{version}",
