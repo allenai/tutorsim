@@ -64,3 +64,21 @@ def get_retry_config() -> dict:
     """Get retry settings."""
     config = load_config()
     return config.get("retry", {"max_retries": 5, "base_delay": 5})
+
+
+def get_archetype_annotators(archetype: str | None = None) -> dict[str, set[str]] | set[str] | None:
+    """Get annotator IDs by archetype from config.
+
+    Args:
+        archetype: If given, return the set of annotator IDs for that archetype.
+                   If None, return the full mapping {archetype: set(annotator_ids)}.
+
+    Returns:
+        Full mapping dict, or a set of annotator IDs, or None if archetype not found.
+    """
+    config = load_config()
+    raw = config.get("archetype_annotators", {})
+    mapping = {k: set(v) for k, v in raw.items()}
+    if archetype is None:
+        return mapping
+    return mapping.get(archetype)

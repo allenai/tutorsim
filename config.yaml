@@ -19,6 +19,21 @@ storage:
 
 profile: anthropic
 
+# Annotator archetype assignments (from classify_annotators.py analysis)
+archetype_annotators:
+  generous:
+    - Gerber
+    - Jones
+    - Shields
+    - Stobbe
+    - Trujillo
+  balanced:
+    - Forbes
+    - Mann
+    - Padgett
+  demanding:
+    - Flick
+
 profiles:
   gemini:
     tutor:

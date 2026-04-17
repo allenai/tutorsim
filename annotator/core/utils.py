@@ -89,13 +89,8 @@ def load_ground_truth(annotator_style: str | None = None) -> dict:
     """
     from .storage import load_all_ground_truth_files
 
-    # Archetype -> annotator IDs mapping
-    ARCHETYPE_ANNOTATORS = {
-        "generous": {"Gerber", "Jones", "Shields", "Stobbe", "Trujillo"},
-        "balanced": {"Forbes", "Mann", "Padgett"},
-        "demanding": {"Flick"},
-    }
-    filter_ids = ARCHETYPE_ANNOTATORS.get(annotator_style) if annotator_style else None
+    from .config import get_archetype_annotators
+    filter_ids = get_archetype_annotators(annotator_style) if annotator_style else None
 
     conversations = {}
     for data in load_all_ground_truth_files():
