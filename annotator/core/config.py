@@ -35,10 +35,15 @@ def load_config(path: Optional[Path] = None) -> dict:
 
 
 def get_phase_config(phase: str, profile: Optional[str] = None) -> dict:
-    """Get config for a specific phase (detect/annotate/label/advisor).
+    """Get config for a specific phase (detect/annotate/label/advisor/tutor).
+
+    Profile-level defaults are merged with phase-specific overrides.
+    For example, if the profile defines model and max_tokens at the top level,
+    and the 'annotate' section adds context_window, the returned dict contains
+    all three keys.
 
     Args:
-        phase: One of 'detect', 'annotate', 'label', 'advisor'.
+        phase: One of 'detect', 'annotate', 'label', 'advisor', 'tutor'.
         profile: Profile name. If None, uses config's 'profile' field.
 
     Returns:
@@ -52,12 +57,21 @@ def get_phase_config(phase: str, profile: Optional[str] = None) -> dict:
             f"Unknown profile '{profile_name}'. "
             f"Available: {', '.join(profiles.keys())}"
         )
-    phase_config = profiles[profile_name].get(phase, {})
-    if not phase_config:
+    profile_data = profiles[profile_name]
+
+    # Profile-level defaults: all non-dict (scalar) values
+    base = {k: v for k, v in profile_data.items() if not isinstance(v, dict)}
+
+    # Phase-specific overrides (if any)
+    phase_overrides = profile_data.get(phase, {})
+    if isinstance(phase_overrides, dict):
+        base.update(phase_overrides)
+
+    if "model" not in base:
         raise ValueError(
-            f"Profile '{profile_name}' has no config for phase '{phase}'"
+            f"Profile '{profile_name}' has no 'model' configured"
         )
-    return dict(phase_config)
+    return base
 
 
 def get_retry_config() -> dict:

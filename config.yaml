@@ -40,138 +40,66 @@ annotator:
   style: null                  # null = no style. Set to generous/balanced/demanding
   version: null                # null = auto-generate as {profile}_{date}
 
+# Model profiles -- profile-level defaults apply to all phases.
+# Per-phase sections override specific keys only where they differ.
 profiles:
   gemini:
-    tutor:
-      model: gemini-3.1-pro-preview
-      max_tokens: 65536
-    detect:
-      model: gemini-3.1-pro-preview
-      mode: batch
-      max_tokens: 65536
-      poll_interval: 30
-      thinking: true
-      thinking_budget: 16384
+    model: gemini-3.1-pro-preview
+    max_tokens: 65536
+    mode: batch
+    poll_interval: 30
+    thinking: true
+    thinking_budget: 16384
     annotate:
-      model: gemini-3.1-pro-preview
-      mode: batch
-      max_tokens: 65536
       context_window: 20
-      poll_interval: 30
-      thinking: true
-      thinking_budget: 16384
-    label:
-      model: gemini-3.1-pro-preview
-      mode: batch
-      max_tokens: 65536
-      poll_interval: 30
-      thinking: true
-      thinking_budget: 16384
     advisor:
-      model: gemini-3.1-pro-preview
-      max_tokens: 65536
       timeout: 300
-      thinking: true
-      thinking_budget: 16384
 
   openai:
+    model: gpt-5.4
+    max_tokens: 128000
+    mode: batch
+    poll_interval: 60
+    thinking: true
+    thinking_budget: 16384
     tutor:
-      model: gpt-5.4
       max_tokens: 65536
-    detect:
-      model: gpt-5.4
-      mode: batch
-      max_tokens: 128000
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
     annotate:
-      model: gpt-5.4
-      mode: batch
-      max_tokens: 128000
       context_window: 20
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
-    label:
-      model: gpt-5.4
-      mode: batch
-      max_tokens: 128000
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
     advisor:
-      model: gpt-5.4
-      max_tokens: 128000
       timeout: 300
-      thinking: true
-      thinking_budget: 16384
 
   anthropic:
+    model: claude-opus-4-6
+    max_tokens: 128000
+    mode: batch
+    poll_interval: 60
+    thinking: true
+    thinking_budget: 16384
     tutor:
-      model: claude-opus-4-6
       max_tokens: 65536
-    detect:
-      model: claude-opus-4-6
-      mode: batch
-      max_tokens: 128000
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
     annotate:
-      model: claude-opus-4-6
-      mode: batch
-      max_tokens: 128000
       context_window: 20
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
-    label:
-      model: claude-opus-4-6
-      mode: batch
-      max_tokens: 128000
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
     advisor:
-      model: claude-opus-4-6
-      max_tokens: 128000
       timeout: 300
-      thinking: true
-      thinking_budget: 16384
 
   openai_claude:
+    model: gpt-5.4                   # default model (tutor + detect)
+    max_tokens: 128000
+    mode: batch
+    poll_interval: 60
+    thinking: true
+    thinking_budget: 16384
     tutor:
-      model: gpt-5.4
       max_tokens: 65536
-    detect:
-      model: gpt-5.4
-      mode: batch
-      max_tokens: 128000
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
     annotate:
-      model: claude-opus-4-6
-      mode: batch
-      max_tokens: 128000
+      model: claude-opus-4-6         # annotation uses Claude
       context_window: 20
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
     label:
       model: claude-opus-4-6
-      mode: batch
-      max_tokens: 128000
-      poll_interval: 60
-      thinking: true
-      thinking_budget: 16384
     advisor:
       model: claude-opus-4-6
-      max_tokens: 128000
       timeout: 300
-      thinking: true
-      thinking_budget: 16384
 
 # Retry settings
 retry:
