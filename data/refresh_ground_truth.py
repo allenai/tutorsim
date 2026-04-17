@@ -5,13 +5,14 @@ For each conversation in data/raw/consolidated/:
   - Reuse strategy_label for moments unchanged from the existing ground_truth file
     (matched by annotator_id + turn_start + turn_end + annotation_type + result text)
   - Classify new/changed moments via Anthropic batch API
-  - Write the merged result to data/ground_truth/<conv_id>.json
+  - Write the merged result to data/ground_truth_<labeller>/<conv_id>.json
 
 Also writes transcript files for any conversations in consolidated that are missing one.
 
 Usage:
     python data/refresh_ground_truth.py
     python data/refresh_ground_truth.py --dry-run
+    python data/refresh_ground_truth.py --labeller v2
 """
 import argparse
 import hashlib
@@ -27,17 +28,13 @@ CONSOLIDATED_DIR = DATA_DIR / "raw" / "consolidated"
 GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"
 TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
 
-CLASSIFICATION_PROMPT = """Classify this tutoring strategy evaluation into exactly one category.
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts" / "annotator" / "labeller"
 
-Categories:
-- "effective": The strategy worked well, had positive impact on the student
-- "partial": Mixed results — some benefits but notable limitations
-- "ineffective": The strategy did not work, missed the mark, or was counterproductive
 
-Annotator's evaluation:
-"{result_text}"
-
-Respond with ONLY one word: effective, partial, or ineffective"""
+def _load_prompt(name: str) -> str:
+    path = PROMPTS_DIR / f"{name}.txt"
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
 VALID_LABELS = {"effective", "partial", "ineffective"}
 JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
@@ -70,8 +67,9 @@ def load_existing_labels():
     return existing
 
 
-def classify_batch(items):
-    """Run batch classification. `items` is list of dicts with keys: key, result_text.
+def classify_batch(items, labeller="v2"):
+    """Run batch classification. `items` is list of dicts with keys:
+    key, annotation_type, situation, action, result_text.
     Returns {key: label}."""
     if not items:
         return {}
@@ -81,6 +79,8 @@ def classify_batch(items):
     cfg = get_phase_config("label", "anthropic")
     client = ModelClient(cfg["model"])
 
+    template = _load_prompt(f"classify_{labeller}")
+
     entries = []
     labels = {}
     for it in items:
@@ -89,7 +89,11 @@ def classify_batch(items):
         if stripped in JUNK_TEXTS:
             labels[it["key"]] = "unclear"
             continue
-        prompt = CLASSIFICATION_PROMPT.replace("{result_text}", text)
+        prompt = (template
+                  .replace("{annotation_type}", it.get("annotation_type", "unknown"))
+                  .replace("{situation}", it.get("situation", ""))
+                  .replace("{action}", it.get("action", ""))
+                  .replace("{result_text}", text))
         entries.append(build_batch_entry(
             key=it["key"],
             prompt_text=prompt,
@@ -137,7 +141,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
                         help="Show counts without submitting batch or writing files")
+    parser.add_argument("--labeller", default="v2",
+                        help="Labeller version (determines output dir and prompt, default: v2)")
     args = parser.parse_args()
+
+    global GROUND_TRUTH_DIR
+    if args.labeller != "v1":
+        GROUND_TRUTH_DIR = DATA_DIR / f"ground_truth_{args.labeller}"
 
     if not CONSOLIDATED_DIR.exists():
         print(f"ERROR: consolidated dir not found: {CONSOLIDATED_DIR}")
@@ -163,7 +173,13 @@ def main():
                 plan.append(("reuse", ann, known[k]))
             else:
                 ckey = f"{conv_id}__{idx}"
-                to_classify.append({"key": ckey, "result_text": ann.get("result", "")})
+                to_classify.append({
+                    "key": ckey,
+                    "annotation_type": ann.get("annotation_type", "unknown"),
+                    "situation": ann.get("situation", ""),
+                    "action": ann.get("action", ""),
+                    "result_text": ann.get("result", ""),
+                })
                 plan.append(("classify", ann, ckey))
         conv_plans.append((conv_id, conv_data, plan))
 
@@ -182,7 +198,7 @@ def main():
         return
 
     # Second pass: batch classify
-    new_labels = classify_batch(to_classify)
+    new_labels = classify_batch(to_classify, labeller=args.labeller)
 
     # Third pass: write ground truth files
     GROUND_TRUTH_DIR.mkdir(parents=True, exist_ok=True)
