@@ -107,6 +107,14 @@ retry:
   max_retries: 5
   base_delay: 5
 
+# Evaluation settings
+eval:
+  iou_threshold: 0.3
+
+# Batch API settings
+batch:
+  timeout: 86400     # max seconds to poll a batch job (24h)
+
 # Benchmark model config
 benchmark:
   version: null                # null = auto-generate as {tutor_profile}_{date}
