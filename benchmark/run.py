@@ -83,7 +83,7 @@ def run_benchmark(version: str, config: dict):
     resolved_models["student"] = get_phase_config("tutor", student_profile)["model"]
     ann_profile = config["annotator"]["profile"]
     resolved_models["annotator"] = get_phase_config("annotate", ann_profile)["model"]
-    resolved_models["labeler"] = get_phase_config("label", ann_profile)["model"]
+    resolved_models["labeller"] = get_phase_config("label", ann_profile)["model"]
     config["run_version"] = version
 
     # Resolve detect model
