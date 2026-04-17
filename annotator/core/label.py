@@ -1,9 +1,9 @@
 """
 Pass 3 -- Label annotations for effectiveness.
 
-Always uses Gemini -- same classifier used on gold truth human annotations
-in data/extract_ground_truth.py. This ensures labels are on a consistent
-scale regardless of which model produced the annotations.
+Uses classify_v2.txt -- the same prompt used by data/refresh_ground_truth.py
+for ground truth labelling. This ensures labels are on a consistent scale
+regardless of which model produced the annotations.
 
 Reads annotations (from annotate.py output) and classifies each result
 text as effective / partial / ineffective.
@@ -84,8 +84,10 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
                 template = _load_prompt("classify_binary")
                 prompt = template.replace("{result_text}", result_text)
             else:
-                template = _load_prompt("classify")
+                annotation_type = ann.get("annotation_type", "unknown")
+                template = _load_prompt("classify_v2")
                 prompt = (template
+                          .replace("{annotation_type}", annotation_type)
                           .replace("{situation}", situation)
                           .replace("{action}", action)
                           .replace("{result_text}", result_text))
