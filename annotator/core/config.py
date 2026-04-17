@@ -104,3 +104,58 @@ def get_annotator_defaults() -> dict:
     """Get annotator pipeline defaults from config."""
     config = load_config()
     return config.get("annotator", {})
+
+
+def get_iou_threshold() -> float:
+    """Get IoU threshold for detection/effectiveness matching."""
+    config = load_config()
+    return config.get("eval", {}).get("iou_threshold", 0.3)
+
+
+def get_batch_timeout() -> int:
+    """Get max seconds to poll a batch job before raising."""
+    config = load_config()
+    return config.get("batch", {}).get("timeout", 86400)
+
+
+def resolve_run_params(
+    cli_version: str | None,
+    cli_profile: str | None,
+    cli_style: str | None,
+    cli_prompt_version: str | None,
+) -> dict:
+    """Resolve version, profile, style, and prompt_version from CLI + config.
+
+    Resolution order for each: CLI > config > auto-generate/None.
+    Returns dict with keys: version, profile, style, prompt_version.
+    """
+    import datetime
+
+    config = load_config()
+    defaults = get_annotator_defaults()
+
+    profile = cli_profile or config.get("profile", "anthropic")
+
+    if cli_version:
+        version = cli_version
+    elif defaults.get("version"):
+        version = defaults["version"]
+    else:
+        date_str = datetime.date.today().strftime("%Y-%m-%d")
+        version = f"{profile}_{date_str}"
+        print(f"  Auto-generated version: {version}")
+
+    style = cli_style
+    if style is None:
+        cfg_style = defaults.get("style")
+        if cfg_style is not None:
+            style = cfg_style
+
+    prompt_version = cli_prompt_version or defaults.get("prompt_version") or version
+
+    return {
+        "version": version,
+        "profile": profile,
+        "style": style,
+        "prompt_version": prompt_version,
+    }
