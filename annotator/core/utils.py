@@ -10,7 +10,10 @@ TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
 
 RESULTS_DIR = REPO_ROOT / "results" / "annotator"
 
-IOU_THRESHOLD = 0.3
+from .config import get_iou_threshold
+
+# Re-export for backwards compatibility with scripts that import from utils
+IOU_THRESHOLD = get_iou_threshold()
 
 # Conversations used as few-shot examples in prompts.
 # These MUST be excluded from evaluation to prevent data leakage.
