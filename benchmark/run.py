@@ -3,7 +3,7 @@
 All-batch architecture:
   Phase 1: Generate exchanges (batch per round -- all scenarios in parallel)
   Phase 2: Annotate all exchanges (batch per style)
-  Phase 3: Aggregate scores + build leaderboard
+  Phase 3: Score per style (no composite aggregation)
 
 Usage:
     python -m benchmark.run --version v1
@@ -345,7 +345,7 @@ def main():
     parser.add_argument("--version", required=True, help="Benchmark version (e.g., v1)")
     parser.add_argument("--tutor-profile",
                         help="Single tutor profile (e.g. gemini, openai, anthropic)")
-    parser.add_argument("--scenario-mode", choices=["key_moment", "random", "both"],
+    parser.add_argument("--scenario-mode", choices=["detected", "random", "both"],
                         help="Override scenario extraction mode")
     parser.add_argument("--max-scenarios", type=int, help="Limit number of scenarios")
     parser.add_argument("--max-per-conv", type=int,
