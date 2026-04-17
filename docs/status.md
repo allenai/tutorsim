@@ -102,6 +102,13 @@ Gemini balanced results also regenerated in `annotator_profiles/balanced/`.
 | Generous | 0.4061 | 0.3350 | 0.3740 | 0.4081 | Kappa slightly down, ceiling up |
 | Demanding | 0.6283 | -- | 0.4810 | -- | Dropped, small n=172 |
 
+**Spot-check validation** (50 random transitions + 13 targeted by-annotator samples):
+- partial -> ineffective: 27/30 correct (90%). The 3 errors are genuine edge cases (e.g., "not effective for tutor but effective for student" — explicitly mixed dimensions).
+- partial -> effective: 20/20 correct (100%). Every case was a fundamentally positive assessment with minor improvement suggestions.
+- Combined accuracy: **94% (47/50)**. The v1 labeller was inflating partial by treating courtesy hedging ("but the tutor could also...") and improvement suggestions ("to make this more effective...") as mixed signals.
+- Per-annotator check: Forbes accounts for 141/277 changes (29.9% change rate) because she writes detailed improvement suggestions in every assessment. V2 correctly reads these as "positive with suggestions" or "negative with intent acknowledged" rather than "mixed." Padgett (59 changes), Gerber (36), Mann (16) all checked — same pattern confirmed.
+- AI annotation labelling: 0 verdict-label mismatches on 583 AI annotations with explicit verdicts. V2 is consistent on AI text.
+
 **Interpretation**: The v2 labeller is more polarized — it resolves ambiguous assessments to effective/ineffective instead of defaulting to partial. This reveals real disagreement that v1 was hiding behind inflated partial counts. The balanced human ceiling dropped from 0.5049 to 0.2310 because different annotators' hedged narratives now resolve to different poles instead of all landing on partial. The AI kappa dropped correspondingly because it's being measured against a more discriminating ground truth.
 
 **Spec**: `docs/superpowers/specs/2026-04-17-labeller-v2-design.md`
