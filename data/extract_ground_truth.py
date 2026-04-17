@@ -1,8 +1,12 @@
 """
 Extract structured ground truth labels from consolidated JSON files.
 
-Reads all 116 consolidated JSON files from data/consolidated/ and produces
-a single data/ground_truth.json with structured labels for evaluation.
+Reads consolidated JSON files from data/consolidated/ and produces
+a single data/raw/ground_truth.json with structured labels for evaluation.
+
+Note: The pipeline reads per-conversation files from data/ground_truth*/
+produced by refresh_ground_truth.py. This script produces a legacy single-file
+format. Both now use classify_v2.txt for consistent labelling.
 
 Usage:
     python data/extract_ground_truth.py
@@ -18,23 +22,20 @@ CONSOLIDATED_DIR = RAW_DIR / "consolidated"
 OUTPUT_PATH = RAW_DIR / "ground_truth.json"
 
 
-CLASSIFICATION_PROMPT = """Classify this tutoring strategy evaluation into exactly one category.
-
-Categories:
-- "effective": The strategy worked well, had positive impact on the student
-- "partial": Mixed results — some benefits but notable limitations
-- "ineffective": The strategy did not work, missed the mark, or was counterproductive
-
-Annotator's evaluation:
-"{result_text}"
-
-Respond with ONLY one word: effective, partial, or ineffective"""
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts" / "annotator" / "labeller"
 
 
-def classify_effectiveness(result_texts: list[str]) -> list[str]:
-    """Classify result texts using Gemini LLM.
+def _load_prompt(name: str) -> str:
+    path = PROMPTS_DIR / f"{name}.txt"
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
-    Returns a list of labels corresponding to each input text.
+
+def classify_effectiveness(annotations: list[dict]) -> list[str]:
+    """Classify annotations using Gemini LLM.
+
+    Each annotation dict must have keys: annotation_type, situation, action, result.
+    Returns a list of labels corresponding to each input annotation.
     Returns "unclear" for empty/garbage texts.
     """
     from dotenv import load_dotenv
@@ -48,18 +49,24 @@ def classify_effectiveness(result_texts: list[str]) -> list[str]:
     client = genai.Client(api_key=api_key)
     model = "gemini-3.1-pro-preview"
     valid_labels = {"effective", "partial", "ineffective"}
+    template = _load_prompt("classify_v2")
 
     labels = []
-    total = len(result_texts)
+    total = len(annotations)
 
-    for i, text in enumerate(result_texts):
+    for i, ann in enumerate(annotations):
+        result_text = ann.get("result", "")
         # Skip empty/garbage texts
-        stripped = text.strip().lower()
+        stripped = result_text.strip().lower()
         if not stripped or stripped in ("n/a", "test", "sdf", "this is a test annotation"):
             labels.append("unclear")
             continue
 
-        prompt = CLASSIFICATION_PROMPT.replace("{result_text}", text)
+        prompt = (template
+                  .replace("{annotation_type}", ann.get("annotation_type", "unknown"))
+                  .replace("{situation}", ann.get("situation", ""))
+                  .replace("{action}", ann.get("action", ""))
+                  .replace("{result_text}", result_text))
 
         for attempt in range(3):
             try:
@@ -106,10 +113,10 @@ def main():
 
     print(f"Total annotations to classify: {len(all_data)}")
 
-    # Classify all result texts
-    result_texts = [ann.get("result", "") for _, _, ann in all_data]
+    # Classify all annotations
+    ann_dicts = [ann for _, _, ann in all_data]
     print("Classifying with Gemini LLM...")
-    labels = classify_effectiveness(result_texts)
+    labels = classify_effectiveness(ann_dicts)
 
     # Build output structures
     conversations = {}
