@@ -77,7 +77,7 @@ def classify_batch(items, labeller="v2"):
     from annotator.core.client import ModelClient, run_batch, build_batch_entry
     from annotator.core.config import get_phase_config
 
-    cfg = get_phase_config("label", "anthropic")
+    cfg = get_phase_config("label")
     client = ModelClient(cfg["model"])
 
     template = _load_prompt(f"classify_{labeller}")

@@ -68,6 +68,14 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
 
     results = data["results"]
 
+    # Load template once
+    from .config import get_annotator_defaults
+    if binary:
+        template = _load_prompt("classify_binary")
+    else:
+        labeller = get_annotator_defaults()["labeller"]
+        template = _load_prompt(labeller)
+
     entries = []
     skipped = []
     locations = []
@@ -82,11 +90,9 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             situation = ann.get("situation", "")
             action = ann.get("action", "")
             if binary:
-                template = _load_prompt("classify_binary")
                 prompt = template.replace("{result_text}", result_text)
             else:
                 annotation_type = ann.get("annotation_type", "unknown")
-                template = _load_prompt("classify_v2")
                 prompt = (template
                           .replace("{annotation_type}", annotation_type)
                           .replace("{situation}", situation)

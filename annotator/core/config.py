@@ -50,7 +50,9 @@ def get_phase_config(phase: str, profile: Optional[str] = None) -> dict:
         Dict with keys like 'model', 'max_tokens', 'mode', etc.
     """
     config = load_config()
-    profile_name = profile or config.get("profile", "gemini")
+    profile_name = profile or config.get("profile")
+    if not profile_name:
+        raise ValueError("No profile specified and no 'profile' set in config.yaml")
     profiles = config.get("profiles", {})
     if profile_name not in profiles:
         raise ValueError(

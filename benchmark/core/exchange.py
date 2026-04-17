@@ -17,7 +17,7 @@ from annotator.core.client import (
 )
 from .scenarios import Scenario
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "benchmark"
+PROMPTS_BASE = Path(__file__).parent.parent.parent / "prompts" / "benchmark"
 
 NEXT_DELIMITER = "[NEXT]"
 
@@ -38,21 +38,22 @@ class Exchange:
         return asdict(self)
 
 
-def _load_prompt(filename: str) -> str:
-    path = PROMPTS_DIR / filename
+def _load_prompt(prompt_version: str, filename: str) -> str:
+    path = PROMPTS_BASE / prompt_version / filename
     with open(path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
 
 def _build_role_prompt(
     role: str, transcript_so_far: str, student_context: str,
+    prompt_version: str = "v1",
 ) -> str:
     """Build a prompt for either tutor or student."""
     if role == "TUTOR":
-        system_prompt = _load_prompt("tutor_system.txt")
+        system_prompt = _load_prompt(prompt_version, "tutor_system.txt")
         role_instruction = "Respond as the TUTOR. Give only your response, no labels or prefixes."
     else:
-        system_prompt = _load_prompt("student_system.txt")
+        system_prompt = _load_prompt(prompt_version, "student_system.txt")
         role_instruction = "Respond as the STUDENT. Give only your response, no labels or prefixes."
 
     system_prompt = system_prompt.replace("{student_context}", student_context)
@@ -106,6 +107,7 @@ def run_exchange(
     num_turns: int = 4,
     tutor_max_tokens: int = 65536,
     student_max_tokens: int = 65536,
+    prompt_version: str = "v1",
 ) -> Exchange:
     """Run a multi-turn exchange for a single scenario (sync mode)."""
     exchange = Exchange(
@@ -118,7 +120,7 @@ def run_exchange(
 
     for i in range(num_turns):
         # Tutor turn(s)
-        prompt = _build_role_prompt("TUTOR", running_transcript, scenario.student_context)
+        prompt = _build_role_prompt("TUTOR", running_transcript, scenario.student_context, prompt_version)
         response = tutor_client.generate(prompt, json_mode=False, max_tokens=tutor_max_tokens)
         _add_usage(exchange.tutor_usage, response.usage)
 
@@ -129,7 +131,7 @@ def run_exchange(
 
         # Student turn(s) — skip on last round
         if i < num_turns - 1:
-            prompt = _build_role_prompt("STUDENT", running_transcript, scenario.student_context)
+            prompt = _build_role_prompt("STUDENT", running_transcript, scenario.student_context, prompt_version)
             response = student_client.generate(prompt, json_mode=False, max_tokens=student_max_tokens)
             _add_usage(exchange.student_usage, response.usage)
 
@@ -154,6 +156,7 @@ def run_exchanges_batch(
     student_max_tokens: int = 65536,
     poll_interval: int = 30,
     save_callback: callable = None,
+    prompt_version: str = "v1",
 ) -> dict[str, Exchange]:
     """Run multi-turn exchanges for all scenarios using batch API.
 
@@ -190,7 +193,7 @@ def run_exchanges_batch(
         tutor_entries = []
         for sid in active_ids:
             scenario = scenario_map[sid]
-            prompt = _build_role_prompt("TUTOR", transcripts[sid], scenario.student_context)
+            prompt = _build_role_prompt("TUTOR", transcripts[sid], scenario.student_context, prompt_version)
             tutor_entries.append(
                 build_batch_entry(sid, prompt, json_mode=False, max_tokens=tutor_max_tokens)
             )
@@ -229,7 +232,7 @@ def run_exchanges_batch(
             student_entries = []
             for sid in active_ids:
                 scenario = scenario_map[sid]
-                prompt = _build_role_prompt("STUDENT", transcripts[sid], scenario.student_context)
+                prompt = _build_role_prompt("STUDENT", transcripts[sid], scenario.student_context, prompt_version)
                 student_entries.append(
                     build_batch_entry(sid, prompt, json_mode=False, max_tokens=student_max_tokens)
                 )

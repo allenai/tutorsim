@@ -78,25 +78,25 @@ def run_benchmark(version: str, config: dict):
     resolved_models = {}
     for profile_name in config.get("tutor_profiles", []):
         resolved_models[f"tutor_{profile_name}"] = get_phase_config("tutor", profile_name)["model"]
-    student_profile = config.get("student", {}).get("profile", "gemini")
+    student_profile = config["student"]["profile"]
     # Student uses the base model from its profile (no separate "student" phase in config)
     resolved_models["student"] = get_phase_config("tutor", student_profile)["model"]
-    ann_profile = config.get("annotator", {}).get("profile", "gemini")
+    ann_profile = config["annotator"]["profile"]
     resolved_models["annotator"] = get_phase_config("annotate", ann_profile)["model"]
     resolved_models["labeler"] = get_phase_config("label", ann_profile)["model"]
     config["run_version"] = version
 
     # Resolve detect model
-    detect_cfg_section = config.get("detect", {})
-    detect_profile = detect_cfg_section.get("profile", "anthropic")
-    detect_prompt_version = detect_cfg_section.get("prompt_version", "v5")
+    detect_cfg_section = config["detect"]
+    detect_profile = detect_cfg_section["profile"]
+    detect_prompt_version = detect_cfg_section["prompt_version"]
     resolved_models["detector"] = get_phase_config("detect", detect_profile)["model"]
     config["resolved_models"] = resolved_models
 
     save_benchmark_result(version, "config.json", data=config)
 
     # --- Step 0: Run detection on all transcripts ---
-    scenario_mode = config.get("scenarios", {}).get("mode", "detected")
+    scenario_mode = config["scenarios"]["mode"]
     detections_by_conv = None
 
     if scenario_mode in ("detected", "both"):
@@ -122,17 +122,17 @@ def run_benchmark(version: str, config: dict):
     scenarios = load_scenarios(config["scenarios"], detections_by_conv=detections_by_conv)
     save_benchmark_result(version, "scenarios.json", data=[s.to_dict() for s in scenarios])
 
-    tutor_profiles = config.get("tutor_profiles", ["gemini"])
-    exchange_cfg = config.get("exchange", {})
-    annotator_cfg = config.get("annotator", {})
+    tutor_profiles = config["tutor_profiles"]
+    exchange_cfg = config["exchange"]
+    annotator_cfg = config["annotator"]
     agg_cfg = config.get("aggregation", {})
-    ann_mode = annotator_cfg.get("mode", "batch")
-    annotator_profile = annotator_cfg.get("profile", "gemini")
+    ann_mode = annotator_cfg["mode"]
+    annotator_profile = annotator_cfg["profile"]
     prompt_version_base = annotator_cfg["prompt_version"]
-    context_window = annotator_cfg.get("context_window", 20)
-    styles = annotator_cfg.get("styles", ["generous", "balanced", "demanding"])
+    context_window = annotator_cfg["context_window"]
+    styles = annotator_cfg["styles"]
 
-    student_profile = config.get("student", {}).get("profile", "gemini")
+    student_profile = config["student"]["profile"]
     student_cfg = get_phase_config("tutor", student_profile)
     student_client = ModelClient(student_cfg["model"])
 
@@ -179,16 +179,19 @@ def run_benchmark(version: str, config: dict):
                 save_benchmark_result(version, "exchanges", profile, f"{sid}.json",
                                       data=exchange.to_dict())
 
+            exchange_prompt_version = exchange_cfg["prompt_version"]
+
             if ann_mode == "batch":
                 new_exchanges = run_exchanges_batch(
                     scenarios=missing,
                     tutor_client=tutor_client,
                     student_client=student_client,
-                    num_turns=exchange_cfg.get("num_turns", 4),
+                    num_turns=exchange_cfg["num_turns"],
                     tutor_max_tokens=tutor_cfg["max_tokens"],
                     student_max_tokens=student_cfg["max_tokens"],
-                    poll_interval=exchange_cfg.get("poll_interval", 60),
+                    poll_interval=exchange_cfg["poll_interval"],
                     save_callback=_save_exchange,
+                    prompt_version=exchange_prompt_version,
                 )
             else:
                 new_exchanges = {}
@@ -200,9 +203,10 @@ def run_benchmark(version: str, config: dict):
                             scenario=scenario,
                             tutor_client=tutor_client,
                             student_client=student_client,
-                            num_turns=exchange_cfg.get("num_turns", 4),
+                            num_turns=exchange_cfg["num_turns"],
                             tutor_max_tokens=tutor_cfg["max_tokens"],
                             student_max_tokens=student_cfg["max_tokens"],
+                            prompt_version=exchange_prompt_version,
                         )
                         new_exchanges[scenario.scenario_id] = exchange
                         print(f"{len(exchange.generated_turns)} turns")

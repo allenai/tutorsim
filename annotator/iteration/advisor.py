@@ -430,7 +430,7 @@ def main():
                              "## Annotator Calibration section of the prompt")
     args = parser.parse_args()
 
-    profile_name = args.profile or load_config().get("profile", "gemini")
+    profile_name = args.profile or load_config().get("profile")
     if args.profile:
         phase_cfg = get_phase_config("advisor", args.profile)
     model = args.model or phase_cfg["model"]
