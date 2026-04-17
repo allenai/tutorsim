@@ -7,7 +7,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = REPO_ROOT / "data"
 TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
-GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"
 
 RESULTS_DIR = REPO_ROOT / "results" / "annotator"
 
