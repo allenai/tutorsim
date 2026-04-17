@@ -21,7 +21,7 @@ from pathlib import Path
 from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
-from .config import get_phase_config, get_annotator_defaults, load_config
+from .config import get_phase_config, get_annotator_defaults
 from .storage import (
     load_annotator_result, save_annotator_result, annotator_result_exists,
     get_annotator_result_path,
@@ -179,29 +179,18 @@ def main():
                         help="Match the annotations_{style}.json file from annotate --style")
     args = parser.parse_args()
 
-    defaults = get_annotator_defaults()
+    from .config import resolve_run_params
+    params = resolve_run_params(
+        cli_version=args.version,
+        cli_profile=args.profile,
+        cli_style=args.annotator_style,
+        cli_prompt_version=None,
+    )
+    profile = params["profile"]
+    version = params["version"]
+    style = params["style"]
 
-    # Resolve profile first (needed for version generation)
-    profile = args.profile or load_config().get("profile", "anthropic")
     phase_cfg = get_phase_config("label", profile)
-
-    # Resolve version: CLI > config > auto-generate
-    if args.version:
-        version = args.version
-    elif defaults.get("version"):
-        version = defaults["version"]
-    else:
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
-        version = f"{profile}_{date_str}"
-        print(f"  Auto-generated version: {version}")
-
-    # Resolve style: CLI > config > None
-    style = args.annotator_style
-    if style is None:
-        cfg_style = defaults.get("style")
-        if cfg_style is not None:
-            style = cfg_style
-
     model = args.model or phase_cfg["model"]
     mode = args.mode or phase_cfg.get("mode", "batch")
 

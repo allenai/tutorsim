@@ -23,7 +23,7 @@ from pathlib import Path
 from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
-from .config import get_phase_config, get_annotator_defaults, load_config
+from .config import get_phase_config
 from .storage import (
     load_all_transcripts, load_annotator_result, save_annotator_result,
     annotator_result_exists, get_annotator_result_path,
@@ -350,35 +350,22 @@ def main():
                         help="Annotator archetype to simulate (generous/balanced/demanding)")
     args = parser.parse_args()
 
-    defaults = get_annotator_defaults()
+    from .config import resolve_run_params
+    params = resolve_run_params(
+        cli_version=args.version,
+        cli_profile=args.profile,
+        cli_style=args.annotator_style,
+        cli_prompt_version=args.prompt_version,
+    )
+    profile = params["profile"]
+    version = params["version"]
+    style = params["style"]
+    prompt_version = params["prompt_version"]
 
-    # Resolve profile first (needed for version generation)
-    profile = args.profile or load_config().get("profile", "anthropic")
     phase_cfg = get_phase_config("annotate", profile)
-
-    # Resolve version: CLI > config > auto-generate
-    if args.version:
-        version = args.version
-    elif defaults.get("version"):
-        version = defaults["version"]
-    else:
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
-        version = f"{profile}_{date_str}"
-        print(f"  Auto-generated version: {version}")
-
-    # Resolve style: CLI > config > None
-    style = args.annotator_style
-    if style is None:
-        cfg_style = defaults.get("style")
-        if cfg_style is not None:
-            style = cfg_style
-
     model = args.model or phase_cfg["model"]
     mode = args.mode or phase_cfg.get("mode", "batch")
     context_window = args.context if args.context is not None else phase_cfg.get("context_window", 20)
-
-    # Resolve prompt_version: CLI > config > version
-    prompt_version = args.prompt_version or defaults.get("prompt_version") or version
 
     # When style is set, override prompt version to per-style profiles
     if style and not args.prompt_version:

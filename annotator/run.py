@@ -17,7 +17,7 @@ import argparse
 import datetime
 from pathlib import Path
 
-from .core.config import get_phase_config, get_annotator_defaults, load_config
+from .core.config import get_phase_config
 from .core.detect import run_detect
 from .core.annotate import run_annotate
 from .core.label import run_label
@@ -60,30 +60,17 @@ def main():
                         help="Context window for annotation excerpts")
     args = parser.parse_args()
 
-    defaults = get_annotator_defaults()
-
-    # Resolve profile first (needed for version generation)
-    profile = args.profile or load_config().get("profile", "anthropic")
-
-    # Resolve version: CLI > config > auto-generate
-    if args.version:
-        version = args.version
-    elif defaults.get("version"):
-        version = defaults["version"]
-    else:
-        date_str = datetime.date.today().strftime("%Y-%m-%d")
-        version = f"{profile}_{date_str}"
-        print(f"  Auto-generated version: {version}")
-
-    # Resolve style: CLI > config > None
-    style = args.style
-    if style is None:
-        cfg_style = defaults.get("style")
-        if cfg_style is not None:
-            style = cfg_style
-
-    # Resolve prompt_version: CLI > config > version
-    prompt_version = args.prompt_version or defaults.get("prompt_version") or version
+    from .core.config import resolve_run_params
+    params = resolve_run_params(
+        cli_version=args.version,
+        cli_profile=args.profile,
+        cli_style=args.style,
+        cli_prompt_version=args.prompt_version,
+    )
+    profile = params["profile"]
+    version = params["version"]
+    style = params["style"]
+    prompt_version = params["prompt_version"]
 
     if args.gold:
         args.skip_detect = True
