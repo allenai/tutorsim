@@ -43,7 +43,7 @@ PROVIDER_PREFIXES = [
     ("claude", "anthropic"),
 ]
 
-from .config import get_retry_config
+from .config import get_retry_config, get_batch_timeout
 
 # Provider-specific max output token limits
 MAX_OUTPUT_TOKENS = {
@@ -427,11 +427,18 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
         print(f"Batch job created: {batch_job.name}")
 
         # Poll
+        poll_start = time.monotonic()
+        batch_timeout = get_batch_timeout()
         completed_states = {
             "JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED",
             "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED",
         }
         while batch_job.state.name not in completed_states:
+            if time.monotonic() - poll_start > batch_timeout:
+                raise RuntimeError(
+                    f"Gemini batch timed out after {batch_timeout}s "
+                    f"(state: {batch_job.state.name})"
+                )
             print(f"  State: {batch_job.state.name} -- polling in {poll_interval}s...")
             time.sleep(poll_interval)
             batch_job = gemini_client.batches.get(name=batch_job.name)
@@ -536,8 +543,15 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
         print(f"Batch job created: {batch_job.id}")
 
         # Poll
+        poll_start = time.monotonic()
+        batch_timeout = get_batch_timeout()
         terminal_states = {"completed", "failed", "expired", "cancelled"}
         while batch_job.status not in terminal_states:
+            if time.monotonic() - poll_start > batch_timeout:
+                raise RuntimeError(
+                    f"OpenAI batch timed out after {batch_timeout}s "
+                    f"(state: {batch_job.status})"
+                )
             print(f"  Status: {batch_job.status} -- polling in {poll_interval}s...")
             time.sleep(poll_interval)
             batch_job = openai_client.batches.retrieve(batch_job.id)
@@ -655,7 +669,14 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
     print(f"Batch created: {message_batch.id}")
 
     # Poll
+    poll_start = time.monotonic()
+    batch_timeout = get_batch_timeout()
     while message_batch.processing_status != "ended":
+        if time.monotonic() - poll_start > batch_timeout:
+            raise RuntimeError(
+                f"Anthropic batch timed out after {batch_timeout}s "
+                f"(state: {message_batch.processing_status})"
+            )
         print(f"  Status: {message_batch.processing_status} -- polling in {poll_interval}s...")
         time.sleep(poll_interval)
         message_batch = anthropic_client.messages.batches.retrieve(message_batch.id)
