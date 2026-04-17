@@ -159,7 +159,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
   background: #eef; color: #336; padding: 2px 8px; border-radius: 4px; font-size: 12px;
   font-weight: 600;
 }}
-.header .info .tag.key_moment {{ background: #e8f5e9; color: #2e7d32; }}
+.header .info .tag.detected {{ background: #e8f5e9; color: #2e7d32; }}
 .header .info .tag.random {{ background: #fff3e0; color: #e65100; }}
 
 .legend {{
@@ -312,7 +312,7 @@ function selectScenario(idx) {{
 
   // Update info bar
   const info = document.getElementById('scenario-info');
-  const modeClass = s.mode === 'key_moment' ? 'key_moment' : 'random';
+  const modeClass = s.mode === 'detected' ? 'detected' : 'random';
   info.innerHTML =
     '<span class="tag ' + modeClass + '">' + escapeHtml(s.mode) + '</span>' +
     '<span>Conv: ' + escapeHtml(s.conv_id.substring(0, 40)) + '</span>' +
@@ -427,7 +427,7 @@ function renderAIAnnotations(s) {{
       const cardId = 'ai-card-' + cardIdx;
       cardIdx++;
       const type = ann.annotation_type || 'unknown';
-      const label = ann.effectiveness || ann.strategy_label || 'unclear';
+      const label = ann.effectiveness || 'unclear';
 
       html += '<div class="ann-card" id="' + cardId + '" ';
       html += 'onmouseenter="highlightTurns(' + (ann.turn_start || 0) + ',' + (ann.turn_end || 0) + ',\\'' + cardId + '\\')" ';
