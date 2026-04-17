@@ -196,7 +196,3 @@ benchmark:
       effective: 1.0
       partial: 0.5
       ineffective: 0.0
-    style_weights:
-      generous: 0.25
-      balanced: 0.50
-      demanding: 0.25

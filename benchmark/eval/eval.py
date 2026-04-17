@@ -1,9 +1,9 @@
 """
-Benchmark evaluation: compare AI tutor performance against real tutor baseline.
+Benchmark evaluation: summarize AI tutor performance across scenarios.
 
-For key_moment scenarios, the ground truth tells us how the real tutor performed.
-The benchmark annotations tell us how the AI tutor performed at the same moment.
-This module compares the two.
+For detected scenarios, the detection tells us where to cut; the benchmark
+annotations tell us how the AI tutor performed from that cut point.
+This module produces per-profile summary statistics.
 
 Also produces per-profile summary statistics: label distributions, style agreement,
 scaffolding vs rapport breakdown.

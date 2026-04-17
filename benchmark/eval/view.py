@@ -2,7 +2,7 @@
 Build a self-contained HTML viewer for benchmark pipeline results.
 
 Generates a single HTML file with:
-- Three-panel layout: Ground Truth (left) | Transcript (center) | AI Annotations (right)
+- Three-panel layout: Detection (left) | Transcript (center) | AI Annotations (right)
 - AI-generated turns highlighted with purple/violet tint
 - Annotation cards grouped by annotator style (Generous / Balanced / Demanding)
 - Scenario selector with metadata (conv_id, mode, cut point)
@@ -26,7 +26,7 @@ BENCHMARK_RESULTS_DIR = REPO_ROOT / "results" / "benchmark"
 
 
 def load_data(version: str, profile: str):
-    """Load scenarios, exchanges, annotations, transcripts, and ground truth."""
+    """Load scenarios, exchanges, annotations, and transcripts."""
     # Load scenarios
     scenarios_raw = load_benchmark_result(version, "scenarios.json")
     if not scenarios_raw:
@@ -183,7 +183,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
   font-size: 14px; color: #555; margin-bottom: 12px; padding-bottom: 8px;
   border-bottom: 2px solid #e0e0e0; position: sticky; top: 0; background: #fff; z-index: 1;
 }}
-.sidebar h3.ground-truth {{ border-bottom-color: #ff9800; }}
+.sidebar h3.detection {{ border-bottom-color: #ff9800; }}
 .sidebar h3.ai-ann {{ border-bottom-color: #9c27b0; }}
 
 .style-group {{
@@ -281,7 +281,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 
 <div class="main">
   <div class="sidebar" id="gt-sidebar">
-    <h3 class="ground-truth">Detection (trigger)</h3>
+    <h3 class="detection">Detection (trigger)</h3>
     <div id="gt-cards"></div>
   </div>
   <div class="transcript" id="transcript"></div>
@@ -320,7 +320,7 @@ function selectScenario(idx) {{
     '<span>Model: ' + escapeHtml(s.tutor_model) + '</span>';
 
   renderTranscript(s);
-  renderGroundTruth(s);
+  renderDetection(s);
   renderAIAnnotations(s);
 }}
 
@@ -355,12 +355,12 @@ function renderTranscript(s) {{
   container.innerHTML = html;
 }}
 
-function renderGroundTruth(s) {{
+function renderDetection(s) {{
   const container = document.getElementById('gt-cards');
   const anns = s.detection_info;
 
   if (!anns || anns.length === 0) {{
-    container.innerHTML = '<div class="empty">No ground truth annotations' +
+    container.innerHTML = '<div class="empty">No detection info' +
       (s.mode === 'random' ? ' (random scenario)' : '') + '</div>';
     return;
   }}

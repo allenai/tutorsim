@@ -38,7 +38,7 @@ The benchmark is now fully ground-truth-free. It uses synthetic detection to fin
 **Pipeline flow:**
 1. v5 detection on all transcripts (finds key moments + `suggested_cut_turn`)
 2. Each detection becomes a scenario (cut at suggested_cut_turn)
-3. Synthetic tutor + student exchange (20 rounds)
+3. Synthetic tutor + student exchange (num_turns: 2, configurable)
 4. 3-style annotation (generous/balanced/demanding profiles)
 5. Per-style scoring (no composite aggregation -- user picks their perspective)
 
