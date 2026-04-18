@@ -122,7 +122,8 @@ class ModelClient:
     def generate(self, prompt: str, json_mode: bool = True,
                  max_tokens: int = 0, timeout: int = 120,
                  thinking: bool = False,
-                 thinking_budget: int = 0) -> ModelResponse:
+                 thinking_budget: int = 0,
+                 reasoning_effort: str = "") -> ModelResponse:
         """Make a synchronous API call with retry logic.
 
         Args:
@@ -130,8 +131,10 @@ class ModelClient:
             json_mode: If True, request structured JSON output.
             max_tokens: Max output tokens. 0 = use provider default.
             timeout: Timeout in seconds per attempt.
-            thinking: If True, enable thinking/reasoning mode.
+            thinking: If True, enable thinking/reasoning mode (Gemini, Anthropic).
             thinking_budget: Token budget for thinking mode. 0 = use provider default.
+            reasoning_effort: OpenAI reasoning effort ('low', 'medium', 'high').
+                Empty string = don't set (use model default).
 
         Returns:
             ModelResponse with .text and .usage fields.
@@ -151,7 +154,8 @@ class ModelClient:
                                                  thinking, thinking_budget)
                 elif self.provider == "openai":
                     return self._generate_openai(prompt, json_mode, max_tokens, timeout,
-                                                  thinking, thinking_budget)
+                                                  thinking, thinking_budget,
+                                                  reasoning_effort=reasoning_effort)
                 elif self.provider == "anthropic":
                     return self._generate_anthropic(prompt, json_mode, max_tokens, timeout,
                                                      thinking, thinking_budget)
@@ -198,7 +202,8 @@ class ModelClient:
         return ModelResponse(text=text, usage=usage)
 
     def _generate_openai(self, prompt, json_mode, max_tokens, timeout,
-                         thinking=False, thinking_budget=0):
+                         thinking=False, thinking_budget=0,
+                         reasoning_effort: str = ""):
         """OpenAI API call via openai SDK."""
         kwargs = {
             "model": self.model,
@@ -208,6 +213,8 @@ class ModelClient:
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
 
         response = self._client.chat.completions.create(**kwargs)
 
@@ -366,7 +373,8 @@ def run_sync_entries(client: 'ModelClient', entries: list[dict],
 def run_batch(client: 'ModelClient', entries: list[dict],
               json_mode: bool = True, display_name: str = "batch",
               poll_interval: int = 30,
-              thinking: bool = False, thinking_budget: int = 0) -> dict:
+              thinking: bool = False, thinking_budget: int = 0,
+              reasoning_effort: str = "") -> dict:
     """Run entries as a batch job via the provider's batch API.
 
     Dispatches to Gemini, OpenAI, or Anthropic batch API based on
@@ -380,7 +388,7 @@ def run_batch(client: 'ModelClient', entries: list[dict],
                                 thinking, thinking_budget)
     elif provider == "openai":
         return _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
-                                thinking, thinking_budget)
+                                thinking, thinking_budget, reasoning_effort)
     elif provider == "anthropic":
         return _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
                                    thinking, thinking_budget)
@@ -496,7 +504,7 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
 # ===================================================================
 
 def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
-                      thinking=False, thinking_budget=0):
+                      thinking=False, thinking_budget=0, reasoning_effort=""):
     """OpenAI batch: upload JSONL, create batch, poll, download results."""
     import tempfile
     openai_client = client._client
@@ -516,6 +524,8 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
             }
             if json_mode and entry_json_mode:
                 body["response_format"] = {"type": "json_object"}
+            if reasoning_effort:
+                body["reasoning_effort"] = reasoning_effort
             line = {
                 "custom_id": key,
                 "method": "POST",

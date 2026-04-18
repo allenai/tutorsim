@@ -63,6 +63,7 @@ profiles:
     poll_interval: 60
     thinking: true
     thinking_budget: 16384
+    reasoning_effort: medium   # OpenAI-specific: low | medium | high
     tutor:
       max_tokens: 65536
     annotate:
@@ -91,6 +92,7 @@ profiles:
     poll_interval: 60
     thinking: true
     thinking_budget: 16384
+    reasoning_effort: medium   # OpenAI-specific: low | medium | high
     tutor:
       max_tokens: 65536
     annotate:

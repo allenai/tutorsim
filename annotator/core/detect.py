@@ -165,7 +165,8 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
         poll_interval = phase_cfg.get("poll_interval", 30)
         raw = run_batch(client, entries, display_name="detect", poll_interval=poll_interval,
                        thinking=phase_cfg.get("thinking", False),
-                       thinking_budget=phase_cfg.get("thinking_budget", 0))
+                       thinking_budget=phase_cfg.get("thinking_budget", 0),
+                       reasoning_effort=phase_cfg.get("reasoning_effort", ""))
     else:
         print(f"Running {len(entries)} entries in sync mode...")
         raw = run_sync_entries(client, entries)

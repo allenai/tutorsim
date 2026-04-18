@@ -134,8 +134,12 @@ class LocalBackend(StorageBackend):
     def write_json(self, rel_path: str, data: dict) -> None:
         path = self.root / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        # Atomic write: write to temp file then rename, so a crash mid-write
+        # doesn't leave a truncated/corrupted target file.
+        tmp_path = path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        os.replace(tmp_path, path)
 
     def list_files(self, rel_prefix: str) -> list[str]:
         directory = self.root / rel_prefix

@@ -33,6 +33,7 @@ class Exchange:
     student_usage: dict = field(default_factory=lambda: {
         "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
     })
+    completed: bool = False
 
     def to_dict(self):
         return asdict(self)
@@ -140,6 +141,7 @@ def run_exchange(
                 exchange, messages, "STUDENT", running_transcript, next_turn_num,
             )
 
+    exchange.completed = True
     return exchange
 
 
@@ -268,6 +270,10 @@ def run_exchanges_batch(
         if save_callback:
             for sid in active_ids:
                 save_callback(sid, exchanges[sid])
+
+    # Mark surviving scenarios as completed
+    for sid in active_ids:
+        exchanges[sid].completed = True
 
     print(f"\n    Exchanges complete: {len(active_ids)}/{len(scenarios)} succeeded")
     return exchanges

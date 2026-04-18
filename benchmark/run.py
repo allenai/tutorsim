@@ -151,12 +151,19 @@ def run_benchmark(version: str, config: dict):
         print(f"\n--- Phase 1: Generate Exchanges ({len(scenarios)} scenarios) ---")
 
         existing_files = list_benchmark_result_files(version, "exchanges", profile)
-        existing = {f.replace(".json", "") for f in existing_files}
+        existing = set()
+        for f in existing_files:
+            sid = f.replace(".json", "")
+            data = load_benchmark_result(version, "exchanges", profile, f)
+            if data and data.get("completed", False):
+                existing.add(sid)
         missing = [s for s in scenarios if s.scenario_id not in existing]
 
         def _load_exchange(sid):
             data = load_benchmark_result(version, "exchanges", profile, f"{sid}.json")
             if data is None:
+                return None
+            if not data.get("completed", False):
                 return None
             return Exchange(
                 scenario_id=data["scenario_id"],
@@ -164,6 +171,7 @@ def run_benchmark(version: str, config: dict):
                 generated_turns=data["generated_turns"],
                 tutor_usage=data.get("tutor_usage", {}),
                 student_usage=data.get("student_usage", {}),
+                completed=True,
             )
 
         if not missing:
@@ -213,10 +221,11 @@ def run_benchmark(version: str, config: dict):
                     except Exception as e:
                         print(f"ERROR: {e}")
 
-            # Save new exchanges
+            # Save completed exchanges (skip partial failures)
             for sid, exchange in new_exchanges.items():
-                save_benchmark_result(version, "exchanges", profile, f"{sid}.json",
-                                      data=exchange.to_dict())
+                if exchange.completed:
+                    save_benchmark_result(version, "exchanges", profile, f"{sid}.json",
+                                          data=exchange.to_dict())
 
             # Load all exchanges (cached + new)
             exchanges = {}
