@@ -16,6 +16,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
+from ..core.config import get_valid_styles
 from ..core.storage import get_annotator_result_path
 
 REPO_ROOT = Path(__file__).parent.parent.parent
@@ -173,7 +174,7 @@ def main():
               f"{p['total_annotations']:>5}")
 
     print(f"\nArchetype buckets:")
-    for arch in ("generous", "balanced", "demanding", "insufficient_data"):
+    for arch in list(get_valid_styles()) + ["insufficient_data"]:
         members = archetypes.get(arch, [])
         if members:
             print(f"  {arch}: {', '.join(sorted(members))}")

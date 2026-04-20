@@ -22,7 +22,7 @@ import random
 from pathlib import Path
 
 from ..core.client import ModelClient
-from ..core.config import get_phase_config
+from ..core.config import get_phase_config, get_valid_styles
 
 from ..core.storage import get_annotator_result_path
 
@@ -147,7 +147,7 @@ def main():
 
     STYLES_DIR.mkdir(parents=True, exist_ok=True)
 
-    for archetype in ("generous", "balanced", "demanding"):
+    for archetype in get_valid_styles():
         annotators = profiles_data["archetypes"].get(archetype, [])
         if not annotators:
             print(f"\n[{archetype}] No annotators in this bucket, skipping.")
