@@ -155,7 +155,7 @@ def annotate_exchange(
 
     if mode == "batch":
         raw = run_batch(client, entries, display_name="benchmark_annotate",
-                        poll_interval=annotate_cfg.get("poll_interval", 30))
+                        poll_interval=annotate_cfg["poll_interval"])
     else:
         raw = run_sync_entries(client, entries)
 
@@ -250,7 +250,7 @@ def execute_and_parse_bulk(
 
     if mode == "batch":
         raw = run_batch(client, entries, display_name="benchmark_annotate",
-                        poll_interval=annotate_cfg.get("poll_interval", 30))
+                        poll_interval=annotate_cfg["poll_interval"])
     else:
         raw = run_sync_entries(client, entries)
 

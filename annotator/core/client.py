@@ -372,7 +372,7 @@ def run_sync_entries(client: 'ModelClient', entries: list[dict],
 
 def run_batch(client: 'ModelClient', entries: list[dict],
               json_mode: bool = True, display_name: str = "batch",
-              poll_interval: int = 30,
+              poll_interval: int = 60,
               thinking: bool = False, thinking_budget: int = 0,
               reasoning_effort: str = "") -> dict:
     """Run entries as a batch job via the provider's batch API.
