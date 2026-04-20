@@ -22,7 +22,7 @@ from ..core.config import get_phase_config, load_config, get_valid_styles
 from ..core.storage import load_annotator_result, save_annotator_result
 from ..core.utils import (
     compute_iou, merge_overlapping_ranges, load_transcripts, get_excerpt,
-    load_ground_truth, REPO_ROOT, DATA_DIR, IOU_THRESHOLD,
+    load_ground_truth, REPO_ROOT, IOU_THRESHOLD,
     EXAMPLE_CONV_IDS,
 )
 

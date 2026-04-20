@@ -24,10 +24,11 @@ from pathlib import Path
 from ..core.client import ModelClient
 from ..core.config import get_phase_config
 
-from ..core.utils import DATA_DIR, RESULTS_DIR
+from ..core.storage import get_annotator_result_path
 
-GOLD_RAW_PATH = DATA_DIR / "raw" / "gold_raw.json"  # legacy one-time script
-PROFILES_PATH = RESULTS_DIR / "annotator_profiles.json"
+REPO_ROOT = Path(__file__).parent.parent.parent
+GOLD_RAW_PATH = REPO_ROOT / "data" / "raw" / "gold_raw.json"  # legacy one-time script
+PROFILES_PATH = get_annotator_result_path("", "annotator_profiles.json")
 STYLES_DIR = Path(__file__).parent.parent.parent / "prompts" / "archive" / "annotator_styles_old"
 
 EXAMPLES_PER_ARCHETYPE = 12

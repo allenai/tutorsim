@@ -43,7 +43,7 @@ from pathlib import Path
 
 from ..core.config import get_valid_styles
 from ..core.utils import (
-    compute_iou, merge_overlapping_ranges, RESULTS_DIR, load_ground_truth,
+    compute_iou, merge_overlapping_ranges, load_ground_truth,
     EXAMPLE_CONV_IDS,
 )
 from ..core.storage import (

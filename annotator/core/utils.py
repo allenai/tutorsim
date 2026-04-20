@@ -5,10 +5,6 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent.parent
-DATA_DIR = REPO_ROOT / "data"
-TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
-
-RESULTS_DIR = REPO_ROOT / "results" / "annotator"
 
 from .config import get_iou_threshold
 

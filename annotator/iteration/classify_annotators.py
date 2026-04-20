@@ -16,9 +16,10 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from ..core.utils import RESULTS_DIR, DATA_DIR
+from ..core.storage import get_annotator_result_path
 
-GOLD_RAW_PATH = DATA_DIR / "raw" / "gold_raw.json"  # legacy one-time script
+REPO_ROOT = Path(__file__).parent.parent.parent
+GOLD_RAW_PATH = REPO_ROOT / "data" / "raw" / "gold_raw.json"  # legacy one-time script
 
 VALID_LABELS = {"effective", "partial", "ineffective"}
 
@@ -153,8 +154,9 @@ def main():
         },
     }
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = RESULTS_DIR / "annotator_profiles.json"
+    results_dir = get_annotator_result_path("")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    output_path = results_dir / "annotator_profiles.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
 
