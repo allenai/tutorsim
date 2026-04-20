@@ -40,6 +40,9 @@ annotator:
   labeller: classify_v2        # labeller prompt name (in prompts/annotator/labeller/)
   style: null                  # null = no style. Set to generous/balanced/demanding
   version: null                # null = auto-generate as {profile}_{date}
+  annotation_types:
+    - scaffolding
+    - rapport
 
 # Model profiles -- profile-level defaults apply to all phases.
 # Per-phase sections override specific keys only where they differ.

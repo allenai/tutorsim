@@ -118,6 +118,50 @@ def get_batch_timeout() -> int:
     return config.get("batch", {}).get("timeout", 86400)
 
 
+def get_valid_styles() -> list[str]:
+    """Get valid annotator styles from archetype_annotators config keys."""
+    config = load_config()
+    return list(config.get("archetype_annotators", {}).keys())
+
+
+def get_annotation_types() -> list[str]:
+    """Get valid annotation types from config."""
+    config = load_config()
+    return config.get("annotator", {}).get("annotation_types", ["scaffolding", "rapport"])
+
+
+def get_benchmark_config(overrides: dict | None = None) -> dict:
+    """Get benchmark config section with optional CLI overrides.
+
+    This is the single entry point for benchmark configuration.
+    Replaces benchmark/run.py's local load_config().
+    """
+    config = load_config()
+    bm = config.get("benchmark", {})
+
+    if overrides:
+        # Direct key overrides (e.g. tutor_profiles, exchange, etc.)
+        for key, value in overrides.items():
+            if key in bm:
+                bm[key] = value
+
+        # CLI-style shorthand overrides mapped to nested keys
+        if overrides.get("scenario_mode"):
+            bm["scenarios"]["mode"] = overrides["scenario_mode"]
+        if overrides.get("max_scenarios"):
+            bm["scenarios"]["max_scenarios"] = overrides["max_scenarios"]
+        if overrides.get("max_per_conv"):
+            bm["scenarios"]["max_per_conv"] = overrides["max_per_conv"]
+        if overrides.get("tutor_profile"):
+            bm["tutor_profiles"] = [overrides["tutor_profile"]]
+        if overrides.get("mode"):
+            bm["annotator"]["mode"] = overrides["mode"]
+        if overrides.get("test_transcripts"):
+            bm["scenarios"]["test_transcripts"] = overrides["test_transcripts"]
+
+    return bm
+
+
 def resolve_run_params(
     cli_version: str | None,
     cli_profile: str | None,

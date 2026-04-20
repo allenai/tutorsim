@@ -96,3 +96,40 @@ class TestResolveRunParams:
         )
         assert "anthropic_" in params["version"]
         assert params["profile"] == "anthropic"
+
+
+class TestGetValidStyles:
+    def test_returns_list(self):
+        from annotator.core.config import get_valid_styles
+        styles = get_valid_styles()
+        assert isinstance(styles, list)
+        assert styles == ["generous", "balanced", "demanding"]
+
+    def test_matches_archetype_keys(self):
+        from annotator.core.config import get_valid_styles, get_archetype_annotators
+        styles = get_valid_styles()
+        archetypes = get_archetype_annotators()
+        assert set(styles) == set(archetypes.keys())
+
+
+class TestGetAnnotationTypes:
+    def test_returns_list(self):
+        from annotator.core.config import get_annotation_types
+        types = get_annotation_types()
+        assert isinstance(types, list)
+        assert types == ["scaffolding", "rapport"]
+
+
+class TestGetBenchmarkConfig:
+    def test_returns_dict(self):
+        from annotator.core.config import get_benchmark_config
+        cfg = get_benchmark_config()
+        assert isinstance(cfg, dict)
+        assert "exchange" in cfg
+        assert "tutor_profiles" in cfg
+        assert "annotator" in cfg
+
+    def test_override_merges(self):
+        from annotator.core.config import get_benchmark_config
+        cfg = get_benchmark_config({"tutor_profiles": ["gemini"]})
+        assert cfg["tutor_profiles"] == ["gemini"]
