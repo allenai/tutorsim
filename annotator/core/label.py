@@ -113,7 +113,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
         write_jsonl(entries, jsonl_path)
 
     if mode == "batch":
-        poll_interval = phase_cfg.get("poll_interval", 30)
+        poll_interval = phase_cfg["poll_interval"]
         raw = run_batch(client, entries, json_mode=False, display_name="label", poll_interval=poll_interval,
                        thinking=phase_cfg.get("thinking", False),
                        thinking_budget=phase_cfg.get("thinking_budget", 0),

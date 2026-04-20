@@ -105,10 +105,10 @@ def run_exchange(
     scenario: Scenario,
     tutor_client: ModelClient,
     student_client: ModelClient,
-    num_turns: int = 4,
-    tutor_max_tokens: int = 65536,
-    student_max_tokens: int = 65536,
-    prompt_version: str = "v1",
+    num_turns: int,
+    tutor_max_tokens: int,
+    student_max_tokens: int,
+    prompt_version: str,
 ) -> Exchange:
     """Run a multi-turn exchange for a single scenario (sync mode)."""
     exchange = Exchange(
@@ -153,10 +153,10 @@ def run_exchanges_batch(
     scenarios: list[Scenario],
     tutor_client: ModelClient,
     student_client: ModelClient,
-    num_turns: int = 4,
-    tutor_max_tokens: int = 65536,
-    student_max_tokens: int = 65536,
-    poll_interval: int = 30,
+    num_turns: int,
+    tutor_max_tokens: int,
+    student_max_tokens: int,
+    poll_interval: int,
     save_callback: callable = None,
     prompt_version: str = "v1",
 ) -> dict[str, Exchange]:

@@ -15,11 +15,10 @@ Usage:
 
 import argparse
 import json
-import yaml
 from pathlib import Path
 
 from annotator.core.client import ModelClient
-from annotator.core.config import get_phase_config, get_annotation_types
+from annotator.core.config import get_phase_config, get_annotation_types, get_benchmark_config
 from annotator.core.detect import run_detect
 from annotator.core.storage import (
     save_benchmark_result, load_benchmark_result, list_benchmark_result_files,
@@ -38,32 +37,6 @@ from .core.aggregate import (
 
 BASE_DIR = Path(__file__).parent
 REPO_ROOT = BASE_DIR.parent
-CONFIG_PATH = REPO_ROOT / "config.yaml"
-RESULTS_DIR = REPO_ROOT / "results" / "benchmark"
-
-
-def load_config(overrides: dict | None = None) -> dict:
-    """Load benchmark config with optional CLI overrides."""
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        full_config = yaml.safe_load(f)
-
-    config = full_config.get("benchmark", {})
-
-    if overrides:
-        if overrides.get("scenario_mode"):
-            config["scenarios"]["mode"] = overrides["scenario_mode"]
-        if overrides.get("max_scenarios"):
-            config["scenarios"]["max_scenarios"] = overrides["max_scenarios"]
-        if overrides.get("max_per_conv"):
-            config["scenarios"]["max_per_conv"] = overrides["max_per_conv"]
-        if overrides.get("tutor_profile"):
-            config["tutor_profiles"] = [overrides["tutor_profile"]]
-        if overrides.get("mode"):
-            config["annotator"]["mode"] = overrides["mode"]
-        if overrides.get("test_transcripts"):
-            config["scenarios"]["test_transcripts"] = overrides["test_transcripts"]
-
-    return config
 
 
 def save_json(data, path: Path):
@@ -381,7 +354,7 @@ def main():
     }
     overrides = {k: v for k, v in overrides.items() if v is not None}
 
-    config = load_config(overrides)
+    config = get_benchmark_config(overrides)
 
     if args.version:
         version = args.version

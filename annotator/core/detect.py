@@ -162,7 +162,7 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
     print(f"Wrote {len(entries)} detection entries")
 
     if mode == "batch":
-        poll_interval = phase_cfg.get("poll_interval", 30)
+        poll_interval = phase_cfg["poll_interval"]
         raw = run_batch(client, entries, display_name="detect", poll_interval=poll_interval,
                        thinking=phase_cfg.get("thinking", False),
                        thinking_budget=phase_cfg.get("thinking_budget", 0),
