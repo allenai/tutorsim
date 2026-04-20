@@ -3,12 +3,12 @@ Prompt iteration tools: Gemini advisor + detection disagreement analysis.
 
 Two entry points:
   # Gemini advisor -- sends error examples + current prompt for analysis
-  python -m pipeline.iteration.advisor --pass detection --version v2 --type scaffolding
-  python -m pipeline.iteration.advisor --pass annotation --version v2 --type rapport
+  python -m annotator.iteration.advisor --pass detection --version v2 --type scaffolding
+  python -m annotator.iteration.advisor --pass annotation --version v2 --type rapport
 
   # Detection disagreement analysis -- detailed error breakdown
-  python -m pipeline.iteration.advisor analyze --version v1
-  python -m pipeline.iteration.advisor analyze --version v1 --type scaffolding --limit 10
+  python -m annotator.iteration.advisor analyze --version v1
+  python -m annotator.iteration.advisor analyze --version v1 --type scaffolding --limit 10
 """
 
 import argparse

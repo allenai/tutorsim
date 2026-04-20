@@ -25,13 +25,13 @@ Metrics:
     - Human ceiling, confusion matrix, counts, binary accuracy
 
 Usage:
-    python -m pipeline.eval.eval --version v1
-    python -m pipeline.eval.eval --version v1 --mode detections
-    python -m pipeline.eval.eval --version v1 --mode annotations
+    python -m annotator.eval.eval --version v1
+    python -m annotator.eval.eval --version v1 --mode detections
+    python -m annotator.eval.eval --version v1 --mode annotations
 
     # Compare versions side-by-side
-    python -m pipeline.eval.eval --compare v1 v2 --mode detections
-    python -m pipeline.eval.eval --compare v1 v2 v3 --mode full
+    python -m annotator.eval.eval --compare v1 v2 --mode detections
+    python -m annotator.eval.eval --compare v1 v2 v3 --mode full
 
 Ported from archive_per_annotator/eval.py with multi-mode support.
 """

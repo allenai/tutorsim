@@ -8,7 +8,7 @@ Generates a single HTML file with:
 - Conversation selector dropdown
 
 Usage:
-    python -m pipeline.eval.view --version v1
+    python -m annotator.eval.view --version v1
 """
 
 import argparse

@@ -8,7 +8,7 @@ Batch utilities handle batch job submission, polling, and result downloading
 for all three providers (Gemini, OpenAI, Anthropic).
 
 Usage:
-    from pipeline.core.client import ModelClient, run_batch, run_sync_entries
+    from annotator.core.client import ModelClient, run_batch, run_sync_entries
 
     client = ModelClient("gpt-5.4")
     response = client.generate("Return a JSON object with key 'hello'")

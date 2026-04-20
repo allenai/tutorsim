@@ -5,7 +5,7 @@ Reads pipeline/config.yaml once, resolves the active profile,
 and provides per-phase config dicts to callers.
 
 Usage:
-    from pipeline.core.config import get_phase_config
+    from annotator.core.config import get_phase_config
 
     cfg = get_phase_config("detect")           # uses default profile
     cfg = get_phase_config("detect", "openai")  # uses openai profile

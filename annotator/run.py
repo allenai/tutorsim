@@ -6,11 +6,11 @@ Supports per-phase model selection via profiles (e.g., openai_claude
 uses gpt-5.4 for detection and claude-opus-4-6 for annotation).
 
 Usage:
-    python -m pipeline.run --version v1
-    python -m pipeline.run --version v1 --profile openai --mode sync
-    python -m pipeline.run --version v1 --skip-detect       # annotate+label only
-    python -m pipeline.run --version v1 --gold               # annotate gold moments
-    python -m pipeline.run --version v1 --test 3 --mode sync # quick test
+    python -m annotator --version v1
+    python -m annotator --version v1 --profile openai --mode sync
+    python -m annotator --version v1 --skip-detect       # annotate+label only
+    python -m annotator --version v1 --gold               # annotate gold moments
+    python -m annotator --version v1 --test 3 --mode sync # quick test
 """
 
 import argparse

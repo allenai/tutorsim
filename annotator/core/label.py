@@ -9,8 +9,8 @@ Reads annotations (from annotate.py output) and classifies each result
 text as effective / partial / ineffective.
 
 Usage:
-    python -m pipeline.core.label --version v1
-    python -m pipeline.core.label --version v1 --gold
+    python -m annotator.core.label --version v1
+    python -m annotator.core.label --version v1 --gold
 """
 
 import argparse

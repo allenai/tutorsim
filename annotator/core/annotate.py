@@ -6,13 +6,13 @@ focused excerpts to Gemini batch API for detailed analysis.
 
 Usage:
     # Annotate moments found by detect.py
-    python -m pipeline.core.annotate --version v1
+    python -m annotator.core.annotate --version v1
 
     # Annotate gold truth moments (explanations mode)
-    python -m pipeline.core.annotate --version v1 --gold
+    python -m annotator.core.annotate --version v1 --gold
 
     # Custom context window
-    python -m pipeline.core.annotate --version v1 --context 30
+    python -m annotator.core.annotate --version v1 --context 30
 """
 
 import argparse

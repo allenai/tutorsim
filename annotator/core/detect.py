@@ -5,9 +5,9 @@ Reads transcripts, sends full transcripts to Gemini batch API,
 outputs detected moments (turn ranges + brief descriptions).
 
 Usage:
-    python -m pipeline.core.detect --version v1
-    python -m pipeline.core.detect --version v1 --test 3
-    python -m pipeline.core.detect --version v1 --target scaffolding
+    python -m annotator.core.detect --version v1
+    python -m annotator.core.detect --version v1 --test 3
+    python -m annotator.core.detect --version v1 --target scaffolding
 """
 
 import argparse
