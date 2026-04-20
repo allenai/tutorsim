@@ -1,12 +1,12 @@
 """
 Step 1: Classify human annotators by harshness (generous/balanced/demanding)
-based on effectiveness rating distributions in gold_raw.json.
+based on effectiveness rating distributions in ground truth files.
 
 Also computes per-transcript disagreement: moments where 2+ annotators
 annotated the same turn range and gave different labels.
 
 Usage:
-    python -m pipeline.iteration.classify_annotators
+    python -m annotator.iteration.classify_annotators
 
 Output:
     results/annotator_profiles.json
@@ -18,9 +18,7 @@ from pathlib import Path
 
 from ..core.config import get_valid_styles
 from ..core.storage import get_annotator_result_path
-
-REPO_ROOT = Path(__file__).parent.parent.parent
-GOLD_RAW_PATH = REPO_ROOT / "data" / "raw" / "gold_raw.json"  # legacy one-time script
+from ..core.utils import load_ground_truth
 
 VALID_LABELS = {"effective", "partial", "ineffective"}
 
@@ -37,8 +35,7 @@ def classify_archetype(effective_rate: float, ineffective_rate: float, total: in
 
 
 def main():
-    with open(GOLD_RAW_PATH, "r", encoding="utf-8") as f:
-        gold_raw = json.load(f)
+    gold_raw = load_ground_truth()
 
     # Per-annotator label counts + example annotations
     counts = defaultdict(lambda: {"effective": 0, "partial": 0, "ineffective": 0, "total": 0})
