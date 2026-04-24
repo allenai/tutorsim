@@ -17,6 +17,7 @@ import argparse
 import datetime
 from pathlib import Path
 
+from common.logging_setup import setup_logging
 from .core.config import get_phase_config, get_valid_styles, get_annotation_types
 from .core.detect import run_detect
 from .core.annotate import run_annotate
@@ -71,6 +72,8 @@ def main():
     version = params["version"]
     style = params["style"]
     prompt_version = params["prompt_version"]
+
+    setup_logging(version=version)
 
     if args.gold:
         args.skip_detect = True

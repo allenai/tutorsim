@@ -28,6 +28,14 @@ Index of planned work and change log for the project. Plans live in this directo
 **Status**: Partially implemented — see the plan file for per-task checkboxes.
 **Result**: `.env.example` corrected (`GEMINI_API_KEY` vs. `GOOGLE_API_KEY`), `iou_threshold` and `batch_timeout` moved into `config.yaml`, bottom-up task order (config → shared abstractions → consumers → tests). Remaining tasks are individually committable.
 
+### 2026-04-24 — Shared logging module
+
+**Goal**: The repo had 357 `print()` calls and zero `logging` infrastructure — long batch runs left no structured artifact, and there was no way to dial verbosity without editing source. Also no obvious home for cross-cutting code (annotator/core/ had been doing double duty as the shared library).
+**Status**: Implemented (infra + thin migration slice). 17 prints in `annotator/core/annotate.py` migrated to logger calls; the remaining ~340 prints across `annotator/`, `benchmark/`, `data/`, `validation/` migrate incrementally in follow-up PRs.
+**Result**: New top-level `common/` package as the documented home for shared infrastructure. `common.logging_setup.setup_logging()` is idempotent, env-var driven (`LOG_LEVEL`, `LOG_FILE`), and writes per-run logs to `logs/{version}/run.log` for reproducibility. Two-phase init: console handler at process start, file handler attaches once `version` is resolved. Wired into both `annotator` and `benchmark` runners. 11 unit tests covering idempotency, two-phase init, file-handler gating, and level resolution.
+
+**Follow-ups**: migrate remaining prints incrementally; add `--log-level` CLI flag if useful; upload `run.log` to S3 results dir at end-of-run when `STORAGE_BACKEND=s3`.
+
 ## Change log
 
 Reverse chronological. Stuff that shipped but didn't have a dedicated plan file, or non-obvious deltas worth recording.
