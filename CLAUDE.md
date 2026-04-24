@@ -36,33 +36,9 @@ Review the full staged diff for secrets, credentials, PII, and any sensitive dat
 - Data directories should be gitignored by default. Use your judgment about what constitutes data, output, or artifacts based on the actual repo contents.
 - API keys must never appear anywhere — not in code, config, logs, or output. Use environment variables or secret managers.
 
-### New Repository Checklist
-
-When a new repo is introduced, verify before doing any work:
-
-1. Is the repo private?
-2. Is it in the correct org/tenant (user's own, client's, etc.)? Ask if unclear.
-3. Does `.gitignore` exist and cover secrets, data, and environment files?
-4. Are there any existing secrets already committed? If so, flag immediately.
-
-## Project Setup
-
-### Project-Specific Context
-
-When starting a new project, build out this section together. This is the stuff Claude can't infer from reading code:
-
-- **Why** — the purpose, the user, the problem being solved. This is the north star. When ambiguous decisions come up, this is what we use to break ties.
-- **What** — the tech stack, what the major components are and what they do. Not a folder listing (explore the repo for that), but the reasoning behind structural decisions. What's legacy vs. active? What patterns are intentional? What looks wrong but is correct?
-- **How** — the workflows, gotchas, and non-obvious constraints. Not exact commands (figure those out from the repo), but how things fit together, external dependencies, and things that break silently.
-
-Don't document things here that can be discovered by exploring the repo. This section is for context that lives in people's heads, not in files.
-
-
 ## Project Overview
 
-This project answers: **"How good are AI tutors at the human side of teaching?"** It measures whether AI tutor models can replicate the pedagogical strategies real human tutors use -- specifically scaffolding (guiding students to answers without giving them away) and rapport (building trust, reading emotions, making learning feel safe).
-
-The dataset is 104 real K-12 math tutoring transcripts. Human expert annotators labeled "key moments" as effective, partial, or ineffective.
+This project answers: **"How good are AI tutors at tutoring?"** It measures whether AI tutor models can replicate the pedagogical strategies real human tutors use -- specifically scaffolding (guiding students to answers without giving them away) and rapport (building trust, reading emotions, making learning feel safe).
 
 The system has two pipelines:
 1. **Annotator pipeline** (`annotator/`) -- uses LLMs to replicate what human annotators do (detect moments, analyze tutor strategies, label effectiveness). Validated to exceed human inter-rater agreement.
