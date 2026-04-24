@@ -16,6 +16,7 @@ Usage:
     print(response.usage)  # {"input_tokens": 12, "output_tokens": 5, "total_tokens": 17}
 """
 
+import base64
 import json
 import os
 import re
@@ -83,6 +84,72 @@ def _mime_from_path(path: str) -> str:
     if ext not in _MIME_BY_EXT:
         raise ValueError(f"unknown image extension: {ext} (path: {path})")
     return _MIME_BY_EXT[ext]
+
+
+def _should_use_presigned_url() -> bool:
+    """True when the storage backend is S3 (pre-signed URLs available)."""
+    from . import storage
+    be = storage._get_backend()
+    return not isinstance(be, storage.LocalBackend)
+
+
+def _base64_bytes(rel_path: str) -> str:
+    from . import storage
+    raw = storage._get_backend().read_bytes(rel_path)
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _presigned_url(rel_path: str, expires_seconds: int = 172800) -> str:
+    from . import storage
+    return storage._get_backend().get_presigned_url(rel_path, expires_seconds=expires_seconds)
+
+
+def _build_image_blocks_anthropic(
+    image_paths: list[str], use_url: bool, enable_cache: bool,
+) -> list[dict]:
+    blocks = []
+    for path in image_paths:
+        media_type = _mime_from_path(path)
+        if use_url:
+            source = {"type": "url", "url": _presigned_url(path)}
+        else:
+            source = {
+                "type": "base64",
+                "media_type": media_type,
+                "data": _base64_bytes(path),
+            }
+        block = {"type": "image", "source": source}
+        if enable_cache:
+            block["cache_control"] = {"type": "ephemeral"}
+        blocks.append(block)
+    return blocks
+
+
+def _build_image_blocks_openai(
+    image_paths: list[str], use_url: bool,
+) -> list[dict]:
+    blocks = []
+    for path in image_paths:
+        if use_url:
+            url = _presigned_url(path)
+        else:
+            b64 = _base64_bytes(path)
+            url = f"data:{_mime_from_path(path)};base64,{b64}"
+        blocks.append({"type": "image_url", "image_url": {"url": url}})
+    return blocks
+
+
+def _build_image_blocks_gemini(image_paths: list[str]) -> list[dict]:
+    # Gemini does not accept S3 URIs; always inline.
+    blocks = []
+    for path in image_paths:
+        blocks.append({
+            "inline_data": {
+                "mime_type": _mime_from_path(path),
+                "data": _base64_bytes(path),
+            }
+        })
+    return blocks
 
 
 def infer_provider(model: str) -> str:

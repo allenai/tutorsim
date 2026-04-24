@@ -118,3 +118,75 @@ class TestValidateVisionSupport:
     def test_case_insensitive(self):
         from annotator.core.client import validate_vision_support
         validate_vision_support("CLAUDE-OPUS-4-6")
+
+
+class TestImageBlocks:
+    def _mock_backend(self, monkeypatch, is_local):
+        """Stub out the storage backend for deterministic tests."""
+        import annotator.core.client as c
+
+        def fake_read_bytes(path):
+            return b"bytes-for-" + path.encode()
+
+        def fake_get_presigned_url(path, expires_seconds=None):
+            return f"https://example.com/{path}?sig=x"
+
+        class FakeBE:
+            pass
+
+        fake_be = FakeBE()
+        fake_be.read_bytes = fake_read_bytes
+        fake_be.get_presigned_url = fake_get_presigned_url
+
+        class FakeLocal: pass
+        class FakeS3: pass
+        import annotator.core.storage as s
+        monkeypatch.setattr(s, "_get_backend", lambda: fake_be)
+        monkeypatch.setattr(
+            s, "LocalBackend",
+            FakeLocal if not is_local else type(fake_be)
+        )
+
+    def test_anthropic_local_inlines_base64(self, monkeypatch):
+        self._mock_backend(monkeypatch, is_local=True)
+        from annotator.core.client import _build_image_blocks_anthropic
+        blocks = _build_image_blocks_anthropic(["x/1.jpg"], use_url=False, enable_cache=False)
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
+        assert blocks[0]["source"]["type"] == "base64"
+        assert blocks[0]["source"]["media_type"] == "image/jpeg"
+        assert "data" in blocks[0]["source"]
+
+    def test_anthropic_s3_uses_url(self, monkeypatch):
+        self._mock_backend(monkeypatch, is_local=False)
+        from annotator.core.client import _build_image_blocks_anthropic
+        blocks = _build_image_blocks_anthropic(["x/1.jpg"], use_url=True, enable_cache=False)
+        assert blocks[0]["source"]["type"] == "url"
+        assert blocks[0]["source"]["url"].startswith("https://")
+
+    def test_anthropic_cache_control(self, monkeypatch):
+        self._mock_backend(monkeypatch, is_local=True)
+        from annotator.core.client import _build_image_blocks_anthropic
+        blocks = _build_image_blocks_anthropic(["x/1.jpg"], use_url=False, enable_cache=True)
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_openai_local_uses_data_url(self, monkeypatch):
+        self._mock_backend(monkeypatch, is_local=True)
+        from annotator.core.client import _build_image_blocks_openai
+        blocks = _build_image_blocks_openai(["x/1.jpg"], use_url=False)
+        assert blocks[0]["type"] == "image_url"
+        assert blocks[0]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+    def test_openai_s3_uses_https(self, monkeypatch):
+        self._mock_backend(monkeypatch, is_local=False)
+        from annotator.core.client import _build_image_blocks_openai
+        blocks = _build_image_blocks_openai(["x/1.jpg"], use_url=True)
+        assert blocks[0]["image_url"]["url"].startswith("https://")
+
+    def test_gemini_always_inlines(self, monkeypatch):
+        self._mock_backend(monkeypatch, is_local=False)  # even on S3
+        from annotator.core.client import _build_image_blocks_gemini
+        blocks = _build_image_blocks_gemini(["x/1.jpg"])
+        assert "inline_data" in blocks[0]
+        assert blocks[0]["inline_data"]["mime_type"] == "image/jpeg"
+        assert "data" in blocks[0]["inline_data"]
