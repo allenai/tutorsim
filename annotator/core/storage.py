@@ -30,6 +30,53 @@ load_dotenv()
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 
+
+def _parse_timestamp_seconds(ts: str) -> float:
+    """Best-effort: turn a timestamp string into seconds.
+
+    Accepts 'MM:SS-MM:SS', 'M:SS', '{seconds}s', or a bare number.
+    Returns 0.0 on any failure so callers don't have to handle malformed data.
+    """
+    if not ts:
+        return 0.0
+    s = ts.strip()
+    # range form: keep only the first half
+    if "-" in s:
+        s = s.split("-", 1)[0].strip()
+    # '123.4s' form
+    if s.endswith("s") and s[:-1].replace(".", "", 1).isdigit():
+        try:
+            return float(s[:-1])
+        except ValueError:
+            return 0.0
+    # 'MM:SS' or 'HH:MM:SS' form
+    if ":" in s:
+        parts = s.split(":")
+        try:
+            nums = [float(p) for p in parts]
+        except ValueError:
+            return 0.0
+        # MM:SS -> 60*M + S; HH:MM:SS -> 3600*H + 60*M + S
+        if len(nums) == 2:
+            return nums[0] * 60 + nums[1]
+        if len(nums) == 3:
+            return nums[0] * 3600 + nums[1] * 60 + nums[2]
+        return 0.0
+    # bare number
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _annotate_turns_with_start_seconds(conv: dict) -> dict:
+    """Add a start_seconds float to each turn if missing. Mutates and returns conv."""
+    for turn in conv.get("turns", []):
+        if "start_seconds" not in turn:
+            turn["start_seconds"] = _parse_timestamp_seconds(turn.get("timestamp", ""))
+    return conv
+
+
 _cache: dict[str, object] = {}
 _jsonl_indexes: dict[str, dict[str, dict]] = {}  # path -> {conv_id: transformed_record}
 
@@ -316,12 +363,14 @@ def _transform_normalized_record(rec: dict) -> dict:
     # Build unified turn list: dialogue turns + enrichments merged by position
     dialogue_turns = []
     for t in rec.get("turns", []):
+        ss = float(t.get("start_seconds", 0) or 0)
         dialogue_turns.append({
             "_sort_key": (t["turn_number"], 1),  # dialogue after enrichments at same position
             "role": t["role"].upper(),
             "text": t["text"],
             "type": "DIALOGUE",
-            "timestamp": f"{t.get('start_seconds', 0)}s",
+            "timestamp": f"{ss}s",
+            "start_seconds": ss,
         })
 
     enrichment_turns = []
@@ -335,13 +384,15 @@ def _transform_normalized_record(rec: dict) -> dict:
             text = f"[{etype}: {label}]"
         if content:
             text = f"{text} {content}"
+        ss = float(e.get("start_seconds", 0) or 0)
 
         enrichment_turns.append({
             "_sort_key": (e.get("before_turn") or 0, 0),  # enrichments before their turn
             "role": role,
             "text": text,
             "type": etype,
-            "timestamp": f"{e.get('start_seconds', 0)}s",
+            "timestamp": f"{ss}s",
+            "start_seconds": ss,
         })
 
     # Merge and sort: enrichments come before their associated turn
@@ -357,6 +408,7 @@ def _transform_normalized_record(rec: dict) -> dict:
             "text": t["text"],
             "type": t["type"],
             "timestamp": t["timestamp"],
+            "start_seconds": t["start_seconds"],
         })
 
     # Build context from demographics if available
@@ -448,35 +500,38 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
 
 def load_transcript(conv_id: str) -> dict | None:
     """Load a single transcript JSON by conversation ID.
-    Searches all configured transcript paths. Supports JSONL sources."""
+    Searches all configured transcript paths. Supports JSONL sources.
+    Adds start_seconds to each turn if missing."""
     be = _get_backend()
     for rel_path in _get_path_list("transcripts"):
         if rel_path.endswith(".jsonl"):
             index = _load_jsonl_index(rel_path)
             if conv_id in index:
-                return index[conv_id]
+                return _annotate_turns_with_start_seconds(index[conv_id])
         else:
             data = be.read_json(f"{rel_path}/{conv_id}.json")
             if data is not None:
-                return data
+                return _annotate_turns_with_start_seconds(data)
     return None
 
 
 def load_all_transcripts() -> dict[str, dict]:
     """Load all transcripts from all configured transcript paths, merged into one pool.
-    Returns {conv_id: conversation_dict}. Supports JSONL sources."""
+    Returns {conv_id: conversation_dict}. Supports JSONL sources.
+    Adds start_seconds to each turn if missing."""
     be = _get_backend()
     transcripts = {}
     for rel_path in _get_path_list("transcripts"):
         if rel_path.endswith(".jsonl"):
-            transcripts.update(_load_jsonl_index(rel_path))
+            for conv_id, conv in _load_jsonl_index(rel_path).items():
+                transcripts[conv_id] = _annotate_turns_with_start_seconds(conv)
         else:
             for fname in be.list_files(rel_path):
                 data = be.read_json(f"{rel_path}/{fname}")
                 if data and "conversation_id" in data:
-                    transcripts[data["conversation_id"]] = data
+                    transcripts[data["conversation_id"]] = _annotate_turns_with_start_seconds(data)
                 elif data:
-                    transcripts[fname.replace(".json", "")] = data
+                    transcripts[fname.replace(".json", "")] = _annotate_turns_with_start_seconds(data)
     return transcripts
 
 

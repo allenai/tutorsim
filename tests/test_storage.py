@@ -109,6 +109,47 @@ class TestLocalBackend:
         assert url.startswith("file://")
         assert url.endswith("y.jpg")
 
+    def test_consolidated_transcript_has_start_seconds(self, local_storage, temp_data):
+        # Overwrite conv_001 with a timestamp string and reload
+        import json
+        t_path = temp_data / "data" / "transcripts" / "conv_001.json"
+        conv = {
+            "conversation_id": "conv_001",
+            "turns": [
+                {"turn_number": 1, "timestamp": "02:26-02:27", "role": "TUTOR", "text": "Hi", "type": "DIALOGUE"},
+                {"turn_number": 2, "timestamp": "02:30-02:31", "role": "STUDENT", "text": "Hi back", "type": "DIALOGUE"},
+            ],
+        }
+        t_path.write_text(json.dumps(conv), encoding="utf-8")
+
+        import annotator.core.storage as st
+        st._cache.clear()
+
+        loaded = st.load_transcript("conv_001")
+        assert loaded["turns"][0]["start_seconds"] == pytest.approx(146.0)  # 2*60+26
+        assert loaded["turns"][1]["start_seconds"] == pytest.approx(150.0)  # 2*60+30
+        # Existing timestamp string is preserved
+        assert loaded["turns"][0]["timestamp"] == "02:26-02:27"
+
+    def test_malformed_timestamp_yields_zero(self, local_storage, temp_data):
+        import json
+        t_path = temp_data / "data" / "transcripts" / "conv_001.json"
+        conv = {
+            "conversation_id": "conv_001",
+            "turns": [
+                {"turn_number": 1, "timestamp": "", "role": "TUTOR", "text": "Hi", "type": "DIALOGUE"},
+                {"turn_number": 2, "timestamp": "junk", "role": "STUDENT", "text": "Hi", "type": "DIALOGUE"},
+            ],
+        }
+        t_path.write_text(json.dumps(conv), encoding="utf-8")
+
+        import annotator.core.storage as st
+        st._cache.clear()
+
+        loaded = st.load_transcript("conv_001")
+        assert loaded["turns"][0]["start_seconds"] == 0.0
+        assert loaded["turns"][1]["start_seconds"] == 0.0
+
 
 class TestS3Backend:
     @pytest.fixture
