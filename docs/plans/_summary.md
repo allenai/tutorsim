@@ -4,12 +4,29 @@ Index of planned work and change log for the project. Plans live in this directo
 
 ## Plans
 
-| Date | Plan | Status |
-|------|------|--------|
-| 2026-03-26 | [Factor IV storage refactor](2026-03-26-factor-iv-storage-refactor.md) | Implemented. `StorageBackend` ABC with local + S3 backends; env-var overrides for all paths. S3 e2e test blocked on IT-provided credentials. |
-| 2026-04-17 | [Codebase cleanup & CLI simplification](2026-04-17-codebase-cleanup.md) | Implemented (verified bugs, hardcoded-constant removal, CLI defaults via `annotator:` config section). |
-| 2026-04-17 | [Labeller V2](2026-04-17-labeller-v2.md) — [spec](specs/2026-04-17-labeller-v2-design.md) | Implemented. `classify_v2.txt` unified prompt; ground truth versioned at `data/ground_truth_v2/`. |
-| 2026-04-17 | [Production readiness fixes](2026-04-17-production-readiness.md) | Partially implemented — see plan file for per-task status. |
+### 2026-03-26 — [Factor IV storage refactor](2026-03-26-factor-iv-storage-refactor.md)
+
+**Goal**: The same pipeline needs to run on a laptop against local files and in production against S3. Before this, `if backend == "s3"` branching was smeared through the storage layer and paths were hardcoded — swapping environments required code edits.
+**Status**: Implemented; S3 end-to-end still blocked on AWS credentials from IT + cross-account bucket policy from Ai2.
+**Result**: `StorageBackend` ABC with `LocalBackend` and `S3Backend` implementations, singleton delegate, zero branching. Every path (transcripts, ground truth, results) is overridable via env var. `STORAGE_BACKEND=local|s3` flips environments without touching code or config files. 13 tests (11 local, 2 with moto) passing.
+
+### 2026-04-17 — [Codebase cleanup & CLI simplification](2026-04-17-codebase-cleanup.md)
+
+**Goal**: Day-to-day pipeline runs required too many flags and tripped over verified bugs and hardcoded constants. Reduce friction so common operations (run a pass, label gold, re-run with a style) are short and correct by default.
+**Status**: Implemented.
+**Result**: Bugs fixed, hardcoded constants moved into `config.yaml`, and an `annotator:` config section defaults common CLI flags (version auto-generates when omitted). No new abstractions or files.
+
+### 2026-04-17 — [Labeller V2](2026-04-17-labeller-v2.md) · [spec](specs/2026-04-17-labeller-v2-design.md)
+
+**Goal**: Ground-truth labels and pipeline labels were not on the same scale — four divergent labeller prompts with different criteria and different inputs. The v1 labeller also over-applied "partial" (~32.6%) to anything with hedged language, masking real human disagreement and making kappa comparisons misleading.
+**Status**: Implemented.
+**Result**: Single shared `classify_v2.txt` prompt used by both `build_ground_truth.py` and the pipeline labeller, with outcome-anchored criteria and all four annotation fields fed in. Ground truth versioned at `data/ground_truth_v2/`. 13.1% of ground-truth labels shifted (mostly partial → effective/ineffective as intended); spot-check 94% correct. Balanced human ceiling dropped 0.5049 → 0.2310, exposing the real disagreement v1 was hiding.
+
+### 2026-04-17 — [Production readiness fixes](2026-04-17-production-readiness.md)
+
+**Goal**: Before a public research release, the repo needs to be usable by someone new to the project — without tripping on missing env docs, dead code, silent config mismatches, or untested edges.
+**Status**: Partially implemented — see the plan file for per-task checkboxes.
+**Result**: `.env.example` corrected (`GEMINI_API_KEY` vs. `GOOGLE_API_KEY`), `iou_threshold` and `batch_timeout` moved into `config.yaml`, bottom-up task order (config → shared abstractions → consumers → tests). Remaining tasks are individually committable.
 
 ## Change log
 
