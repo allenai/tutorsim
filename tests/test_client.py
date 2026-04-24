@@ -71,3 +71,50 @@ class TestExtractEntry:
         assert prompt == "my prompt"
         assert json_mode is True
         assert max_tokens == 1000
+
+
+class TestMimeFromPath:
+    def test_jpg(self):
+        from annotator.core.client import _mime_from_path
+        assert _mime_from_path("foo/bar.jpg") == "image/jpeg"
+        assert _mime_from_path("X.JPEG") == "image/jpeg"
+
+    def test_png(self):
+        from annotator.core.client import _mime_from_path
+        assert _mime_from_path("a/b/c.png") == "image/png"
+
+    def test_webp(self):
+        from annotator.core.client import _mime_from_path
+        assert _mime_from_path("x.webp") == "image/webp"
+
+    def test_unknown_raises(self):
+        from annotator.core.client import _mime_from_path
+        with pytest.raises(ValueError, match="unknown image extension"):
+            _mime_from_path("foo.bmp")
+
+
+class TestValidateVisionSupport:
+    def test_accepts_claude_opus_4(self):
+        from annotator.core.client import validate_vision_support
+        validate_vision_support("claude-opus-4-6")
+
+    def test_accepts_gemini_3(self):
+        from annotator.core.client import validate_vision_support
+        validate_vision_support("gemini-3.1-pro-preview")
+
+    def test_accepts_gpt5(self):
+        from annotator.core.client import validate_vision_support
+        validate_vision_support("gpt-5.4")
+
+    def test_accepts_gpt_4o(self):
+        from annotator.core.client import validate_vision_support
+        validate_vision_support("gpt-4o-mini")
+
+    def test_rejects_old_text_only(self):
+        from annotator.core.client import validate_vision_support
+        with pytest.raises(ValueError, match="not in the vision-capable list"):
+            validate_vision_support("llama-3")
+
+    def test_case_insensitive(self):
+        from annotator.core.client import validate_vision_support
+        validate_vision_support("CLAUDE-OPUS-4-6")
