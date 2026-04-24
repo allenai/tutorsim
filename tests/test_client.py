@@ -66,11 +66,12 @@ class TestBuildBatchEntry:
 class TestExtractEntry:
     def test_round_trip(self):
         entry = build_batch_entry("my_key", "my prompt", json_mode=True, max_tokens=1000)
-        key, prompt, json_mode, max_tokens = _extract_entry(entry)
+        key, prompt, json_mode, max_tokens, images = _extract_entry(entry)
         assert key == "my_key"
         assert prompt == "my prompt"
         assert json_mode is True
         assert max_tokens == 1000
+        assert images == []
 
 
 class TestMimeFromPath:
@@ -236,3 +237,29 @@ class TestGenerateWithImages:
         assert content[0]["type"] == "text"
         assert content[0]["text"] == "hello"
         assert content[1]["type"] == "image"
+
+
+class TestBuildBatchEntryWithImages:
+    def test_images_stored_in_request(self):
+        from annotator.core.client import build_batch_entry
+        entry = build_batch_entry("k", "p", images=["x/1.jpg", "x/2.jpg"])
+        assert entry["request"]["images"] == ["x/1.jpg", "x/2.jpg"]
+
+    def test_no_images_field_when_empty(self):
+        from annotator.core.client import build_batch_entry
+        entry = build_batch_entry("k", "p")
+        assert "images" not in entry["request"]
+
+
+class TestExtractEntryWithImages:
+    def test_extract_returns_images(self):
+        from annotator.core.client import build_batch_entry, _extract_entry
+        entry = build_batch_entry("k", "p", images=["a.jpg"])
+        key, prompt, json_mode, max_tokens, images = _extract_entry(entry)
+        assert images == ["a.jpg"]
+
+    def test_extract_empty_when_no_images(self):
+        from annotator.core.client import build_batch_entry, _extract_entry
+        entry = build_batch_entry("k", "p")
+        _, _, _, _, images = _extract_entry(entry)
+        assert images == []

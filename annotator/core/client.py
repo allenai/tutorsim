@@ -397,22 +397,25 @@ def _strip_json_fences(text: str) -> str:
     return stripped.strip()
 
 
-def _extract_entry(entry: dict) -> tuple[str, str, bool, int]:
-    """Extract key, prompt, json_mode, max_tokens from a batch entry."""
+def _extract_entry(entry: dict) -> tuple[str, str, bool, int, list[str]]:
+    """Extract key, prompt, json_mode, max_tokens, images from a batch entry."""
     key = entry["key"]
     parts = entry["request"]["contents"][0]["parts"]
     prompt_text = parts[0]["text"]
     gen_config = entry["request"].get("generation_config", {})
     json_mode = "application/json" in gen_config.get("response_mime_type", "")
     max_tokens = gen_config.get("max_output_tokens", 0)
-    return key, prompt_text, json_mode, max_tokens
+    images = entry["request"].get("images", [])
+    return key, prompt_text, json_mode, max_tokens, images
 
 
 # ===================================================================
 # Shared utilities
 # ===================================================================
 
-def build_batch_entry(key: str, prompt_text: str, json_mode: bool = True,
+def build_batch_entry(key: str, prompt_text: str,
+                      images: list[str] | None = None,
+                      json_mode: bool = True,
                       max_tokens: int = 65536) -> dict:
     """Build a single batch entry from a key and prompt text.
 
@@ -422,16 +425,16 @@ def build_batch_entry(key: str, prompt_text: str, json_mode: bool = True,
     gen_config = {"max_output_tokens": max_tokens}
     if json_mode:
         gen_config["response_mime_type"] = "application/json"
-    return {
-        "key": key,
-        "request": {
-            "contents": [{
-                "parts": [{"text": prompt_text}],
-                "role": "user"
-            }],
-            "generation_config": gen_config,
-        }
+    request = {
+        "contents": [{
+            "parts": [{"text": prompt_text}],
+            "role": "user"
+        }],
+        "generation_config": gen_config,
     }
+    if images:
+        request["images"] = list(images)
+    return {"key": key, "request": request}
 
 
 def write_jsonl(entries: list[dict], jsonl_path: str) -> int:
@@ -454,7 +457,7 @@ def run_sync_entries(client: 'ModelClient', entries: list[dict],
     raw_entries = {}
     total = len(entries)
     for i, entry in enumerate(entries):
-        key, prompt_text, entry_json_mode, entry_max_tokens = _extract_entry(entry)
+        key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
         if not entry_max_tokens:
             entry_max_tokens = max_tokens
 
@@ -462,6 +465,7 @@ def run_sync_entries(client: 'ModelClient', entries: list[dict],
         try:
             response = client.generate(
                 prompt_text,
+                images=images or None,
                 json_mode=entry_json_mode if json_mode else False,
                 max_tokens=entry_max_tokens,
             )
@@ -487,12 +491,9 @@ def run_batch(client: 'ModelClient', entries: list[dict],
               json_mode: bool = True, display_name: str = "batch",
               poll_interval: int = 60,
               thinking: bool = False, thinking_budget: int = 0,
-              reasoning_effort: str = "") -> dict:
-    """Run entries as a batch job via the provider's batch API.
-
-    Dispatches to Gemini, OpenAI, or Anthropic batch API based on
-    the client's provider. All return the same {key: {text, usage}} dict.
-    """
+              reasoning_effort: str = "",
+              enable_cache: bool = False) -> dict:
+    """Run entries as a batch job via the provider's batch API."""
     provider = client.provider
     print(f"Running batch ({provider}): {len(entries)} entries, display_name={display_name}")
 
@@ -504,7 +505,7 @@ def run_batch(client: 'ModelClient', entries: list[dict],
                                 thinking, thinking_budget, reasoning_effort)
     elif provider == "anthropic":
         return _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
-                                   thinking, thinking_budget)
+                                   thinking, thinking_budget, enable_cache=enable_cache)
     else:
         raise ValueError(f"Batch API not supported for provider: {provider}")
 
@@ -523,7 +524,18 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False,
                                       encoding="utf-8") as f:
         for entry in entries:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
+            parts = [{"text": prompt_text}]
+            if images:
+                parts.extend(_build_image_blocks_gemini(images))
+            gem_entry = {
+                "key": key,
+                "request": {
+                    "contents": [{"parts": parts, "role": "user"}],
+                    "generation_config": entry["request"].get("generation_config", {}),
+                },
+            }
+            f.write(json.dumps(gem_entry, ensure_ascii=False) + "\n")
         jsonl_path = f.name
 
     try:
@@ -627,12 +639,21 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False,
                                       encoding="utf-8") as f:
         for entry in entries:
-            key, prompt_text, entry_json_mode, entry_max_tokens = _extract_entry(entry)
+            key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
             if not entry_max_tokens or entry_max_tokens > max_tokens:
                 entry_max_tokens = max_tokens
+
+            if images:
+                content = [{"type": "text", "text": prompt_text}]
+                content.extend(_build_image_blocks_openai(
+                    images, use_url=_should_use_presigned_url(),
+                ))
+            else:
+                content = prompt_text
+
             body = {
                 "model": client.model,
-                "messages": [{"role": "user", "content": prompt_text}],
+                "messages": [{"role": "user", "content": content}],
                 "max_completion_tokens": entry_max_tokens,
             }
             if json_mode and entry_json_mode:
@@ -732,7 +753,7 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
 # ===================================================================
 
 def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
-                         thinking=False, thinking_budget=0):
+                         thinking=False, thinking_budget=0, enable_cache=False):
     """Anthropic batch: create message batch, poll, stream results."""
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
@@ -745,17 +766,25 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
     id_to_key = {}
     requests = []
     for i, entry in enumerate(entries):
-        key, prompt_text, entry_json_mode, entry_max_tokens = _extract_entry(entry)
+        key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
         if not entry_max_tokens or entry_max_tokens > max_tokens:
             entry_max_tokens = max_tokens
 
         short_id = f"r{i}"
         id_to_key[short_id] = key
 
+        if images:
+            content = [{"type": "text", "text": prompt_text}]
+            content.extend(_build_image_blocks_anthropic(
+                images, use_url=_should_use_presigned_url(), enable_cache=enable_cache,
+            ))
+        else:
+            content = prompt_text
+
         params = {
             "model": client.model,
             "max_tokens": entry_max_tokens,
-            "messages": [{"role": "user", "content": prompt_text}],
+            "messages": [{"role": "user", "content": content}],
         }
         if json_mode and entry_json_mode:
             params["system"] = (
