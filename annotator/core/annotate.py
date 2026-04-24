@@ -100,13 +100,20 @@ def load_prompt(version: str, target: str) -> str:
 def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
                            context_window: int, version: str,
                            dialogue_only: bool = False,
-                           annotator_style: str | None = None) -> list[dict]:
+                           annotator_style: str | None = None,
+                           with_screenshots: bool = False) -> list[dict]:
     """Build batch entries for analysis.
 
     annotator_style is accepted for API compatibility but NOT injected into
     prompts. Style calibration is achieved by iterating the prompt against
     archetype-filtered ground truth, not by injecting style text.
+
+    When with_screenshots=True, attaches per-moment images whose anchor turn
+    falls inside the excerpt window (excerpt_start <= anchor_turn <= excerpt_end,
+    inclusive).
     """
+    from .screenshots import load_anchored_screenshots
+
     prompt_cache = {}
     entries = []
 
@@ -115,6 +122,15 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
         if not conversation:
             logger.warning("No transcript found for %s, skipping", conv_id)
             continue
+
+        all_screenshots = (
+            load_anchored_screenshots(conv_id, conversation["turns"])
+            if with_screenshots else []
+        )
+
+        turns = conversation.get("turns", [])
+        min_turn = turns[0]["turn_number"] if turns else 1
+        max_turn = turns[-1]["turn_number"] if turns else 1
 
         for idx, det in enumerate(conv_data.get("detections", [])):
             ann_type = det.get("annotation_type", "scaffolding")
@@ -125,13 +141,22 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
             turn_end = det.get("turn_end", turn_start)
             brief_desc = det.get("brief_description", "")
 
+            excerpt_start = max(min_turn, turn_start - context_window)
+            excerpt_end = min(max_turn, turn_end + context_window)
+            in_scope = [
+                s for s in all_screenshots
+                if excerpt_start <= s["anchor_turn"] <= excerpt_end
+            ]
+            image_paths = [s["storage_path"] for s in in_scope]
+
             if ann_type not in prompt_cache:
                 prompt_cache[ann_type] = load_prompt(version, ann_type)
 
             excerpt = format_excerpt(
                 conversation, turn_start, turn_end,
                 context_before=context_window, context_after=context_window,
-                dialogue_only=dialogue_only
+                dialogue_only=dialogue_only,
+                screenshots=in_scope if in_scope else None,
             )
 
             prompt = prompt_cache[ann_type]
@@ -142,7 +167,9 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
             prompt = prompt.replace("{turn_end}", str(turn_end))
 
             key = f"{conv_id}__{ann_type}__{idx}"
-            entries.append(build_batch_entry(key, prompt))
+            entries.append(build_batch_entry(
+                key, prompt, images=image_paths or None,
+            ))
 
     return entries
 
@@ -235,7 +262,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  targets: list[str], phase_cfg: dict,
                  dialogue_only: bool = False, context_window: int = 20,
                  gold: bool = False, annotator_style: str | None = None,
-                 detections_by_conv: dict | None = None) -> dict:
+                 detections_by_conv: dict | None = None,
+                 with_screenshots: bool = False) -> dict:
     """Run annotation pass. Returns the full output dict (with 'results' key).
 
     If detections_by_conv is provided, uses it directly instead of reading
@@ -264,11 +292,17 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
 
     client = ModelClient(model)
 
+    if with_screenshots:
+        from .client import validate_vision_support
+        validate_vision_support(model)
+        print("Screenshots: enabled -- vision model validated, caching ON")
+
     enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
     logger.info("Transcript mode: %s", enrichment_str)
     entries = build_analysis_entries(
         detections_by_conv, conversations_map, context_window, prompt_version,
-        dialogue_only=dialogue_only, annotator_style=annotator_style
+        dialogue_only=dialogue_only, annotator_style=annotator_style,
+        with_screenshots=with_screenshots,
     )
     jsonl_path = str(output_dir / "annotate_requests.jsonl")
     write_jsonl(entries, jsonl_path)
@@ -276,14 +310,35 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
 
     if mode == "batch":
         poll_interval = phase_cfg["poll_interval"]
-        raw = run_batch(client, entries, display_name="annotate", poll_interval=poll_interval,
-                       thinking=phase_cfg.get("thinking", False),
-                       thinking_budget=phase_cfg.get("thinking_budget", 0),
-                       reasoning_effort=phase_cfg.get("reasoning_effort", ""))
+        raw = run_batch(client, entries, display_name="annotate",
+                        poll_interval=poll_interval,
+                        thinking=phase_cfg.get("thinking", False),
+                        thinking_budget=phase_cfg.get("thinking_budget", 0),
+                        reasoning_effort=phase_cfg.get("reasoning_effort", ""),
+                        enable_cache=with_screenshots)
     else:
         logger.info("Running %d entries in sync mode...", len(entries))
         raw = run_sync_entries(client, entries)
     results = parse_and_merge(raw, detections_by_conv)
+
+    images_per_key = {
+        e["key"]: len(e["request"].get("images", []))
+        for e in entries
+    }
+    for conv_id, conv_result in results.items():
+        for i, ann in enumerate(conv_result["annotations"]):
+            ann_type = ann.get("annotation_type", "scaffolding")
+            k = f"{conv_id}__{ann_type}__{i}"
+            ann["images_seen"] = images_per_key.get(k, 0)
+        conv_result["images_seen"] = sum(a.get("images_seen", 0) for a in conv_result["annotations"])
+
+    total_images_sent = sum(images_per_key.values())
+    convs_with_images = sum(1 for r in results.values() if r.get("images_seen", 0) > 0)
+    annotations_with_images = sum(
+        1 for r in results.values()
+        for a in r["annotations"]
+        if a.get("images_seen", 0) > 0
+    )
 
     total_annotations = sum(len(r["annotations"]) for r in results.values())
     total_input = sum(r["usage"]["input_tokens"] for r in results.values())
@@ -304,6 +359,10 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
         "thinking_budget": phase_cfg.get("thinking_budget", 0),
         "total_conversations": len(results),
         "total_annotations": total_annotations,
+        "with_screenshots": with_screenshots,
+        "convs_with_images": convs_with_images,
+        "annotations_with_images": annotations_with_images,
+        "total_images_sent": total_images_sent,
         "results": results,
         "token_summary": {
             "total_input_tokens": total_input,
@@ -352,6 +411,9 @@ def main():
     parser.add_argument("--annotator-style", "--style", choices=VALID_ANNOTATOR_STYLES,
                         default=None, dest="annotator_style",
                         help="Annotator archetype to simulate (generous/balanced/demanding)")
+    parser.add_argument("--with-screenshots", action="store_true",
+                        help="Include anchored screenshots from each moment's "
+                             "context window. Requires a vision-capable model.")
     args = parser.parse_args()
 
     from .config import resolve_run_params
@@ -379,7 +441,8 @@ def main():
                           prompt_version=prompt_version, targets=args.target,
                           phase_cfg=phase_cfg, dialogue_only=args.dialogue_only,
                           context_window=context_window, gold=args.gold,
-                          annotator_style=style)
+                          annotator_style=style,
+                          with_screenshots=args.with_screenshots)
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
