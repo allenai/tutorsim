@@ -150,6 +150,36 @@ class TestLocalBackend:
         assert loaded["turns"][0]["start_seconds"] == 0.0
         assert loaded["turns"][1]["start_seconds"] == 0.0
 
+    def test_list_screenshots(self, local_storage):
+        from annotator.core.storage import list_screenshots
+        files = list_screenshots("2024-t1_2024-s1_099bf759-abcd")
+        assert sorted(files) == ["11.500.jpg", "4.000.jpg"]
+
+    def test_list_screenshots_missing_conv_returns_empty(self, local_storage):
+        from annotator.core.storage import list_screenshots
+        assert list_screenshots("nonexistent_conv") == []
+
+    def test_load_screenshot_bytes(self, local_storage):
+        from annotator.core.storage import load_screenshot_bytes
+        data = load_screenshot_bytes("2024-t1_2024-s1_099bf759-abcd", "4.000.jpg")
+        assert data == b"fake-jpg-1"
+
+    def test_load_screenshot_verification(self, local_storage):
+        from annotator.core.storage import load_screenshot_verification
+        meta = load_screenshot_verification("2024-t1_2024-s1_099bf759-abcd")
+        assert meta["images"]["11.500.jpg"]["eedi_ip"] is True
+        assert meta["images"]["4.000.jpg"]["flagged"] is False
+
+    def test_load_screenshot_verification_missing_returns_empty(self, local_storage):
+        from annotator.core.storage import load_screenshot_verification
+        assert load_screenshot_verification("no_such_conv") == {}
+
+    def test_get_screenshot_uri_local(self, local_storage):
+        from annotator.core.storage import get_screenshot_uri
+        uri = get_screenshot_uri("2024-t1_2024-s1_099bf759-abcd", "4.000.jpg")
+        assert uri.startswith("file://")
+        assert uri.endswith("4.000.jpg")
+
 
 class TestS3Backend:
     @pytest.fixture

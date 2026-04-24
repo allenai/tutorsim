@@ -14,6 +14,7 @@ storage:
       - data/ground_truth_v2
     annotator_results: results/annotator
     benchmark_results: results/benchmark
+    screenshots: deidentified/screenshots
 
 # Annotator model config
 

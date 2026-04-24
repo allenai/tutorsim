@@ -18,6 +18,7 @@ Env vars (override config.yaml):
 
 import json
 import os
+import re
 from abc import ABC, abstractmethod
 from fnmatch import fnmatch
 from pathlib import Path
@@ -67,6 +68,26 @@ def _parse_timestamp_seconds(ts: str) -> float:
         return float(s)
     except ValueError:
         return 0.0
+
+
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+_CONV_ID_PREFIX_RE = re.compile(r"^\d{4}-t\d+_\d{4}-s\d+_")
+
+
+def _conv_id_to_uuid(conv_id: str) -> str:
+    """Extract the UUID component from a full conv_id.
+
+    Accepts bare UUIDs (returned as-is) and full conv_ids like
+    '2024-tN_2024-sN_099bf759-...' (UUID extracted).
+    """
+    m = _UUID_RE.search(conv_id)
+    if m:
+        return m.group(0)
+    # Strip '{year-tN}_{year-sN}_' prefix if present (handles shortened test UUIDs)
+    stripped = _CONV_ID_PREFIX_RE.sub("", conv_id)
+    if stripped != conv_id:
+        return stripped
+    return conv_id
 
 
 def _annotate_turns_with_start_seconds(conv: dict) -> dict:
@@ -645,3 +666,66 @@ def list_benchmark_result_files(version: str, *prefix_parts: str) -> list[str]:
 def get_benchmark_result_path(version: str, *path_parts: str) -> Path:
     """Get the local Path for a benchmark result (for local backend only)."""
     return _get_backend().get_local_path(_bench_rel(version, *path_parts))
+
+
+# ===================================================================
+# Public API -- Screenshots
+# ===================================================================
+
+def _screenshot_root() -> str:
+    """Return the configured screenshots prefix (e.g. 'deidentified/screenshots')."""
+    paths = _get_path_list("screenshots")
+    if not paths:
+        return "deidentified/screenshots"
+    return paths[0]
+
+
+def _screenshot_rel_path(conv_id: str, filename: str) -> str:
+    return f"{_screenshot_root()}/{_conv_id_to_uuid(conv_id)}/{filename}"
+
+
+def list_screenshots(conv_id: str) -> list[str]:
+    """Return screenshot filenames for a conversation, sorted.
+
+    Returns [] if the conversation has no screenshots. Skips the _metadata.json
+    sidecar and any non-image entries.
+    """
+    be = _get_backend()
+    uuid = _conv_id_to_uuid(conv_id)
+    prefix = f"{_screenshot_root()}/{uuid}"
+
+    if isinstance(be, LocalBackend):
+        directory = be.root / prefix
+        if not directory.exists():
+            return []
+        names = [p.name for p in directory.iterdir() if p.is_file()]
+    else:
+        # S3: use a dedicated listing since list_files is json-only
+        prefix_key = be._key(prefix.rstrip("/") + "/")
+        names = []
+        paginator = be.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=be.bucket, Prefix=prefix_key):
+            for obj in page.get("Contents", []):
+                names.append(obj["Key"].rsplit("/", 1)[-1])
+
+    return sorted(
+        n for n in names
+        if not n.startswith("_") and n.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+    )
+
+
+def load_screenshot_bytes(conv_id: str, filename: str) -> bytes:
+    return _get_backend().read_bytes(_screenshot_rel_path(conv_id, filename))
+
+
+def get_screenshot_uri(conv_id: str, filename: str) -> str:
+    return _get_backend().get_presigned_url(_screenshot_rel_path(conv_id, filename))
+
+
+def load_screenshot_verification(conv_id: str) -> dict:
+    """Read _metadata.json for a conv. Returns {} if absent."""
+    be = _get_backend()
+    uuid = _conv_id_to_uuid(conv_id)
+    rel = f"{_screenshot_root()}/{uuid}/_metadata.json"
+    data = be.read_json(rel)
+    return data or {}
