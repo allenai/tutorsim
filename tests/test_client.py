@@ -190,3 +190,49 @@ class TestImageBlocks:
         assert "inline_data" in blocks[0]
         assert blocks[0]["inline_data"]["mime_type"] == "image/jpeg"
         assert "data" in blocks[0]["inline_data"]
+
+
+class TestGenerateWithImages:
+    def test_anthropic_sends_image_blocks(self, monkeypatch):
+        """generate() with images wraps them into Anthropic content blocks."""
+        from annotator.core.client import ModelClient
+
+        captured = {}
+
+        class FakeResponse:
+            class Usage:
+                input_tokens = 1
+                output_tokens = 1
+            usage = Usage()
+            content = [type("T", (), {"type": "text", "text": "ok"})()]
+
+        class FakeAnthropic:
+            class messages:
+                @staticmethod
+                def create(**kwargs):
+                    captured.update(kwargs)
+                    return FakeResponse()
+
+        client = ModelClient.__new__(ModelClient)
+        client.model = "claude-opus-4-6"
+        client.provider = "anthropic"
+        client._client = FakeAnthropic()
+
+        # Stub image block builder to avoid storage calls
+        import annotator.core.client as c
+        monkeypatch.setattr(
+            c, "_build_image_blocks_anthropic",
+            lambda paths, use_url, enable_cache: [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "xx"}}
+            ],
+        )
+        monkeypatch.setattr(c, "_should_use_presigned_url", lambda: False)
+
+        resp = client.generate("hello", images=["foo.jpg"], json_mode=False)
+        assert resp.text == "ok"
+        content = captured["messages"][0]["content"]
+        # Multimodal content is a list of blocks: text block + image block(s)
+        assert isinstance(content, list)
+        assert content[0]["type"] == "text"
+        assert content[0]["text"] == "hello"
+        assert content[1]["type"] == "image"

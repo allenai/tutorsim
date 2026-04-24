@@ -218,26 +218,14 @@ class ModelClient:
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
-    def generate(self, prompt: str, json_mode: bool = True,
+    def generate(self, prompt: str,
+                 images: list[str] | None = None,
+                 json_mode: bool = True,
                  max_tokens: int = 0, timeout: int = 120,
                  thinking: bool = False,
                  thinking_budget: int = 0,
-                 reasoning_effort: str = "") -> ModelResponse:
-        """Make a synchronous API call with retry logic.
-
-        Args:
-            prompt: The user prompt text.
-            json_mode: If True, request structured JSON output.
-            max_tokens: Max output tokens. 0 = use provider default.
-            timeout: Timeout in seconds per attempt.
-            thinking: If True, enable thinking/reasoning mode (Gemini, Anthropic).
-            thinking_budget: Token budget for thinking mode. 0 = use provider default.
-            reasoning_effort: OpenAI reasoning effort ('low', 'medium', 'high').
-                Empty string = don't set (use model default).
-
-        Returns:
-            ModelResponse with .text and .usage fields.
-        """
+                 reasoning_effort: str = "",
+                 enable_cache: bool = False) -> ModelResponse:
         if max_tokens <= 0:
             max_tokens = MAX_OUTPUT_TOKENS.get(self.provider, 8192)
 
@@ -250,14 +238,17 @@ class ModelClient:
             try:
                 if self.provider == "gemini":
                     return self._generate_gemini(prompt, json_mode, max_tokens, timeout,
-                                                 thinking, thinking_budget)
+                                                 thinking, thinking_budget, images)
                 elif self.provider == "openai":
                     return self._generate_openai(prompt, json_mode, max_tokens, timeout,
                                                   thinking, thinking_budget,
-                                                  reasoning_effort=reasoning_effort)
+                                                  reasoning_effort=reasoning_effort,
+                                                  images=images)
                 elif self.provider == "anthropic":
                     return self._generate_anthropic(prompt, json_mode, max_tokens, timeout,
-                                                     thinking, thinking_budget)
+                                                     thinking, thinking_budget,
+                                                     images=images,
+                                                     enable_cache=enable_cache)
             except Exception as e:
                 last_error = e
                 delay = base_delay * (2 ** attempt)
@@ -273,7 +264,7 @@ class ModelClient:
         )
 
     def _generate_gemini(self, prompt, json_mode, max_tokens, timeout,
-                         thinking=False, thinking_budget=0):
+                         thinking=False, thinking_budget=0, images=None):
         """Gemini API call via google-genai SDK."""
         config = {
             "max_output_tokens": max_tokens,
@@ -285,9 +276,15 @@ class ModelClient:
             budget = thinking_budget if thinking_budget > 0 else 16384
             config["thinking_config"] = {"include_thoughts": True, "thinking_budget": budget}
 
+        if images:
+            contents = [{"role": "user",
+                         "parts": [{"text": prompt}] + _build_image_blocks_gemini(images)}]
+        else:
+            contents = prompt
+
         response = self._client.models.generate_content(
             model=f"models/{self.model}",
-            contents=prompt,
+            contents=contents,
             config=config,
         )
 
@@ -302,11 +299,19 @@ class ModelClient:
 
     def _generate_openai(self, prompt, json_mode, max_tokens, timeout,
                          thinking=False, thinking_budget=0,
-                         reasoning_effort: str = ""):
+                         reasoning_effort: str = "", images=None):
         """OpenAI API call via openai SDK."""
+        if images:
+            content = [{"type": "text", "text": prompt}]
+            content.extend(_build_image_blocks_openai(
+                images, use_url=_should_use_presigned_url(),
+            ))
+        else:
+            content = prompt
+
         kwargs = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "max_completion_tokens": max_tokens,
             "timeout": timeout,
         }
@@ -326,7 +331,8 @@ class ModelClient:
         return ModelResponse(text=text, usage=usage)
 
     def _generate_anthropic(self, prompt, json_mode, max_tokens, timeout,
-                            thinking=False, thinking_budget=0):
+                            thinking=False, thinking_budget=0,
+                            images=None, enable_cache=False):
         """Anthropic API call via anthropic SDK."""
         system_parts = []
         if json_mode:
@@ -336,10 +342,18 @@ class ModelClient:
                 "outside the JSON object."
             )
 
+        if images:
+            content = [{"type": "text", "text": prompt}]
+            content.extend(_build_image_blocks_anthropic(
+                images, use_url=_should_use_presigned_url(), enable_cache=enable_cache,
+            ))
+        else:
+            content = prompt
+
         kwargs = {
             "model": self.model,
             "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": content}],
             "timeout": timeout,
         }
         if system_parts:
