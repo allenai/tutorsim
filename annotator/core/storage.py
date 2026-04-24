@@ -119,6 +119,15 @@ class StorageBackend(ABC):
     @abstractmethod
     def get_local_path(self, rel_path: str) -> Path: ...
 
+    @abstractmethod
+    def read_bytes(self, rel_path: str) -> bytes: ...
+
+    @abstractmethod
+    def write_bytes(self, rel_path: str, data: bytes) -> None: ...
+
+    @abstractmethod
+    def get_presigned_url(self, rel_path: str, expires_seconds: int = 172800) -> str: ...
+
 
 class LocalBackend(StorageBackend):
     def __init__(self, root: Path):
@@ -159,6 +168,25 @@ class LocalBackend(StorageBackend):
         else:
             path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def read_bytes(self, rel_path: str) -> bytes:
+        path = self.root / rel_path
+        if not path.exists():
+            raise FileNotFoundError(f"Not found: {path}")
+        with open(path, "rb") as f:
+            return f.read()
+
+    def write_bytes(self, rel_path: str, data: bytes) -> None:
+        path = self.root / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "wb") as f:
+            f.write(data)
+        os.replace(tmp_path, path)
+
+    def get_presigned_url(self, rel_path: str, expires_seconds: int = 172800) -> str:
+        path = (self.root / rel_path).resolve()
+        return path.as_uri()
 
 
 class S3Backend(StorageBackend):
@@ -223,6 +251,25 @@ class S3Backend(StorageBackend):
         raise RuntimeError(
             "get_local_path not available in S3 mode. "
             "Use read_json/write_json for data access."
+        )
+
+    def read_bytes(self, rel_path: str) -> bytes:
+        key = self._key(rel_path)
+        try:
+            resp = self.client.get_object(Bucket=self.bucket, Key=key)
+            return resp["Body"].read()
+        except self.client.exceptions.NoSuchKey:
+            raise FileNotFoundError(f"s3://{self.bucket}/{key}")
+
+    def write_bytes(self, rel_path: str, data: bytes) -> None:
+        key = self._key(rel_path)
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=data)
+
+    def get_presigned_url(self, rel_path: str, expires_seconds: int = 172800) -> str:
+        return self.client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": self.bucket, "Key": self._key(rel_path)},
+            ExpiresIn=expires_seconds,
         )
 
 

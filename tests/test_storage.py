@@ -88,6 +88,27 @@ class TestLocalBackend:
         st._backend = None
         st._cache.clear()
 
+    def test_read_write_bytes_roundtrip(self, local_storage):
+        from annotator.core.storage import _get_backend
+        be = _get_backend()
+        payload = b"\x89PNG\r\n\x1a\nfake image bytes"
+        be.write_bytes("screenshots/test/hello.jpg", payload)
+        assert be.read_bytes("screenshots/test/hello.jpg") == payload
+
+    def test_read_bytes_missing_raises(self, local_storage):
+        from annotator.core.storage import _get_backend
+        be = _get_backend()
+        with pytest.raises(FileNotFoundError):
+            be.read_bytes("nope/nope.jpg")
+
+    def test_local_presigned_url_is_file_uri(self, local_storage):
+        from annotator.core.storage import _get_backend
+        be = _get_backend()
+        be.write_bytes("screenshots/x/y.jpg", b"abc")
+        url = be.get_presigned_url("screenshots/x/y.jpg")
+        assert url.startswith("file://")
+        assert url.endswith("y.jpg")
+
 
 class TestS3Backend:
     @pytest.fixture
@@ -134,3 +155,34 @@ class TestS3Backend:
             from annotator.core.storage import get_annotator_result_path
             with pytest.raises(RuntimeError, match="S3 mode"):
                 get_annotator_result_path("v1")
+
+    def test_s3_read_write_bytes(self, s3_env):
+        import boto3
+        from moto import mock_aws
+        with mock_aws():
+            s3 = boto3.client("s3", region_name="us-east-1")
+            s3.create_bucket(Bucket="test-bucket")
+
+            import annotator.core.storage as st
+            st._backend = None
+            be = st._get_backend()
+
+            payload = b"\x89PNG\r\n\x1a\nbytes"
+            be.write_bytes("screenshots/a/b.jpg", payload)
+            assert be.read_bytes("screenshots/a/b.jpg") == payload
+
+    def test_s3_presigned_url_is_https(self, s3_env):
+        import boto3
+        from moto import mock_aws
+        with mock_aws():
+            s3 = boto3.client("s3", region_name="us-east-1")
+            s3.create_bucket(Bucket="test-bucket")
+
+            import annotator.core.storage as st
+            st._backend = None
+            be = st._get_backend()
+            be.write_bytes("screenshots/a/b.jpg", b"x")
+            url = be.get_presigned_url("screenshots/a/b.jpg", expires_seconds=3600)
+            assert url.startswith("https://")
+            assert "test-bucket" in url
+            assert "b.jpg" in url
