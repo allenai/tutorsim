@@ -18,6 +18,7 @@ Usage:
 import argparse
 import datetime
 import json
+import logging
 from pathlib import Path
 
 from .client import (
@@ -29,6 +30,8 @@ from .storage import (
     annotator_result_exists, get_annotator_result_path,
 )
 from .utils import format_excerpt, load_ground_truth
+
+logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "annotator"
 
@@ -110,7 +113,7 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
     for conv_id, conv_data in detections_by_conv.items():
         conversation = conversations_map.get(conv_id)
         if not conversation:
-            print(f"WARNING: No transcript found for {conv_id}, skipping")
+            logger.warning("No transcript found for %s, skipping", conv_id)
             continue
 
         for idx, det in enumerate(conv_data.get("detections", [])):
@@ -173,9 +176,9 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
             errors.append({"key": key, "error": f"JSON parse error: {e}", "raw": text[:500]})
 
     if errors:
-        print(f"Parse errors: {len(errors)}")
+        logger.warning("Parse errors: %d", len(errors))
         for err in errors[:5]:
-            print(f"  {err['key']}: {err['error']}")
+            logger.warning("  %s: %s", err["key"], err["error"])
 
     # Merge into final results
     results = {}
@@ -241,35 +244,35 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     output_dir = get_annotator_result_path(version)
 
     conversations_map = load_conversations_map()
-    print(f"Loaded {len(conversations_map)} transcripts")
+    logger.info("Loaded %d transcripts", len(conversations_map))
 
     if detections_by_conv is None:
         if gold:
-            print("Using gold truth moments")
+            logger.info("Using gold truth moments")
             detections_by_conv = load_gold_moments(targets, annotator_style=annotator_style)
         else:
             detections_by_conv = load_detections_from_version(version)
             if detections_by_conv is None:
-                print(f"ERROR: detections.json not found for version {version}. Run detect first, or use --gold.")
+                logger.error("detections.json not found for version %s. Run detect first, or use --gold.", version)
                 return None
-            print(f"Loaded detections for version {version}")
+            logger.info("Loaded detections for version %s", version)
 
     total_moments = sum(len(d["detections"]) for d in detections_by_conv.values())
-    print(f"Moments to annotate: {total_moments} across {len(detections_by_conv)} conversations")
+    logger.info("Moments to annotate: %d across %d conversations", total_moments, len(detections_by_conv))
     style_str = f" | Style: {annotator_style}" if annotator_style else ""
-    print(f"Model: {model} | Mode: {mode} | Context: +/-{context_window} turns{style_str}")
+    logger.info("Model: %s | Mode: %s | Context: +/-%d turns%s", model, mode, context_window, style_str)
 
     client = ModelClient(model)
 
     enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
-    print(f"Transcript mode: {enrichment_str}")
+    logger.info("Transcript mode: %s", enrichment_str)
     entries = build_analysis_entries(
         detections_by_conv, conversations_map, context_window, prompt_version,
         dialogue_only=dialogue_only, annotator_style=annotator_style
     )
     jsonl_path = str(output_dir / "annotate_requests.jsonl")
     write_jsonl(entries, jsonl_path)
-    print(f"Wrote {len(entries)} analysis entries")
+    logger.info("Wrote %d analysis entries", len(entries))
 
     if mode == "batch":
         poll_interval = phase_cfg["poll_interval"]
@@ -278,7 +281,7 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                        thinking_budget=phase_cfg.get("thinking_budget", 0),
                        reasoning_effort=phase_cfg.get("reasoning_effort", ""))
     else:
-        print(f"Running {len(entries)} entries in sync mode...")
+        logger.info("Running %d entries in sync mode...", len(entries))
         raw = run_sync_entries(client, entries)
     results = parse_and_merge(raw, detections_by_conv)
 
@@ -317,10 +320,10 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
         filename = f"annotations{style_suffix}.json"
     save_annotator_result(version, filename, output)
 
-    print(f"\nSaved: {filename} (version: {version})")
-    print(f"  {total_annotations} annotations across {len(results)} conversations")
-    print(f"  Errors: {error_count}")
-    print(f"  Tokens: {total_input + total_output:,}")
+    logger.info("Saved: %s (version: %s)", filename, version)
+    logger.info("  %d annotations across %d conversations", total_annotations, len(results))
+    logger.info("  Errors: %d", error_count)
+    logger.info("  Tokens: %s", f"{total_input + total_output:,}")
 
     return output
 
@@ -380,7 +383,7 @@ def main():
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
-        print(f"\nNext: python -m annotator.core.label --version {version}{gold_flag}{style_flag}")
+        logger.info("Next: python -m annotator.core.label --version %s%s%s", version, gold_flag, style_flag)
 
 
 if __name__ == "__main__":

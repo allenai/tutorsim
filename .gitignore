@@ -8,6 +8,12 @@ __pycache__/
 # Test cache
 .pytest_cache/
 
+# Local virtualenv
+.venv/
+
+# Per-run log files
+logs/
+
 # Raw S3 data (14GB videos + transcripts)
 data/raw/s3/
 

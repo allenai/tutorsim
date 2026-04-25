@@ -17,6 +17,7 @@ import argparse
 import json
 from pathlib import Path
 
+from common.logging_setup import setup_logging
 from annotator.core.client import ModelClient
 from annotator.core.config import get_phase_config, get_annotation_types, get_benchmark_config
 from annotator.core.detect import run_detect
@@ -368,6 +369,8 @@ def main():
             date_str = datetime.date.today().strftime("%Y-%m-%d")
             version = f"{tutor_profile}_{date_str}"
             print(f"  Auto-generated version: {version}")
+
+    setup_logging(version=version)
 
     run_benchmark(version, config)
 
