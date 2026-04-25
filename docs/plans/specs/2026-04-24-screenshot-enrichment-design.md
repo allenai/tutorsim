@@ -137,7 +137,7 @@ VISION_CAPABLE_PREFIXES = (
 
 **MIME inference:** one-line helper from extension. `.jpg`/`.jpeg` → `image/jpeg`, `.png` → `image/png`, `.webp` → `image/webp`. Raises on unknown.
 
-### 4. In-prompt marker convention
+### 4. In-prompt marker convention + interleaved content blocks
 
 Rendered inline by `format_transcript` / `format_excerpt` when `screenshots=` is passed:
 
@@ -150,7 +150,20 @@ Turn 52. TUTOR: now try this one
   [SCREEN @ turn 52: image 2]
 ```
 
-Images are passed ordered by `anchor_turn` ascending; the index `K` in `image K` is the 1-based position in the images list. Marker + image list stay positionally aligned; model can cross-check via the turn number in the marker.
+Images are passed ordered by `anchor_turn` ascending; the index `K` in `image K` is the 1-based position in the images list.
+
+**Content interleaving.** `ModelClient` does NOT pile all image blocks at the end of the content array. `_interleave_text_and_images` splits the prompt at each marker line and inserts the matching image block immediately after the marker. Anthropic / OpenAI / Gemini all receive content of the form:
+
+```
+[text up to and including marker 1] [image 1] [text up to marker 2] [image 2] ... [trailing text]
+```
+
+This gives the model spatial proximity between marker and image — it doesn't have to remember "image 5 was at turn 87" because image 5 *lives* at turn 87 in the content stream. The marker text remains visible so the explicit "turn N" label is still right next to the image.
+
+Edge cases:
+- Marker referencing an out-of-range image index → marker stays as text, no image inserted
+- Image not referenced by any marker → appended at the end (no silent drops)
+- Future enrichment of marker (e.g., `[SCREEN @ turn 45, t=603.8s: image 1]`) — regex permits arbitrary metadata between `SCREEN` and `image N]`
 
 ### 5. Detection integration (`annotator/core/detect.py`)
 

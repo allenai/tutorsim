@@ -263,3 +263,137 @@ class TestExtractEntryWithImages:
         entry = build_batch_entry("k", "p")
         _, _, _, _, images = _extract_entry(entry)
         assert images == []
+
+
+class TestInterleaveTextAndImages:
+    def _txt(self):
+        return lambda s: {"type": "text", "text": s}
+
+    def _imgs(self, n):
+        return [{"type": "image", "id": i} for i in range(n)]
+
+    def test_no_markers_no_images_returns_single_text(self):
+        from annotator.core.client import _interleave_text_and_images
+        out = _interleave_text_and_images("hello world", [], self._txt())
+        assert out == [{"type": "text", "text": "hello world"}]
+
+    def test_no_markers_with_orphan_images_appended_at_end(self):
+        from annotator.core.client import _interleave_text_and_images
+        out = _interleave_text_and_images("hello", self._imgs(2), self._txt())
+        assert out == [
+            {"type": "text", "text": "hello"},
+            {"type": "image", "id": 0},
+            {"type": "image", "id": 1},
+        ]
+
+    def test_one_marker_one_image(self):
+        from annotator.core.client import _interleave_text_and_images
+        prompt = "Turn 1. STUDENT: hi\nTurn 2. TUTOR: look\n  [SCREEN @ turn 2: image 1]\nTurn 3. STUDENT: ok"
+        out = _interleave_text_and_images(prompt, self._imgs(1), self._txt())
+        assert len(out) == 3
+        assert out[0]["type"] == "text"
+        assert out[0]["text"].endswith("[SCREEN @ turn 2: image 1]")
+        assert out[1] == {"type": "image", "id": 0}
+        assert out[2]["type"] == "text"
+        assert out[2]["text"].startswith("\nTurn 3.")
+
+    def test_multiple_markers_in_order(self):
+        from annotator.core.client import _interleave_text_and_images
+        prompt = (
+            "Turn 1. TUTOR: a\n"
+            "  [SCREEN @ turn 1: image 1]\n"
+            "Turn 2. STUDENT: b\n"
+            "Turn 3. TUTOR: c\n"
+            "  [SCREEN @ turn 3: image 2]\n"
+            "Turn 4. STUDENT: d"
+        )
+        out = _interleave_text_and_images(prompt, self._imgs(2), self._txt())
+        # text, image0, text, image1, text
+        types = [p.get("type") for p in out]
+        assert types == ["text", "image", "text", "image", "text"]
+        assert out[1]["id"] == 0
+        assert out[3]["id"] == 1
+
+    def test_marker_referencing_oob_index_kept_as_text_no_image_inserted(self):
+        from annotator.core.client import _interleave_text_and_images
+        prompt = "Turn 1.\n  [SCREEN @ turn 1: image 5]\nTurn 2."
+        out = _interleave_text_and_images(prompt, self._imgs(1), self._txt())
+        # Marker stays as text (prefix + trailing split at marker line). The single
+        # image is orphan -> appended at end. No image is silently dropped.
+        types = [p.get("type") for p in out]
+        assert types == ["text", "text", "image"]
+        assert "[SCREEN @ turn 1: image 5]" in out[0]["text"]
+        assert out[1]["text"].startswith("\nTurn 2.")
+        assert out[2]["id"] == 0
+
+    def test_gemini_text_block_shape(self):
+        from annotator.core.client import _interleave_text_and_images
+        prompt = "a\n  [SCREEN @ turn 1: image 1]\nb"
+        out = _interleave_text_and_images(
+            prompt,
+            [{"inline_data": {"mime_type": "image/jpeg", "data": "xx"}}],
+            lambda s: {"text": s},
+        )
+        assert out[0] == {"text": "a\n  [SCREEN @ turn 1: image 1]"}
+        assert "inline_data" in out[1]
+        assert out[2] == {"text": "\nb"}
+
+    def test_marker_with_extra_metadata_in_brackets_still_matches(self):
+        # Future-proof: timestamp embedded in marker should not break interleaving.
+        from annotator.core.client import _interleave_text_and_images
+        prompt = "x\n  [SCREEN @ turn 5, t=603.8s: image 1]\ny"
+        out = _interleave_text_and_images(prompt, self._imgs(1), self._txt())
+        types = [p.get("type") for p in out]
+        assert types == ["text", "image", "text"]
+
+
+class TestGenerateWithImagesInterleaved:
+    def test_anthropic_interleaves_at_marker_position(self, monkeypatch):
+        """Image block lands immediately after its marker, not at the end."""
+        from annotator.core.client import ModelClient
+
+        captured = {}
+
+        class FakeResponse:
+            class Usage:
+                input_tokens = 1
+                output_tokens = 1
+            usage = Usage()
+            content = [type("T", (), {"type": "text", "text": "ok"})()]
+
+        class FakeAnthropic:
+            class messages:
+                @staticmethod
+                def create(**kwargs):
+                    captured.update(kwargs)
+                    return FakeResponse()
+
+        client = ModelClient.__new__(ModelClient)
+        client.model = "claude-opus-4-6"
+        client.provider = "anthropic"
+        client._client = FakeAnthropic()
+
+        import annotator.core.client as c
+        monkeypatch.setattr(
+            c, "_build_image_blocks_anthropic",
+            lambda paths, use_url, enable_cache: [
+                {"type": "image", "tag": f"img-{i}"} for i, _ in enumerate(paths)
+            ],
+        )
+        monkeypatch.setattr(c, "_should_use_presigned_url", lambda: False)
+
+        prompt = (
+            "Turn 1. STUDENT: hi\n"
+            "Turn 2. TUTOR: look\n"
+            "  [SCREEN @ turn 2: image 1]\n"
+            "Turn 3. STUDENT: ok"
+        )
+        client.generate(prompt, images=["a.jpg"], json_mode=False)
+        content = captured["messages"][0]["content"]
+        # Expect text-up-to-and-including-marker, then image, then trailing text.
+        assert len(content) == 3
+        assert content[0]["type"] == "text"
+        assert content[0]["text"].endswith("[SCREEN @ turn 2: image 1]")
+        assert content[1] == {"type": "image", "tag": "img-0"}
+        assert content[2]["type"] == "text"
+        assert content[2]["text"].startswith("\nTurn 3.")

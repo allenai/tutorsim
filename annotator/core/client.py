@@ -152,6 +152,61 @@ def _build_image_blocks_gemini(image_paths: list[str]) -> list[dict]:
     return blocks
 
 
+# Marker emitted by format_transcript / format_excerpt at each anchored screenshot.
+# Permissive on the content between SCREEN and `image N]` so future enrichments
+# (e.g. timestamp) don't break interleaving.
+_SCREEN_MARKER_RE = re.compile(
+    r"^[ \t]*\[SCREEN[^\]]*?image (\d+)\][ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _interleave_text_and_images(
+    prompt: str,
+    image_blocks: list[dict],
+    text_block: callable,
+) -> list[dict]:
+    """Split prompt at screenshot markers and insert image blocks at their referenced positions.
+
+    Each `[SCREEN ... image K]` marker line in the prompt is followed in the output by
+    `image_blocks[K-1]`. The marker line itself is preserved as text so the model still
+    sees the explicit "turn N" label next to the image.
+
+    `text_block` wraps a string into the provider's text-block shape:
+      Anthropic / OpenAI: `lambda s: {"type": "text", "text": s}`
+      Gemini:             `lambda s: {"text": s}`
+
+    A marker referencing an out-of-range index is left as text (no image inserted).
+    Image blocks not referenced by any marker are appended at the end so no image
+    is ever silently dropped.
+    """
+    parts: list[dict] = []
+    cursor = 0
+    used: set[int] = set()
+
+    for m in _SCREEN_MARKER_RE.finditer(prompt):
+        chunk = prompt[cursor:m.end()]
+        if chunk:
+            parts.append(text_block(chunk))
+        cursor = m.end()
+
+        idx = int(m.group(1)) - 1  # 1-based markers, 0-based list
+        if 0 <= idx < len(image_blocks):
+            parts.append(image_blocks[idx])
+            used.add(idx)
+
+    if cursor < len(prompt):
+        tail = prompt[cursor:]
+        if tail:
+            parts.append(text_block(tail))
+
+    for i, block in enumerate(image_blocks):
+        if i not in used:
+            parts.append(block)
+
+    return parts if parts else [text_block(prompt)]
+
+
 def infer_provider(model: str) -> str:
     """Infer provider from model name string.
 
@@ -277,8 +332,11 @@ class ModelClient:
             config["thinking_config"] = {"include_thoughts": True, "thinking_budget": budget}
 
         if images:
-            contents = [{"role": "user",
-                         "parts": [{"text": prompt}] + _build_image_blocks_gemini(images)}]
+            image_blocks = _build_image_blocks_gemini(images)
+            parts = _interleave_text_and_images(
+                prompt, image_blocks, lambda s: {"text": s},
+            )
+            contents = [{"role": "user", "parts": parts}]
         else:
             contents = prompt
 
@@ -302,10 +360,12 @@ class ModelClient:
                          reasoning_effort: str = "", images=None):
         """OpenAI API call via openai SDK."""
         if images:
-            content = [{"type": "text", "text": prompt}]
-            content.extend(_build_image_blocks_openai(
+            image_blocks = _build_image_blocks_openai(
                 images, use_url=_should_use_presigned_url(),
-            ))
+            )
+            content = _interleave_text_and_images(
+                prompt, image_blocks, lambda s: {"type": "text", "text": s},
+            )
         else:
             content = prompt
 
@@ -343,10 +403,12 @@ class ModelClient:
             )
 
         if images:
-            content = [{"type": "text", "text": prompt}]
-            content.extend(_build_image_blocks_anthropic(
+            image_blocks = _build_image_blocks_anthropic(
                 images, use_url=_should_use_presigned_url(), enable_cache=enable_cache,
-            ))
+            )
+            content = _interleave_text_and_images(
+                prompt, image_blocks, lambda s: {"type": "text", "text": s},
+            )
         else:
             content = prompt
 
@@ -525,9 +587,13 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
                                       encoding="utf-8") as f:
         for entry in entries:
             key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
-            parts = [{"text": prompt_text}]
             if images:
-                parts.extend(_build_image_blocks_gemini(images))
+                image_blocks = _build_image_blocks_gemini(images)
+                parts = _interleave_text_and_images(
+                    prompt_text, image_blocks, lambda s: {"text": s},
+                )
+            else:
+                parts = [{"text": prompt_text}]
             gem_entry = {
                 "key": key,
                 "request": {
@@ -644,10 +710,12 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
                 entry_max_tokens = max_tokens
 
             if images:
-                content = [{"type": "text", "text": prompt_text}]
-                content.extend(_build_image_blocks_openai(
+                image_blocks = _build_image_blocks_openai(
                     images, use_url=_should_use_presigned_url(),
-                ))
+                )
+                content = _interleave_text_and_images(
+                    prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
+                )
             else:
                 content = prompt_text
 
@@ -774,10 +842,12 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
         id_to_key[short_id] = key
 
         if images:
-            content = [{"type": "text", "text": prompt_text}]
-            content.extend(_build_image_blocks_anthropic(
+            image_blocks = _build_image_blocks_anthropic(
                 images, use_url=_should_use_presigned_url(), enable_cache=enable_cache,
-            ))
+            )
+            content = _interleave_text_and_images(
+                prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
+            )
         else:
             content = prompt_text
 
