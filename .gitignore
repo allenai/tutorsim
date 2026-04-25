@@ -27,6 +27,6 @@ synthetic_annotator/
 history/
 
 # Claude Code session data
-.claude/
+.claude/settings.local.json
 *.html
 *.pdf
