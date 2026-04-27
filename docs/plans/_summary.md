@@ -64,6 +64,18 @@ Reverse chronological. Stuff that shipped but didn't have a dedicated plan file,
 
 **Coverage**: 4 new shard-helper tests in `test_storage.py`, 1 new test in `test_detect_parse.py` for the `images_seen` / `images_attached` distinction. All 149 tests pass.
 
+### 2026-04-27: Logger format string -- em-dash to pipe
+
+**Problem**: `common/logging_setup.py` `_FORMAT` used a U+2014 em-dash separator (`name — message`). Project memory explicitly flags this: Windows cp1252 stderr can mojibake or raise `UnicodeEncodeError`, and the file handler/stream handler don't necessarily share encoding. Pre-existing in the shared-logging plan; flagged after a code review of the screenshot-enrichment PR routed more traffic through the format.
+
+**Change**: One-character format-string update -- `—` to `|`. File-handler output (utf-8) is unaffected; stderr handler output now stays inside the cp1252 subset on Windows. Per the project's "log format = public contract" rule, this is recorded here so anyone parsing log lines knows the separator changed.
+
+### 2026-04-27: Annotator per-pass CLIs now call `setup_logging()`
+
+**Problem**: After migrating prints in `detect.py` / `annotate.py` / `label.py` to `logger.info(...)`, INFO records emitted by these modules vanished when invoked directly via `python -m annotator.core.detect` (and the equivalents). Python doesn't run `annotator/__main__.py` for dotted module targets, so the only `setup_logging()` call upstream of those CLIs (`__main__.py`) never executed -- the root logger had no handlers and INFO propagated to the stdlib `lastResort` handler at WARNING-level.
+
+**Change**: `setup_logging(version=version)` is now called in each per-pass `main()` immediately after `resolve_run_params`. Append-mode file handler means a per-pass invocation appends to the same `logs/{version}/run.log` the unified runner uses, so a workflow of `python -m annotator.core.detect` followed by `python -m annotator.core.annotate` produces a single coherent log file. The review-patterns skill checklist was updated to reflect this expanded entry-point list.
+
 ### 2026-04-17: Labeller V2 — Unified Prompt + Outcome-Anchored Criteria
 
 **Problem**: Found 4 divergent labeller prompts with different criteria and different inputs. Ground truth script (`build_ground_truth.py`) only passed result text; pipeline labeller (`classify.txt`) passed situation+action+result. The v1 labeller overused "partial" for anything with hedged language (~690/2115 = 32.6%), masking real disagreement.

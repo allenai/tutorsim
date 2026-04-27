@@ -16,6 +16,7 @@ import json
 import logging
 from pathlib import Path
 
+from common.logging_setup import setup_logging
 from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
@@ -309,6 +310,8 @@ def main():
     version = params["version"]
     style = params["style"]
     prompt_version = params["prompt_version"]
+
+    setup_logging(version=version)
 
     phase_cfg = get_phase_config("detect", profile)
     model = args.model or phase_cfg["model"]

@@ -21,6 +21,7 @@ import json
 import logging
 from pathlib import Path
 
+from common.logging_setup import setup_logging
 from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
@@ -341,7 +342,10 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
 
         new_results = parse_and_merge(raw, detections_to_process)
 
-        # Stamp per-annotation and per-conv image counts before sharding.
+        # Stamp per-annotation image count + per-conv attachment total before sharding.
+        # Per-annotation `images_seen` = images attached to that single prompt.
+        # Per-conv `images_attached` = sum across this conv's prompts -- matches
+        # the same field on detection shards.
         images_per_key = {
             e["key"]: len(e["request"].get("images", []))
             for e in entries
@@ -351,7 +355,7 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                 ann_type = ann.get("annotation_type", "scaffolding")
                 k = f"{conv_id}__{ann_type}__{i}"
                 ann["images_seen"] = images_per_key.get(k, 0)
-            conv_result["images_seen"] = sum(
+            conv_result["images_attached"] = sum(
                 a.get("images_seen", 0) for a in conv_result["annotations"]
             )
             save_annotator_shard(version, output_basename, conv_id, conv_result)
@@ -365,8 +369,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     total_annotations = sum(len(r.get("annotations", [])) for r in results.values())
     total_input = sum(r.get("usage", {}).get("input_tokens", 0) for r in results.values())
     total_output = sum(r.get("usage", {}).get("output_tokens", 0) for r in results.values())
-    total_images_sent = sum(r.get("images_seen", 0) for r in results.values())
-    convs_with_images = sum(1 for r in results.values() if r.get("images_seen", 0) > 0)
+    total_images_sent = sum(r.get("images_attached", 0) for r in results.values())
+    convs_with_images = sum(1 for r in results.values() if r.get("images_attached", 0) > 0)
     annotations_with_images = sum(
         1 for r in results.values()
         for a in r.get("annotations", [])
@@ -451,6 +455,8 @@ def main():
     version = params["version"]
     style = params["style"]
     prompt_version = params["prompt_version"]
+
+    setup_logging(version=version)
 
     phase_cfg = get_phase_config("annotate", profile)
     model = args.model or phase_cfg["model"]
