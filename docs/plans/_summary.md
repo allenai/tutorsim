@@ -46,6 +46,24 @@ Index of planned work and change log for the project. Plans live in this directo
 
 Reverse chronological. Stuff that shipped but didn't have a dedicated plan file, or non-obvious deltas worth recording.
 
+### 2026-04-27: Per-conv resume + finish-the-print-migration
+
+**Problem**: Long batch runs had no recovery point — a Ctrl-C or crash threw away every result that had already streamed back from the provider, and ~50 `print()` calls across `annotator/{core,run.py}` were still bypassing the shared logging infra, so structured `logs/{version}/run.log` artifacts only captured a fraction of what actually happened during a run.
+
+**Changes (resume)**:
+- New `save_annotator_shard` / `list_annotator_shard_ids` / `load_annotator_shards` in `annotator/core/storage.py`. Shards live at `results/annotator/{version}/shards/{basename}/{conv_id}.json`. `basename` is the resolved output filename without `.json` (e.g. `detections`, `annotations_generous`, `annotations_gold`), so each profile/source variant gets its own namespace.
+- `run_detect` and `run_annotate` now pre-filter conv_ids that already have a shard for the same `(version, basename)` and only send the remainder to the model. Per-conv shards are written as soon as `parse_*_results` produces them; the monolithic `detections.json` / `annotations*.json` is then assembled from the union of all shards on disk.
+- `parse_detection_results` records `images_attached` (sum across targets, == API attachments) alongside `images_seen` (per-conv max, == unique images). The aggregate `total_images_sent` is computed from `images_attached` so the metric holds across multi-run aggregation.
+- Caveat: in batch mode, Ctrl-C *during polling* abandons the in-flight provider batch — that compute is lost, but no on-disk state is corrupted. A re-run starts a fresh, smaller batch with only the un-sharded conv_ids.
+
+**Changes (logging)**:
+- `client.py`, `storage.py`, `label.py`, `config.py`, `detect.py`, `run.py` now declare a module-level `logger = logging.getLogger(__name__)`. All non-docstring `print()` calls are migrated.
+- Per-entry chatter (sync `[N/total]` progress, batch poll status) drops to `logger.debug` — gone from default INFO terminals, opt-in via `LOG_LEVEL=DEBUG`. Lifecycle events (uploaded, batch created, finished, downloading) stay at `logger.info`. Retries are `warning`; terminal failures are `error`.
+- `run.py` banner separators (`'=' * 60` between passes) collapse to single `logger.info("=== PASS N: ... ===")` lines — the file handler's timestamp + module already provide structure.
+- The two `print()` calls in `client.py`'s module docstring stay; they're code examples, not runtime output.
+
+**Coverage**: 4 new shard-helper tests in `test_storage.py`, 1 new test in `test_detect_parse.py` for the `images_seen` / `images_attached` distinction. All 149 tests pass.
+
 ### 2026-04-17: Labeller V2 — Unified Prompt + Outcome-Anchored Criteria
 
 **Problem**: Found 4 divergent labeller prompts with different criteria and different inputs. Ground truth script (`build_ground_truth.py`) only passed result text; pipeline labeller (`classify.txt`) passed situation+action+result. The v1 labeller overused "partial" for anything with hedged language (~690/2115 = 32.6%), masking real disagreement.
