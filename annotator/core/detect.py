@@ -212,6 +212,11 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
         write_jsonl(entries, jsonl_path)
         logger.info("Wrote %d detection entries", len(entries))
 
+        images_per_key = {
+            e["key"]: len(e["request"].get("images", []))
+            for e in entries
+        }
+
         if mode == "batch":
             poll_interval = phase_cfg["poll_interval"]
             raw = run_batch(client, entries, display_name="detect",
@@ -219,21 +224,25 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                             thinking=phase_cfg.get("thinking", False),
                             thinking_budget=phase_cfg.get("thinking_budget", 0),
                             reasoning_effort=phase_cfg.get("reasoning_effort", ""))
+            new_by_conv = parse_detection_results(raw, images_per_key=images_per_key)
+            for conv_id, conv_data in new_by_conv.items():
+                save_annotator_shard(version, "detections", conv_id, conv_data)
+                logger.debug("Shard saved: %s", conv_id)
         else:
-            logger.info("Running %d entries in sync mode...", len(entries))
-            raw = run_sync_entries(client, entries)
-
-        images_per_key = {
-            e["key"]: len(e["request"].get("images", []))
-            for e in entries
-        }
-        new_by_conv = parse_detection_results(raw, images_per_key=images_per_key)
-
-        # Persist each new conv's slice as a shard before any aggregation, so
-        # a crash now leaves valid partial state on disk.
-        for conv_id, conv_data in new_by_conv.items():
-            save_annotator_shard(version, "detections", conv_id, conv_data)
-            logger.debug("Shard saved: %s", conv_id)
+            # Per-conv sync: shard after each conv's entries return so a
+            # ctrl-C between convs leaves valid partial state on disk.
+            entries_by_conv: dict[str, list[dict]] = {}
+            for e in entries:
+                cid = e["key"].split("__", 1)[0]
+                entries_by_conv.setdefault(cid, []).append(e)
+            logger.info("Running %d convs in sync mode...", len(entries_by_conv))
+            for i, (conv_id, conv_entries) in enumerate(entries_by_conv.items(), start=1):
+                logger.info("Conv %d/%d: %s", i, len(entries_by_conv), conv_id)
+                raw_conv = run_sync_entries(client, conv_entries)
+                parsed_conv = parse_detection_results(raw_conv, images_per_key=images_per_key)
+                if conv_id in parsed_conv:
+                    save_annotator_shard(version, "detections", conv_id, parsed_conv[conv_id])
+                    logger.debug("Shard saved: %s", conv_id)
     else:
         logger.info("All %d conversations already have shards -- nothing to send", len(conversations))
 

@@ -328,6 +328,26 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
         write_jsonl(entries, jsonl_path)
         logger.info("Wrote %d analysis entries", len(entries))
 
+        # Per-annotation `images_seen` = images attached to that single prompt.
+        # Per-conv `images_attached` = sum across this conv's prompts -- matches
+        # the same field on detection shards.
+        images_per_key = {
+            e["key"]: len(e["request"].get("images", []))
+            for e in entries
+        }
+
+        def _stamp_and_shard(conv_results: dict) -> None:
+            for cid, cresult in conv_results.items():
+                for i, ann in enumerate(cresult["annotations"]):
+                    ann_type = ann.get("annotation_type", "scaffolding")
+                    k = f"{cid}__{ann_type}__{i}"
+                    ann["images_seen"] = images_per_key.get(k, 0)
+                cresult["images_attached"] = sum(
+                    a.get("images_seen", 0) for a in cresult["annotations"]
+                )
+                save_annotator_shard(version, output_basename, cid, cresult)
+                logger.debug("Shard saved: %s", cid)
+
         if mode == "batch":
             poll_interval = phase_cfg["poll_interval"]
             raw = run_batch(client, entries, display_name="annotate",
@@ -336,30 +356,20 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                             thinking_budget=phase_cfg.get("thinking_budget", 0),
                             reasoning_effort=phase_cfg.get("reasoning_effort", ""),
                             enable_cache=with_screenshots)
+            _stamp_and_shard(parse_and_merge(raw, detections_to_process))
         else:
-            logger.info("Running %d entries in sync mode...", len(entries))
-            raw = run_sync_entries(client, entries)
-
-        new_results = parse_and_merge(raw, detections_to_process)
-
-        # Stamp per-annotation image count + per-conv attachment total before sharding.
-        # Per-annotation `images_seen` = images attached to that single prompt.
-        # Per-conv `images_attached` = sum across this conv's prompts -- matches
-        # the same field on detection shards.
-        images_per_key = {
-            e["key"]: len(e["request"].get("images", []))
-            for e in entries
-        }
-        for conv_id, conv_result in new_results.items():
-            for i, ann in enumerate(conv_result["annotations"]):
-                ann_type = ann.get("annotation_type", "scaffolding")
-                k = f"{conv_id}__{ann_type}__{i}"
-                ann["images_seen"] = images_per_key.get(k, 0)
-            conv_result["images_attached"] = sum(
-                a.get("images_seen", 0) for a in conv_result["annotations"]
-            )
-            save_annotator_shard(version, output_basename, conv_id, conv_result)
-            logger.debug("Shard saved: %s", conv_id)
+            # Per-conv sync: shard after each conv's entries return so a
+            # ctrl-C between convs leaves valid partial state on disk.
+            entries_by_conv: dict[str, list[dict]] = {}
+            for e in entries:
+                cid = e["key"].split("__", 1)[0]
+                entries_by_conv.setdefault(cid, []).append(e)
+            logger.info("Running %d convs in sync mode...", len(entries_by_conv))
+            for i, (conv_id, conv_entries) in enumerate(entries_by_conv.items(), start=1):
+                logger.info("Conv %d/%d: %s", i, len(entries_by_conv), conv_id)
+                raw_conv = run_sync_entries(client, conv_entries)
+                conv_dets = {conv_id: detections_to_process[conv_id]}
+                _stamp_and_shard(parse_and_merge(raw_conv, conv_dets))
     else:
         logger.info("All conversations already have shards -- nothing to send")
 
