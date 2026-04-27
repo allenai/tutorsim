@@ -20,7 +20,10 @@ from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
 from .config import get_phase_config, get_valid_styles, get_annotation_types
-from .storage import load_all_transcripts, save_annotator_result, get_annotator_result_path
+from .storage import (
+    load_all_transcripts, save_annotator_result, get_annotator_result_path,
+    save_annotator_shard, list_annotator_shard_ids, load_annotator_shards,
+)
 from .utils import format_transcript
 
 logger = logging.getLogger(__name__)
@@ -115,12 +118,15 @@ def parse_detection_results(raw_entries: dict,
                 "detections": [],
                 "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
                 "images_seen": 0,
+                "images_attached": 0,
             }
-        # accumulate max images seen for this conv across targets (same images per target)
+        # images_seen = max across targets (unique images per conv).
+        # images_attached = sum across targets (total API attachments).
+        n_imgs = images_per_key.get(key, 0)
         detections_by_conv[conv_id]["images_seen"] = max(
-            detections_by_conv[conv_id]["images_seen"],
-            images_per_key.get(key, 0),
+            detections_by_conv[conv_id]["images_seen"], n_imgs,
         )
+        detections_by_conv[conv_id]["images_attached"] += n_imgs
 
         if "error" in data:
             errors.append({"key": key, "error": data["error"]})
@@ -155,9 +161,9 @@ def parse_detection_results(raw_entries: dict,
             detections_by_conv[conv_id]["usage"][field] += usage.get(field, 0)
 
     if errors:
-        print(f"Parse errors: {len(errors)}")
+        logger.warning("Parse errors: %d", len(errors))
         for err in errors[:5]:
-            print(f"  {err['key']}: {err['error']}")
+            logger.warning("  %s: %s", err["key"], err["error"])
 
     return detections_by_conv
 
@@ -166,53 +172,78 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                targets: list[str], phase_cfg: dict,
                test: int = 0, dialogue_only: bool = False,
                with_screenshots: bool = False) -> dict:
-    """Run detection pass. Returns the full output dict (with 'results' key)."""
+    """Run detection pass. Returns the full output dict (with 'results' key).
+
+    Resumable: per-conv results are written to shards under
+    results/annotator/{version}/shards/detections/{conv_id}.json as they parse.
+    A re-run with the same version skips conv_ids that already have a shard
+    and only sends the remainder to the model. Delete the version directory
+    to force a clean re-run.
+    """
     output_dir = get_annotator_result_path(version)
 
     conversations = load_conversations(limit=test)
     if test > 0:
-        print(f"TEST MODE: {test} conversations")
-    print(f"Loaded {len(conversations)} conversations")
-    print(f"Model: {model} | Mode: {mode} | Targets: {targets}")
+        logger.info("TEST MODE: %d conversations", test)
+    logger.info("Loaded %d conversations", len(conversations))
+    logger.info("Model: %s | Mode: %s | Targets: %s", model, mode, targets)
 
-    client = ModelClient(model)
+    existing_ids = set(list_annotator_shard_ids(version, "detections"))
+    to_process = [c for c in conversations if c["conversation_id"] not in existing_ids]
+    if existing_ids:
+        logger.info("Resuming version %s: %d shards already on disk, %d to process",
+                    version, len(existing_ids), len(to_process))
 
-    if with_screenshots:
-        from .client import validate_vision_support
-        validate_vision_support(model)
-        logger.info("Screenshots: enabled -- vision model validated")
+    if to_process:
+        client = ModelClient(model)
 
-    enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
-    print(f"Transcript mode: {enrichment_str}")
-    entries = build_detection_entries(conversations, targets, prompt_version,
-                                     dialogue_only=dialogue_only,
-                                     with_screenshots=with_screenshots)
-    jsonl_path = str(output_dir / "detect_requests.jsonl")
-    write_jsonl(entries, jsonl_path)
-    print(f"Wrote {len(entries)} detection entries")
+        if with_screenshots:
+            from .client import validate_vision_support
+            validate_vision_support(model)
+            logger.info("Screenshots: enabled -- vision model validated")
 
-    if mode == "batch":
-        poll_interval = phase_cfg["poll_interval"]
-        raw = run_batch(client, entries, display_name="detect", poll_interval=poll_interval,
-                       thinking=phase_cfg.get("thinking", False),
-                       thinking_budget=phase_cfg.get("thinking_budget", 0),
-                       reasoning_effort=phase_cfg.get("reasoning_effort", ""))
+        enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
+        logger.info("Transcript mode: %s", enrichment_str)
+        entries = build_detection_entries(to_process, targets, prompt_version,
+                                          dialogue_only=dialogue_only,
+                                          with_screenshots=with_screenshots)
+        jsonl_path = str(output_dir / "detect_requests.jsonl")
+        write_jsonl(entries, jsonl_path)
+        logger.info("Wrote %d detection entries", len(entries))
+
+        if mode == "batch":
+            poll_interval = phase_cfg["poll_interval"]
+            raw = run_batch(client, entries, display_name="detect",
+                            poll_interval=poll_interval,
+                            thinking=phase_cfg.get("thinking", False),
+                            thinking_budget=phase_cfg.get("thinking_budget", 0),
+                            reasoning_effort=phase_cfg.get("reasoning_effort", ""))
+        else:
+            logger.info("Running %d entries in sync mode...", len(entries))
+            raw = run_sync_entries(client, entries)
+
+        images_per_key = {
+            e["key"]: len(e["request"].get("images", []))
+            for e in entries
+        }
+        new_by_conv = parse_detection_results(raw, images_per_key=images_per_key)
+
+        # Persist each new conv's slice as a shard before any aggregation, so
+        # a crash now leaves valid partial state on disk.
+        for conv_id, conv_data in new_by_conv.items():
+            save_annotator_shard(version, "detections", conv_id, conv_data)
+            logger.debug("Shard saved: %s", conv_id)
     else:
-        print(f"Running {len(entries)} entries in sync mode...")
-        raw = run_sync_entries(client, entries)
+        logger.info("All %d conversations already have shards -- nothing to send", len(conversations))
 
-    images_per_key = {
-        e["key"]: len(e["request"].get("images", []))
-        for e in entries
-    }
-    detections_by_conv = parse_detection_results(raw, images_per_key=images_per_key)
+    # Aggregate the monolithic JSON from the union of all shards.
+    detections_by_conv = load_annotator_shards(version, "detections")
 
-    total_dets = sum(len(d["detections"]) for d in detections_by_conv.values())
+    total_dets = sum(len(d.get("detections", [])) for d in detections_by_conv.values())
     avg = total_dets / len(detections_by_conv) if detections_by_conv else 0
-    total_images_sent = sum(images_per_key.values())
+    total_images_sent = sum(d.get("images_attached", 0) for d in detections_by_conv.values())
     convs_with_images = sum(
-        1 for conv_data in detections_by_conv.values()
-        if conv_data.get("images_seen", 0) > 0
+        1 for d in detections_by_conv.values() if d.get("images_seen", 0) > 0
     )
 
     output = {
@@ -233,8 +264,9 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
 
     save_annotator_result(version, "detections.json", output)
 
-    print(f"\nSaved: detections.json (version: {version})")
-    print(f"  {total_dets} detections across {len(detections_by_conv)} conversations (avg {avg:.1f}/conv)")
+    logger.info("Saved: detections.json (version: %s)", version)
+    logger.info("  %d detections across %d conversations (avg %.1f/conv)",
+                total_dets, len(detections_by_conv), avg)
 
     return output
 
@@ -293,7 +325,7 @@ def main():
                         phase_cfg=phase_cfg, test=args.test,
                         dialogue_only=args.dialogue_only,
                         with_screenshots=args.with_screenshots)
-    print(f"\nNext: python -m annotator.core.annotate --version {version}")
+    logger.info("Next: python -m annotator.core.annotate --version %s", version)
 
 
 if __name__ == "__main__":

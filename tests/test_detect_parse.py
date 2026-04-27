@@ -81,6 +81,24 @@ class TestParseDetectionResults:
         assert result["conv1"]["usage"]["input_tokens"] == 300
         assert result["conv1"]["usage"]["output_tokens"] == 125
 
+    def test_image_counts_per_conv(self):
+        """images_seen is the per-conv max (unique images);
+        images_attached sums across targets (counts API attachments)."""
+        raw = {
+            "conv1__scaffolding": {
+                "text": json.dumps({"detections": []}),
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            },
+            "conv1__rapport": {
+                "text": json.dumps({"detections": []}),
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            },
+        }
+        images_per_key = {"conv1__scaffolding": 3, "conv1__rapport": 3}
+        result = parse_detection_results(raw, images_per_key=images_per_key)
+        assert result["conv1"]["images_seen"] == 3       # unique per conv
+        assert result["conv1"]["images_attached"] == 6   # 3 images * 2 targets
+
 
 class TestBuildDetectionEntriesWithScreenshots:
     def test_includes_images_when_flag_set(self, local_storage, monkeypatch):
