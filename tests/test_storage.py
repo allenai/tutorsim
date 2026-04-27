@@ -180,6 +180,48 @@ class TestLocalBackend:
         assert uri.startswith("file://")
         assert uri.endswith("4.000.jpg")
 
+    def test_save_and_load_annotator_shard(self, local_storage):
+        from annotator.core.storage import (
+            save_annotator_shard, load_annotator_shards, list_annotator_shard_ids,
+        )
+        save_annotator_shard("v1", "detections", "conv_a", {"detections": [{"x": 1}]})
+        save_annotator_shard("v1", "detections", "conv_b", {"detections": [{"x": 2}]})
+
+        ids = list_annotator_shard_ids("v1", "detections")
+        assert sorted(ids) == ["conv_a", "conv_b"]
+
+        shards = load_annotator_shards("v1", "detections")
+        assert shards["conv_a"]["detections"][0]["x"] == 1
+        assert shards["conv_b"]["detections"][0]["x"] == 2
+
+    def test_shards_isolated_by_basename(self, local_storage):
+        from annotator.core.storage import (
+            save_annotator_shard, list_annotator_shard_ids,
+        )
+        save_annotator_shard("v1", "detections", "conv_a", {"k": "det"})
+        save_annotator_shard("v1", "annotations_generous", "conv_a", {"k": "ann"})
+
+        det_ids = list_annotator_shard_ids("v1", "detections")
+        ann_ids = list_annotator_shard_ids("v1", "annotations_generous")
+        assert det_ids == ["conv_a"]
+        assert ann_ids == ["conv_a"]
+
+    def test_list_shard_ids_empty_when_dir_missing(self, local_storage):
+        from annotator.core.storage import list_annotator_shard_ids
+        assert list_annotator_shard_ids("v_never_run", "detections") == []
+
+    def test_top_level_results_listing_excludes_shards(self, local_storage):
+        """Existing list_annotator_result_files must not pick up shard files."""
+        from annotator.core.storage import (
+            save_annotator_result, save_annotator_shard, list_annotator_result_files,
+        )
+        save_annotator_result("v1", "detections.json", {"ok": True})
+        save_annotator_shard("v1", "detections", "conv_a", {"x": 1})
+
+        files = list_annotator_result_files("v1")
+        assert "detections.json" in files
+        assert "conv_a.json" not in files
+
 
 class TestS3Backend:
     @pytest.fixture

@@ -637,6 +637,50 @@ def get_annotator_result_path(version: str, filename: str = "") -> Path:
 
 
 # ===================================================================
+# Public API -- Annotator shards (incremental per-conv writes)
+# ===================================================================
+#
+# Shards live under results/annotator/{version}/shards/{basename}/{conv_id}.json
+# where `basename` is the output filename without extension (e.g. "detections",
+# "annotations", "annotations_generous"). Each shard stores the per-conv slice
+# of what would otherwise be inside the monolithic output's `results` dict.
+#
+# This enables Ctrl-C resume: a re-run skips conv_ids that already have shards
+# and only sends the remaining work to the model.
+
+def _ann_shard_dir(version: str, basename: str) -> str:
+    base = _get_result_path("annotator_results")
+    return f"{base}/{version}/shards/{basename}"
+
+
+def save_annotator_shard(version: str, basename: str, conv_id: str, data: dict) -> None:
+    """Write one conv's slice to its own file. Called incrementally as results parse."""
+    rel = f"{_ann_shard_dir(version, basename)}/{conv_id}.json"
+    _get_backend().write_json(rel, data)
+
+
+def list_annotator_shard_ids(version: str, basename: str) -> list[str]:
+    """Return conv_ids that already have a shard for (version, basename)."""
+    files = _get_backend().list_files(_ann_shard_dir(version, basename))
+    return sorted(f[:-5] for f in files if f.endswith(".json"))
+
+
+def load_annotator_shards(version: str, basename: str) -> dict[str, dict]:
+    """Load every shard for (version, basename) as {conv_id: data}."""
+    be = _get_backend()
+    shard_dir = _ann_shard_dir(version, basename)
+    out = {}
+    for fname in be.list_files(shard_dir):
+        if not fname.endswith(".json"):
+            continue
+        conv_id = fname[:-5]
+        data = be.read_json(f"{shard_dir}/{fname}")
+        if data is not None:
+            out[conv_id] = data
+    return out
+
+
+# ===================================================================
 # Public API -- Results (benchmark)
 # ===================================================================
 
