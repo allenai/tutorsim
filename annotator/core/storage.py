@@ -17,11 +17,14 @@ Env vars (override config.yaml):
 """
 
 import json
+import logging
 import os
 import re
 from abc import ABC, abstractmethod
 from fnmatch import fnmatch
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -462,7 +465,7 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
         return _jsonl_indexes[path]
 
     be = _get_backend()
-    print(f"Loading JSONL transcript index from {path}...")
+    logger.info("Loading JSONL transcript index from %s...", path)
 
     import io
 
@@ -486,10 +489,10 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
                 resp = s3_client.get_object(Bucket=bucket, Key=key)
                 stream = io.TextIOWrapper(resp["Body"], encoding="utf-8")
             except Exception as e:
-                print(f"  Failed to load JSONL from S3: {e}")
+                logger.warning("Failed to load JSONL from S3: %s", e)
 
     if stream is None:
-        print(f"  JSONL file not found: {path}")
+        logger.warning("JSONL file not found: %s", path)
         _jsonl_indexes[path] = {}
         return {}
 
@@ -510,7 +513,7 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
     finally:
         stream.close()
 
-    print(f"  Indexed {len(index)} transcripts ({errors} parse errors)")
+    logger.info("Indexed %d transcripts (%d parse errors)", len(index), errors)
     _jsonl_indexes[path] = index
     return index
 

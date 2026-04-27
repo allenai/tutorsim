@@ -13,9 +13,12 @@ Usage:
     mode = cfg.get("mode", "batch")
 """
 
+import logging
 import yaml
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
 _loaded_config = None
@@ -187,7 +190,7 @@ def resolve_run_params(
     else:
         date_str = datetime.date.today().strftime("%Y-%m-%d")
         version = f"{profile}_{date_str}"
-        print(f"  Auto-generated version: {version}")
+        logger.info("Auto-generated version: %s", version)
 
     style = cli_style
     if style is None:

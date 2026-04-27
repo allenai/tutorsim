@@ -18,6 +18,7 @@ Usage:
 
 import base64
 import json
+import logging
 import os
 import re
 import time
@@ -27,6 +28,8 @@ from dotenv import load_dotenv
 from google.genai import types
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 # ===================================================================
@@ -308,11 +311,11 @@ class ModelClient:
                 last_error = e
                 delay = base_delay * (2 ** attempt)
                 if attempt < max_retries - 1:
-                    print(f"  API error (attempt {attempt + 1}/{max_retries}): {e}. "
-                          f"Retrying in {delay}s...", flush=True)
+                    logger.warning("API error (attempt %d/%d): %s. Retrying in %ds...",
+                                   attempt + 1, max_retries, e, delay)
                     time.sleep(delay)
                 else:
-                    print(f"  API failed after {max_retries} attempts: {e}", flush=True)
+                    logger.error("API failed after %d attempts: %s", max_retries, e)
 
         raise RuntimeError(
             f"API call failed after {max_retries} attempts: {last_error}"
@@ -523,7 +526,7 @@ def run_sync_entries(client: 'ModelClient', entries: list[dict],
         if not entry_max_tokens:
             entry_max_tokens = max_tokens
 
-        print(f"  [{i+1}/{total}] {key[:60]}...", flush=True)
+        logger.debug("[%d/%d] %s...", i + 1, total, key[:60])
         try:
             response = client.generate(
                 prompt_text,
@@ -536,7 +539,7 @@ def run_sync_entries(client: 'ModelClient', entries: list[dict],
                 "usage": response.usage,
             }
         except Exception as e:
-            print(f"  ERROR on {key}: {e}", flush=True)
+            logger.error("ERROR on %s: %s", key, e)
             raw_entries[key] = {
                 "text": "",
                 "error": str(e),
@@ -557,7 +560,8 @@ def run_batch(client: 'ModelClient', entries: list[dict],
               enable_cache: bool = False) -> dict:
     """Run entries as a batch job via the provider's batch API."""
     provider = client.provider
-    print(f"Running batch ({provider}): {len(entries)} entries, display_name={display_name}")
+    logger.info("Running batch (%s): %d entries, display_name=%s",
+                provider, len(entries), display_name)
 
     if provider == "gemini":
         return _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
@@ -605,8 +609,7 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
         jsonl_path = f.name
 
     try:
-        # Upload
-        print(f"Uploading batch request file...")
+        logger.info("Uploading batch request file...")
         uploaded_file = gemini_client.files.upload(
             file=jsonl_path,
             config=types.UploadFileConfig(
@@ -614,18 +617,16 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
                 mime_type="jsonl"
             )
         )
-        print(f"Uploaded file: {uploaded_file.name}")
+        logger.info("Uploaded file: %s", uploaded_file.name)
 
-        # Submit
-        print("Submitting batch job...")
+        logger.info("Submitting batch job...")
         batch_job = gemini_client.batches.create(
             model=f"models/{client.model}",
             src=uploaded_file.name,
             config={"display_name": display_name},
         )
-        print(f"Batch job created: {batch_job.name}")
+        logger.info("Batch job created: %s", batch_job.name)
 
-        # Poll
         poll_start = time.monotonic()
         batch_timeout = get_batch_timeout()
         completed_states = {
@@ -638,19 +639,18 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
                     f"Gemini batch timed out after {batch_timeout}s "
                     f"(state: {batch_job.state.name})"
                 )
-            print(f"  State: {batch_job.state.name} -- polling in {poll_interval}s...")
+            logger.debug("State: %s -- polling in %ds...", batch_job.state.name, poll_interval)
             time.sleep(poll_interval)
             batch_job = gemini_client.batches.get(name=batch_job.name)
 
-        print(f"Batch job finished: {batch_job.state.name}")
+        logger.info("Batch job finished: %s", batch_job.state.name)
         if batch_job.state.name != "JOB_STATE_SUCCEEDED":
             raise RuntimeError(f"Gemini batch failed: {batch_job.state.name}")
 
-        # Download and parse
         if not batch_job.dest or not batch_job.dest.file_name:
             raise RuntimeError("No output file in batch job result")
 
-        print(f"Downloading results from: {batch_job.dest.file_name}")
+        logger.info("Downloading results from: %s", batch_job.dest.file_name)
         result_bytes = gemini_client.files.download(file=batch_job.dest.file_name)
         result_text = result_bytes.decode("utf-8")
 
@@ -738,23 +738,20 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
         jsonl_path = f.name
 
     try:
-        # Upload
-        print("Uploading batch request file...")
+        logger.info("Uploading batch request file...")
         with open(jsonl_path, "rb") as f:
             uploaded_file = openai_client.files.create(file=f, purpose="batch")
-        print(f"Uploaded file: {uploaded_file.id}")
+        logger.info("Uploaded file: %s", uploaded_file.id)
 
-        # Create batch
-        print("Submitting batch job...")
+        logger.info("Submitting batch job...")
         batch_job = openai_client.batches.create(
             input_file_id=uploaded_file.id,
             endpoint="/v1/chat/completions",
             completion_window="24h",
             metadata={"description": display_name},
         )
-        print(f"Batch job created: {batch_job.id}")
+        logger.info("Batch job created: %s", batch_job.id)
 
-        # Poll
         poll_start = time.monotonic()
         batch_timeout = get_batch_timeout()
         terminal_states = {"completed", "failed", "expired", "cancelled"}
@@ -764,19 +761,18 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
                     f"OpenAI batch timed out after {batch_timeout}s "
                     f"(state: {batch_job.status})"
                 )
-            print(f"  Status: {batch_job.status} -- polling in {poll_interval}s...")
+            logger.debug("Status: %s -- polling in %ds...", batch_job.status, poll_interval)
             time.sleep(poll_interval)
             batch_job = openai_client.batches.retrieve(batch_job.id)
 
-        print(f"Batch job finished: {batch_job.status}")
+        logger.info("Batch job finished: %s", batch_job.status)
         if batch_job.status != "completed":
             raise RuntimeError(f"OpenAI batch failed: {batch_job.status}")
 
-        # Download and parse
         if not batch_job.output_file_id:
             raise RuntimeError("No output file in batch job result")
 
-        print(f"Downloading results from: {batch_job.output_file_id}")
+        logger.info("Downloading results from: %s", batch_job.output_file_id)
         result_bytes = openai_client.files.content(batch_job.output_file_id).content
         result_text = result_bytes.decode("utf-8")
 
@@ -871,8 +867,7 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
             params=MessageCreateParamsNonStreaming(**params),
         ))
 
-    # Create batch (with retry for connection errors)
-    print(f"Submitting batch ({len(requests)} requests)...")
+    logger.info("Submitting batch (%d requests)...", len(requests))
     retry_cfg = get_retry_config()
     max_retries = retry_cfg.get("max_retries", 5)
     base_delay = retry_cfg.get("base_delay", 5)
@@ -883,14 +878,13 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
         except Exception as e:
             if attempt < max_retries - 1:
                 delay = base_delay * (2 ** attempt)
-                print(f"  Batch submit error (attempt {attempt + 1}/{max_retries}): {e}. "
-                      f"Retrying in {delay}s...", flush=True)
+                logger.warning("Batch submit error (attempt %d/%d): %s. Retrying in %ds...",
+                               attempt + 1, max_retries, e, delay)
                 time.sleep(delay)
             else:
                 raise
-    print(f"Batch created: {message_batch.id}")
+    logger.info("Batch created: %s", message_batch.id)
 
-    # Poll
     poll_start = time.monotonic()
     batch_timeout = get_batch_timeout()
     while message_batch.processing_status != "ended":
@@ -899,12 +893,12 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
                 f"Anthropic batch timed out after {batch_timeout}s "
                 f"(state: {message_batch.processing_status})"
             )
-        print(f"  Status: {message_batch.processing_status} -- polling in {poll_interval}s...")
+        logger.debug("Status: %s -- polling in %ds...", message_batch.processing_status, poll_interval)
         time.sleep(poll_interval)
         message_batch = anthropic_client.messages.batches.retrieve(message_batch.id)
 
-    print(f"Batch finished: {message_batch.processing_status}")
-    print(f"  Counts: {message_batch.request_counts}")
+    logger.info("Batch finished: %s", message_batch.processing_status)
+    logger.info("  Counts: %s", message_batch.request_counts)
 
     # Parse results -- map short IDs back to original keys
     raw_entries = {}

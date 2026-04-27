@@ -16,6 +16,7 @@ Usage:
 import argparse
 import datetime
 import json
+import logging
 from pathlib import Path
 
 from .client import (
@@ -26,6 +27,9 @@ from .storage import (
     load_annotator_result, save_annotator_result, annotator_result_exists,
     get_annotator_result_path,
 )
+
+logger = logging.getLogger(__name__)
+
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "annotator" / "labeller"
 
 
@@ -61,7 +65,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     else:
         data = load_annotator_result(version, filename)
         if data is None:
-            print(f"ERROR: {filename} not found for version {version}. Run annotate first.")
+            logger.error("%s not found for version %s. Run annotate first.", filename, version)
             return None
 
     results = data["results"]
@@ -100,8 +104,8 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             entries.append(build_batch_entry(key, prompt, json_mode=False))
             locations.append((conv_id, idx))
 
-    print(f"Annotations to label: {len(entries)} ({len(skipped)} skipped as junk)")
-    print(f"Model: {model} | Mode: {mode}")
+    logger.info("Annotations to label: %d (%d skipped as junk)", len(entries), len(skipped))
+    logger.info("Model: %s | Mode: %s", model, mode)
 
     for conv_id, idx in skipped:
         results[conv_id]["annotations"][idx]["effectiveness"] = "unclear"
@@ -119,7 +123,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
                        thinking_budget=phase_cfg.get("thinking_budget", 0),
                        reasoning_effort=phase_cfg.get("reasoning_effort", ""))
     else:
-        print(f"Running {len(entries)} entries in sync mode...")
+        logger.info("Running %d entries in sync mode...", len(entries))
         raw = run_sync_entries(client, entries, json_mode=False)
 
     valid = VALID_LABELS_BINARY if binary else VALID_LABELS
@@ -147,14 +151,14 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     data["label_stats"] = by_label
 
     save_annotator_result(version, filename, data)
-    print(f"\nSaved: {filename} (version: {version})")
-    print(f"  Effective:   {by_label['effective']}")
+    logger.info("Saved: %s (version: %s)", filename, version)
+    logger.info("  Effective:   %d", by_label['effective'])
     if not binary:
-        print(f"  Partial:     {by_label['partial']}")
-    print(f"  Ineffective: {by_label['ineffective']}")
-    print(f"  Unclear:     {by_label['unclear']}")
+        logger.info("  Partial:     %d", by_label['partial'])
+    logger.info("  Ineffective: %d", by_label['ineffective'])
+    logger.info("  Unclear:     %d", by_label['unclear'])
     if errors:
-        print(f"  Batch errors: {errors}")
+        logger.warning("Batch errors: %d", errors)
 
     return data
 
@@ -199,7 +203,7 @@ def main():
     if output:
         mode_hint = " --mode annotations" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
-        print(f"\nNext: python -m annotator.eval.eval --version {version}{mode_hint}{style_flag}")
+        logger.info("Next: python -m annotator.eval.eval --version %s%s%s", version, mode_hint, style_flag)
 
 
 if __name__ == "__main__":
