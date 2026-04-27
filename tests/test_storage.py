@@ -222,6 +222,37 @@ class TestLocalBackend:
         assert "detections.json" in files
         assert "conv_a.json" not in files
 
+    def test_inflight_batch_lifecycle(self, local_storage):
+        from annotator.core.storage import (
+            save_inflight_batch, load_inflight_batch, clear_inflight_batch,
+        )
+        assert load_inflight_batch("v1", "detections") is None
+
+        save_inflight_batch("v1", "detections", {
+            "provider": "anthropic", "batch_id": "msgbatch_abc",
+            "model": "claude-opus-4-6", "n_entries": 6,
+            "display_name": "detect", "submitted_at": "2026-04-27T15:00:00",
+        })
+        rec = load_inflight_batch("v1", "detections")
+        assert rec["batch_id"] == "msgbatch_abc"
+        assert rec["n_entries"] == 6
+
+        clear_inflight_batch("v1", "detections")
+        assert load_inflight_batch("v1", "detections") is None
+
+    def test_clear_inflight_is_safe_when_absent(self, local_storage):
+        from annotator.core.storage import clear_inflight_batch
+        clear_inflight_batch("v_never_run", "detections")  # should not raise
+
+    def test_inflight_isolated_from_results_listing(self, local_storage):
+        from annotator.core.storage import (
+            save_annotator_result, save_inflight_batch, list_annotator_result_files,
+        )
+        save_annotator_result("v1", "detections.json", {})
+        save_inflight_batch("v1", "detections", {"batch_id": "x"})
+        files = list_annotator_result_files("v1")
+        assert files == ["detections.json"]
+
 
 class TestS3Backend:
     @pytest.fixture

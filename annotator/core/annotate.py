@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import datetime
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -30,12 +31,20 @@ from .storage import (
     load_all_transcripts, load_annotator_result, save_annotator_result,
     annotator_result_exists, get_annotator_result_path,
     save_annotator_shard, list_annotator_shard_ids, load_annotator_shards,
+    save_inflight_batch, load_inflight_batch, clear_inflight_batch,
 )
 from .utils import format_excerpt, load_ground_truth
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "annotator"
+
+
+def _entries_keys_hash(entries: list[dict]) -> str:
+    """Stable short hash of an entries list, keyed on entry order + keys.
+    Mirrors detect._entries_keys_hash for in-flight batch matching."""
+    joined = "\n".join(e["key"] for e in entries)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 VALID_TARGETS = get_annotation_types()
 VALID_ANNOTATION_TYPES = set(get_annotation_types())
@@ -350,13 +359,47 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
 
         if mode == "batch":
             poll_interval = phase_cfg["poll_interval"]
+
+            inflight = load_inflight_batch(version, output_basename)
+            existing_batch_id = None
+            if inflight:
+                expected = inflight.get("entry_keys_hash")
+                actual = _entries_keys_hash(entries)
+                if expected == actual:
+                    existing_batch_id = inflight["batch_id"]
+                    logger.info("Found in-flight %s batch %s (submitted %s). Resuming poll.",
+                                output_basename, existing_batch_id,
+                                inflight.get("submitted_at", "?"))
+                else:
+                    logger.error(
+                        "In-flight %s batch sidecar exists but entry-keys hash differs "
+                        "(sidecar=%s, current=%s). Detections may have changed between runs. "
+                        "Delete %s/in_flight/%s.json to start a fresh batch.",
+                        output_basename, expected, actual, version, output_basename,
+                    )
+                    raise RuntimeError("entry-keys mismatch on in-flight batch resume")
+
+            def _record(batch_id: str) -> None:
+                save_inflight_batch(version, output_basename, {
+                    "provider": client.provider,
+                    "model": model,
+                    "batch_id": batch_id,
+                    "n_entries": len(entries),
+                    "entry_keys_hash": _entries_keys_hash(entries),
+                    "display_name": "annotate",
+                    "submitted_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                })
+
             raw = run_batch(client, entries, display_name="annotate",
                             poll_interval=poll_interval,
                             thinking=phase_cfg.get("thinking", False),
                             thinking_budget=phase_cfg.get("thinking_budget", 0),
                             reasoning_effort=phase_cfg.get("reasoning_effort", ""),
-                            enable_cache=with_screenshots)
+                            enable_cache=with_screenshots,
+                            existing_batch_id=existing_batch_id,
+                            on_batch_created=_record)
             _stamp_and_shard(parse_and_merge(raw, detections_to_process))
+            clear_inflight_batch(version, output_basename)
         else:
             # Per-conv sync: shard after each conv's entries return so a
             # ctrl-C between convs leaves valid partial state on disk.

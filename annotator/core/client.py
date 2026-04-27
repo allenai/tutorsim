@@ -557,21 +557,41 @@ def run_batch(client: 'ModelClient', entries: list[dict],
               poll_interval: int = 60,
               thinking: bool = False, thinking_budget: int = 0,
               reasoning_effort: str = "",
-              enable_cache: bool = False) -> dict:
-    """Run entries as a batch job via the provider's batch API."""
+              enable_cache: bool = False,
+              existing_batch_id: str | None = None,
+              on_batch_created=None) -> dict:
+    """Run entries as a batch job via the provider's batch API.
+
+    Resume support: if `existing_batch_id` is set, skip submission and resume
+    polling on that batch (the entries list still drives result parsing, so
+    the caller must pass the same entries that were submitted with the batch).
+    `on_batch_created` is called with the provider's batch id immediately after
+    a fresh submission succeeds, before the poll loop starts -- callers use
+    this to persist the id for ctrl-C recovery.
+    """
     provider = client.provider
-    logger.info("Running batch (%s): %d entries, display_name=%s",
-                provider, len(entries), display_name)
+    if existing_batch_id:
+        logger.info("Resuming in-flight %s batch %s (%d entries)",
+                    provider, existing_batch_id, len(entries))
+    else:
+        logger.info("Running batch (%s): %d entries, display_name=%s",
+                    provider, len(entries), display_name)
 
     if provider == "gemini":
         return _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
-                                thinking, thinking_budget)
+                                 thinking, thinking_budget,
+                                 existing_batch_id=existing_batch_id,
+                                 on_batch_created=on_batch_created)
     elif provider == "openai":
         return _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
-                                thinking, thinking_budget, reasoning_effort)
+                                 thinking, thinking_budget, reasoning_effort,
+                                 existing_batch_id=existing_batch_id,
+                                 on_batch_created=on_batch_created)
     elif provider == "anthropic":
         return _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
-                                   thinking, thinking_budget, enable_cache=enable_cache)
+                                    thinking, thinking_budget, enable_cache=enable_cache,
+                                    existing_batch_id=existing_batch_id,
+                                    on_batch_created=on_batch_created)
     else:
         raise ValueError(f"Batch API not supported for provider: {provider}")
 
@@ -581,34 +601,41 @@ def run_batch(client: 'ModelClient', entries: list[dict],
 # ===================================================================
 
 def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
-                      thinking=False, thinking_budget=0):
-    """Gemini batch: upload JSONL, submit, poll, download."""
+                      thinking=False, thinking_budget=0,
+                      existing_batch_id=None, on_batch_created=None):
+    """Gemini batch: upload JSONL, submit, poll, download.
+
+    If existing_batch_id is set, skip upload+submit and retrieve that job.
+    """
     import tempfile
     gemini_client = client._client
+    jsonl_path = None
 
-    # Write Gemini-format JSONL to temp file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False,
-                                      encoding="utf-8") as f:
-        for entry in entries:
-            key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
-            if images:
-                image_blocks = _build_image_blocks_gemini(images)
-                parts = _interleave_text_and_images(
-                    prompt_text, image_blocks, lambda s: {"text": s},
-                )
-            else:
-                parts = [{"text": prompt_text}]
-            gem_entry = {
-                "key": key,
-                "request": {
-                    "contents": [{"parts": parts, "role": "user"}],
-                    "generation_config": entry["request"].get("generation_config", {}),
-                },
-            }
-            f.write(json.dumps(gem_entry, ensure_ascii=False) + "\n")
-        jsonl_path = f.name
+    if existing_batch_id:
+        batch_job = gemini_client.batches.get(name=existing_batch_id)
+    else:
+        # Write Gemini-format JSONL to temp file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False,
+                                          encoding="utf-8") as f:
+            for entry in entries:
+                key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
+                if images:
+                    image_blocks = _build_image_blocks_gemini(images)
+                    parts = _interleave_text_and_images(
+                        prompt_text, image_blocks, lambda s: {"text": s},
+                    )
+                else:
+                    parts = [{"text": prompt_text}]
+                gem_entry = {
+                    "key": key,
+                    "request": {
+                        "contents": [{"parts": parts, "role": "user"}],
+                        "generation_config": entry["request"].get("generation_config", {}),
+                    },
+                }
+                f.write(json.dumps(gem_entry, ensure_ascii=False) + "\n")
+            jsonl_path = f.name
 
-    try:
         logger.info("Uploading batch request file...")
         uploaded_file = gemini_client.files.upload(
             file=jsonl_path,
@@ -626,7 +653,10 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
             config={"display_name": display_name},
         )
         logger.info("Batch job created: %s", batch_job.name)
+        if on_batch_created:
+            on_batch_created(batch_job.name)
 
+    try:
         poll_start = time.monotonic()
         batch_timeout = get_batch_timeout()
         completed_states = {
@@ -687,7 +717,8 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
                 }
         return raw_entries
     finally:
-        os.unlink(jsonl_path)
+        if jsonl_path:
+            os.unlink(jsonl_path)
 
 
 # ===================================================================
@@ -695,49 +726,56 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
 # ===================================================================
 
 def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
-                      thinking=False, thinking_budget=0, reasoning_effort=""):
-    """OpenAI batch: upload JSONL, create batch, poll, download results."""
+                      thinking=False, thinking_budget=0, reasoning_effort="",
+                      existing_batch_id=None, on_batch_created=None):
+    """OpenAI batch: upload JSONL, create batch, poll, download results.
+
+    If existing_batch_id is set, skip upload+create and retrieve that batch.
+    """
     import tempfile
     openai_client = client._client
     max_tokens = MAX_OUTPUT_TOKENS["openai"]
+    jsonl_path = None
 
-    # Write OpenAI-format JSONL
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False,
-                                      encoding="utf-8") as f:
-        for entry in entries:
-            key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
-            if not entry_max_tokens or entry_max_tokens > max_tokens:
-                entry_max_tokens = max_tokens
+    if existing_batch_id:
+        batch_job = openai_client.batches.retrieve(existing_batch_id)
+    else:
+        # Write OpenAI-format JSONL
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False,
+                                          encoding="utf-8") as f:
+            for entry in entries:
+                key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
+                if not entry_max_tokens or entry_max_tokens > max_tokens:
+                    entry_max_tokens = max_tokens
 
-            if images:
-                image_blocks = _build_image_blocks_openai(
-                    images, use_url=_should_use_presigned_url(),
-                )
-                content = _interleave_text_and_images(
-                    prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
-                )
-            else:
-                content = prompt_text
+                if images:
+                    image_blocks = _build_image_blocks_openai(
+                        images, use_url=_should_use_presigned_url(),
+                    )
+                    content = _interleave_text_and_images(
+                        prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
+                    )
+                else:
+                    content = prompt_text
 
-            body = {
-                "model": client.model,
-                "messages": [{"role": "user", "content": content}],
-                "max_completion_tokens": entry_max_tokens,
-            }
-            if json_mode and entry_json_mode:
-                body["response_format"] = {"type": "json_object"}
-            if reasoning_effort:
-                body["reasoning_effort"] = reasoning_effort
-            line = {
-                "custom_id": key,
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": body,
-            }
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
-        jsonl_path = f.name
+                body = {
+                    "model": client.model,
+                    "messages": [{"role": "user", "content": content}],
+                    "max_completion_tokens": entry_max_tokens,
+                }
+                if json_mode and entry_json_mode:
+                    body["response_format"] = {"type": "json_object"}
+                if reasoning_effort:
+                    body["reasoning_effort"] = reasoning_effort
+                line = {
+                    "custom_id": key,
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": body,
+                }
+                f.write(json.dumps(line, ensure_ascii=False) + "\n")
+            jsonl_path = f.name
 
-    try:
         logger.info("Uploading batch request file...")
         with open(jsonl_path, "rb") as f:
             uploaded_file = openai_client.files.create(file=f, purpose="batch")
@@ -751,7 +789,10 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
             metadata={"description": display_name},
         )
         logger.info("Batch job created: %s", batch_job.id)
+        if on_batch_created:
+            on_batch_created(batch_job.id)
 
+    try:
         poll_start = time.monotonic()
         batch_timeout = get_batch_timeout()
         terminal_states = {"completed", "failed", "expired", "cancelled"}
@@ -809,7 +850,8 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
             }
         return raw_entries
     finally:
-        os.unlink(jsonl_path)
+        if jsonl_path:
+            os.unlink(jsonl_path)
 
 
 # ===================================================================
@@ -817,73 +859,83 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
 # ===================================================================
 
 def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
-                         thinking=False, thinking_budget=0, enable_cache=False):
-    """Anthropic batch: create message batch, poll, stream results."""
+                         thinking=False, thinking_budget=0, enable_cache=False,
+                         existing_batch_id=None, on_batch_created=None):
+    """Anthropic batch: create message batch, poll, stream results.
+
+    If existing_batch_id is set, skip submission and retrieve that batch.
+    The id_to_key mapping is rebuilt deterministically from `entries` order
+    (so callers must pass the same entries that were originally submitted).
+    """
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
     anthropic_client = client._client
     max_tokens = MAX_OUTPUT_TOKENS["anthropic"]
 
-    # Build requests -- Anthropic custom_id has a 64-char limit,
-    # so use short indexed IDs and map back to original keys.
-    id_to_key = {}
-    requests = []
-    for i, entry in enumerate(entries):
-        key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
-        if not entry_max_tokens or entry_max_tokens > max_tokens:
-            entry_max_tokens = max_tokens
+    # id_to_key mapping is deterministic in entries order, so it can be rebuilt
+    # on resume without re-submitting. Anthropic custom_id has a 64-char limit,
+    # so we use short indexed IDs.
+    id_to_key = {f"r{i}": _extract_entry(e)[0] for i, e in enumerate(entries)}
 
-        short_id = f"r{i}"
-        id_to_key[short_id] = key
+    if existing_batch_id:
+        message_batch = anthropic_client.messages.batches.retrieve(existing_batch_id)
+    else:
+        requests = []
+        for i, entry in enumerate(entries):
+            key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
+            if not entry_max_tokens or entry_max_tokens > max_tokens:
+                entry_max_tokens = max_tokens
 
-        if images:
-            image_blocks = _build_image_blocks_anthropic(
-                images, use_url=_should_use_presigned_url(), enable_cache=enable_cache,
-            )
-            content = _interleave_text_and_images(
-                prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
-            )
-        else:
-            content = prompt_text
-
-        params = {
-            "model": client.model,
-            "max_tokens": entry_max_tokens,
-            "messages": [{"role": "user", "content": content}],
-        }
-        if json_mode and entry_json_mode:
-            params["system"] = (
-                "You must respond with valid JSON only. "
-                "Do not include markdown code fences, explanations, or any text "
-                "outside the JSON object."
-            )
-        if thinking:
-            budget = thinking_budget if thinking_budget > 0 else 16384
-            params["thinking"] = {"type": "enabled", "budget_tokens": budget}
-
-        requests.append(Request(
-            custom_id=short_id,
-            params=MessageCreateParamsNonStreaming(**params),
-        ))
-
-    logger.info("Submitting batch (%d requests)...", len(requests))
-    retry_cfg = get_retry_config()
-    max_retries = retry_cfg.get("max_retries", 5)
-    base_delay = retry_cfg.get("base_delay", 5)
-    for attempt in range(max_retries):
-        try:
-            message_batch = anthropic_client.messages.batches.create(requests=requests)
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt)
-                logger.warning("Batch submit error (attempt %d/%d): %s. Retrying in %ds...",
-                               attempt + 1, max_retries, e, delay)
-                time.sleep(delay)
+            if images:
+                image_blocks = _build_image_blocks_anthropic(
+                    images, use_url=_should_use_presigned_url(), enable_cache=enable_cache,
+                )
+                content = _interleave_text_and_images(
+                    prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
+                )
             else:
-                raise
-    logger.info("Batch created: %s", message_batch.id)
+                content = prompt_text
+
+            params = {
+                "model": client.model,
+                "max_tokens": entry_max_tokens,
+                "messages": [{"role": "user", "content": content}],
+            }
+            if json_mode and entry_json_mode:
+                params["system"] = (
+                    "You must respond with valid JSON only. "
+                    "Do not include markdown code fences, explanations, or any text "
+                    "outside the JSON object."
+                )
+            if thinking:
+                budget = thinking_budget if thinking_budget > 0 else 16384
+                params["thinking"] = {"type": "enabled", "budget_tokens": budget}
+
+            requests.append(Request(
+                custom_id=f"r{i}",
+                params=MessageCreateParamsNonStreaming(**params),
+            ))
+
+        logger.info("Submitting batch (%d requests)...", len(requests))
+        retry_cfg = get_retry_config()
+        max_retries = retry_cfg.get("max_retries", 5)
+        base_delay = retry_cfg.get("base_delay", 5)
+        for attempt in range(max_retries):
+            try:
+                message_batch = anthropic_client.messages.batches.create(requests=requests)
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning("Batch submit error (attempt %d/%d): %s. Retrying in %ds...",
+                                   attempt + 1, max_retries, e, delay)
+                    time.sleep(delay)
+                else:
+                    raise
+        logger.info("Batch created: %s", message_batch.id)
+        if on_batch_created:
+            on_batch_created(message_batch.id)
 
     poll_start = time.monotonic()
     batch_timeout = get_batch_timeout()

@@ -684,6 +684,51 @@ def load_annotator_shards(version: str, basename: str) -> dict[str, dict]:
 
 
 # ===================================================================
+# Public API -- In-flight batch sidecars (ctrl-C resume during poll)
+# ===================================================================
+#
+# When a batch is submitted to a provider, the batch keeps running server-side
+# even if our process exits. We persist the provider's batch ID to a sidecar
+# at results/annotator/{version}/in_flight_{basename}.json BEFORE entering the
+# poll loop, so a re-run after ctrl-C can resume polling on the same batch
+# instead of re-submitting and double-charging compute.
+#
+# The sidecar is deleted only after the batch's results are successfully
+# parsed and sharded.
+
+def _inflight_rel(version: str, basename: str) -> str:
+    # Subdirectory keeps the sidecar out of list_annotator_result_files results.
+    base = _get_result_path("annotator_results")
+    return f"{base}/{version}/in_flight/{basename}.json"
+
+
+def save_inflight_batch(version: str, basename: str, data: dict) -> None:
+    """Record an in-flight batch's metadata. Expected keys:
+    provider, model, batch_id, n_entries, display_name, submitted_at."""
+    _get_backend().write_json(_inflight_rel(version, basename), data)
+
+
+def load_inflight_batch(version: str, basename: str) -> dict | None:
+    """Return the recorded in-flight batch metadata, or None if no batch is in flight."""
+    return _get_backend().read_json(_inflight_rel(version, basename))
+
+
+def clear_inflight_batch(version: str, basename: str) -> None:
+    """Delete the in-flight sidecar after a batch completes successfully."""
+    be = _get_backend()
+    rel = _inflight_rel(version, basename)
+    if isinstance(be, LocalBackend):
+        path = be.root / rel
+        if path.exists():
+            path.unlink()
+    else:
+        try:
+            be.client.delete_object(Bucket=be.bucket, Key=be._key(rel))
+        except Exception:
+            pass
+
+
+# ===================================================================
 # Public API -- Results (benchmark)
 # ===================================================================
 
