@@ -295,7 +295,7 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     if with_screenshots:
         from .client import validate_vision_support
         validate_vision_support(model)
-        print("Screenshots: enabled -- vision model validated, caching ON")
+        logger.info("Screenshots: enabled -- vision model validated, caching ON")
 
     enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
     logger.info("Transcript mode: %s", enrichment_str)

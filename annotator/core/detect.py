@@ -13,6 +13,7 @@ Usage:
 import argparse
 import datetime
 import json
+import logging
 from pathlib import Path
 
 from .client import (
@@ -21,6 +22,8 @@ from .client import (
 from .config import get_phase_config, get_valid_styles, get_annotation_types
 from .storage import load_all_transcripts, save_annotator_result, get_annotator_result_path
 from .utils import format_transcript
+
+logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "annotator"
 
@@ -177,7 +180,7 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
     if with_screenshots:
         from .client import validate_vision_support
         validate_vision_support(model)
-        print("Screenshots: enabled -- vision model validated")
+        logger.info("Screenshots: enabled -- vision model validated")
 
     enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
     print(f"Transcript mode: {enrichment_str}")
