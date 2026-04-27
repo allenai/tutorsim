@@ -70,6 +70,24 @@ Reverse chronological. Stuff that shipped but didn't have a dedicated plan file,
 
 **Change**: One-character format-string update -- `—` to `|`. File-handler output (utf-8) is unaffected; stderr handler output now stays inside the cp1252 subset on Windows. Per the project's "log format = public contract" rule, this is recorded here so anyone parsing log lines knows the separator changed.
 
+### 2026-04-27: Real ctrl-C resume -- per-conv sync checkpoint + batch-ID persistence
+
+**Problem**: The first cut of "ctrl-C resume" only worked across *completed* runs -- shards were only written after `run_sync_entries` / `run_batch` returned, so a ctrl-C in the middle of either lost everything for that run. The original ask was "if I ctrl-C and start again, it'll start where it left off," which the previous implementation did not actually deliver in practice.
+
+**Changes (sync mode)**:
+- `run_detect` and `run_annotate` now group entries by `conv_id` and call `run_sync_entries` per conv, sharding after each conv's entries return. A ctrl-C between convs leaves a clean per-conv checkpoint on disk; the next run skips already-sharded convs and picks up at the next un-sharded one.
+
+**Changes (batch mode)**:
+- New `save_inflight_batch` / `load_inflight_batch` / `clear_inflight_batch` helpers in `storage.py`. Sidecar lives at `results/annotator/{version}/in_flight/{basename}.json` (subdir keeps it out of `list_annotator_result_files`).
+- `run_batch` and the three provider runners (Gemini, OpenAI, Anthropic) accept `existing_batch_id` (skip submission, retrieve and continue polling) and `on_batch_created` (called with the new batch id immediately after submission so the orchestrator can persist it before the poll loop starts).
+- `run_detect` / `run_annotate` check the sidecar before submitting. They hash the current entries' keys against `entry_keys_hash` recorded at submission. Match -> resume polling on the saved batch id, no double-submit. Mismatch (user changed conv set between runs) -> error loudly with instructions to delete the sidecar.
+- After successful parse + shard write, the sidecar is cleared.
+- Anthropic-specific: `id_to_key` short-id mapping is rebuilt deterministically from `entries` order on resume; the entry-keys hash check guarantees the input is the same, so we don't need to persist the mapping itself.
+
+**Coverage**: 3 sidecar lifecycle tests in `test_storage.py`. End-to-end ctrl-C smoke run in sync mode against `claude-opus-4-6` (test=2 convs, ctrl-C between convs, re-run completes from conv 2). All 152 tests pass.
+
+**Caveat**: changing the conv set between runs (adding/removing transcripts, switching `--with-screenshots`) shifts entry indices and produces an `entry_keys_hash` mismatch -- the resume aborts loudly rather than silently mis-mapping results. The fix is documented at the error site.
+
 ### 2026-04-27: Annotator per-pass CLIs now call `setup_logging()`
 
 **Problem**: After migrating prints in `detect.py` / `annotate.py` / `label.py` to `logger.info(...)`, INFO records emitted by these modules vanished when invoked directly via `python -m annotator.core.detect` (and the equivalents). Python doesn't run `annotator/__main__.py` for dotted module targets, so the only `setup_logging()` call upstream of those CLIs (`__main__.py`) never executed -- the root logger had no handlers and INFO propagated to the stdlib `lastResort` handler at WARNING-level.
