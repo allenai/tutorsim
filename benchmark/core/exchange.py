@@ -15,7 +15,11 @@ from pathlib import Path
 from annotator.core.client import (
     ModelClient, build_batch_entry, run_batch, run_sync_entries,
 )
+import logging
+
 from .scenarios import Scenario
+
+logger = logging.getLogger(__name__)
 
 PROMPTS_BASE = Path(__file__).parent.parent.parent / "prompts" / "benchmark"
 
@@ -191,7 +195,7 @@ def run_exchanges_batch(
 
     for round_num in range(num_turns):
         # --- Tutor batch ---
-        print(f"\n    Round {round_num + 1}/{num_turns} - Tutor batch ({len(active_ids)} scenarios)...")
+        logger.info("Round %d/%d - tutor batch (%d scenarios)", round_num + 1, num_turns, len(active_ids))
         tutor_entries = []
         for sid in active_ids:
             scenario = scenario_map[sid]
@@ -211,7 +215,7 @@ def run_exchanges_batch(
         for sid in active_ids:
             result = tutor_raw.get(sid, {})
             if "error" in result or not result.get("text"):
-                print(f"      WARN: tutor failed for {sid[:50]}")
+                logger.warning("tutor failed for %s", sid[:50])
                 failed.append(sid)
                 continue
 
@@ -230,7 +234,7 @@ def run_exchanges_batch(
 
         # --- Student batch (skip on last round) ---
         if round_num < num_turns - 1 and active_ids:
-            print(f"    Round {round_num + 1}/{num_turns} - Student batch ({len(active_ids)} scenarios)...")
+            logger.info("Round %d/%d - student batch (%d scenarios)", round_num + 1, num_turns, len(active_ids))
             student_entries = []
             for sid in active_ids:
                 scenario = scenario_map[sid]
@@ -250,7 +254,7 @@ def run_exchanges_batch(
             for sid in active_ids:
                 result = student_raw.get(sid, {})
                 if "error" in result or not result.get("text"):
-                    print(f"      WARN: student failed for {sid[:50]}")
+                    logger.warning("student failed for %s", sid[:50])
                     failed.append(sid)
                     continue
 
@@ -275,5 +279,5 @@ def run_exchanges_batch(
     for sid in active_ids:
         exchanges[sid].completed = True
 
-    print(f"\n    Exchanges complete: {len(active_ids)}/{len(scenarios)} succeeded")
+    logger.info("Exchanges complete: %d/%d succeeded", len(active_ids), len(scenarios))
     return exchanges

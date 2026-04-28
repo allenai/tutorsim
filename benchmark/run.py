@@ -89,7 +89,7 @@ def run_benchmark(version: str, config: dict):
     detections_by_conv = None
 
     if scenario_mode in ("detected", "both"):
-        print("\n=== Step 0: Key Moment Detection ===")
+        logger.info("=== Step 0: Key Moment Detection ===")
         detect_phase_cfg = get_phase_config("detect", detect_profile)
         detect_model = detect_phase_cfg["model"]
         detect_mode = detect_phase_cfg.get("mode", "batch")
@@ -107,7 +107,7 @@ def run_benchmark(version: str, config: dict):
         save_benchmark_result(version, "detections.json", data=detect_output)
 
     # --- Step 1: Extract scenarios from detections ---
-    print("\n=== Step 1: Extract Scenarios ===")
+    logger.info("=== Step 1: Extract Scenarios ===")
     scenarios = load_scenarios(config["scenarios"], detections_by_conv=detections_by_conv)
     save_benchmark_result(version, "scenarios.json", data=[s.to_dict() for s in scenarios])
 
@@ -128,16 +128,14 @@ def run_benchmark(version: str, config: dict):
     for profile in tutor_profiles:
         tutor_cfg = get_phase_config("tutor", profile)
         tutor_model = tutor_cfg["model"]
-        print(f"\n{'=' * 60}")
-        print(f"  Evaluating: {profile} ({tutor_model})")
-        print(f"{'=' * 60}")
+        logger.info("=== Evaluating: %s (%s) ===", profile, tutor_model)
 
         tutor_client = ModelClient(tutor_model)
 
         # ---------------------------------------------------------------
         # Phase 1: Generate all exchanges (skip if already on disk)
         # ---------------------------------------------------------------
-        print(f"\n--- Phase 1: Generate Exchanges ({len(scenarios)} scenarios) ---")
+        logger.info("--- Phase 1: Generate Exchanges (%d scenarios) ---", len(scenarios))
 
         existing_files = list_benchmark_result_files(version, "exchanges", profile)
         existing = set()
@@ -164,14 +162,14 @@ def run_benchmark(version: str, config: dict):
             )
 
         if not missing:
-            print(f"  All {len(scenarios)} exchanges already cached -- loading...")
+            logger.info("All %d exchanges already cached -- loading", len(scenarios))
             exchanges = {}
             for scenario in scenarios:
                 ex = _load_exchange(scenario.scenario_id)
                 if ex:
                     exchanges[scenario.scenario_id] = ex
         else:
-            print(f"  {len(existing)} cached, {len(missing)} to generate...")
+            logger.info("%d cached, %d to generate", len(existing), len(missing))
             def _save_exchange(sid, exchange):
                 save_benchmark_result(version, "exchanges", profile, f"{sid}.json",
                                       data=exchange.to_dict())
@@ -193,8 +191,6 @@ def run_benchmark(version: str, config: dict):
             else:
                 new_exchanges = {}
                 for i, scenario in enumerate(missing):
-                    print(f"  [{i+1}/{len(missing)}] {scenario.scenario_id}...",
-                          end=" ", flush=True)
                     try:
                         exchange = run_exchange(
                             scenario=scenario,
@@ -206,9 +202,11 @@ def run_benchmark(version: str, config: dict):
                             prompt_version=exchange_prompt_version,
                         )
                         new_exchanges[scenario.scenario_id] = exchange
-                        print(f"{len(exchange.generated_turns)} turns")
+                        logger.debug("[%d/%d] %s -> %d turns",
+                                     i + 1, len(missing), scenario.scenario_id,
+                                     len(exchange.generated_turns))
                     except Exception as e:
-                        print(f"ERROR: {e}")
+                        logger.warning("scenario %s failed: %s", scenario.scenario_id, e)
 
             # Save completed exchanges (skip partial failures)
             for sid, exchange in new_exchanges.items():
@@ -223,7 +221,7 @@ def run_benchmark(version: str, config: dict):
                 if ex:
                     exchanges[scenario.scenario_id] = ex
 
-        print(f"\n  Exchanges ready: {len(exchanges)}/{len(scenarios)}")
+        logger.info("Exchanges ready: %d/%d", len(exchanges), len(scenarios))
 
         # ---------------------------------------------------------------
         # Phase 2: Annotate all exchanges (batch per style)
@@ -336,7 +334,7 @@ def run_benchmark(version: str, config: dict):
         # ---------------------------------------------------------------
         # Phase 3: Per-style scores (no composite aggregation)
         # ---------------------------------------------------------------
-        print(f"\n--- Phase 3: Per-Style Scores ---")
+        logger.info("--- Phase 3: Per-Style Scores ---")
         label_weights = agg_cfg.get("label_weights", DEFAULT_LABEL_WEIGHTS)
 
         for style in styles:
@@ -387,9 +385,9 @@ def run_benchmark(version: str, config: dict):
 
             save_benchmark_result(version, "scores", f"{profile}_{style}.json",
                                   data=style_summary)
-            print(f"  {style}: {overall_mean:.3f} (n={n}) | "
-                  f"scaffolding={type_means.get('scaffolding', 0):.3f}, "
-                  f"rapport={type_means.get('rapport', 0):.3f}")
+            logger.info("[%s] mean=%.3f n=%d scaffolding=%.3f rapport=%.3f",
+                        style, overall_mean, n,
+                        type_means.get('scaffolding', 0), type_means.get('rapport', 0))
 
     logger.info("Results saved (version: %s)", version)
     save_benchmark_result(version, "_complete.json", data={
