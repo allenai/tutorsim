@@ -82,3 +82,71 @@ def test_prepare_bulk_entries_default_no_screenshots():
     mock_load.assert_not_called()
     assert mock_build.call_args.kwargs.get("screenshots_by_conv") is None
     assert mock_build.call_args.kwargs.get("with_screenshots") is False
+
+
+def test_run_exchange_attaches_images_to_tutor_call():
+    """Sync mode: when images= is passed, tutor calls receive them."""
+    from benchmark.core.exchange import run_exchange
+    from benchmark.core.scenarios import Scenario
+    from unittest.mock import MagicMock
+
+    scenario = Scenario(
+        scenario_id="conv_xyz__det_0", conv_id="conv_xyz", mode="detected",
+        cut_turn=10, transcript_prefix="Turn 1. TUTOR: hi",
+        student_context="ctx", last_student_message="hi",
+        detection=None,
+    )
+    images = [
+        "deidentified/screenshots/REAL/s1.jpg",
+        "deidentified/screenshots/REAL/s2.jpg",
+    ]
+
+    tutor_resp = MagicMock(text="answer", usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+    tutor_client = MagicMock()
+    tutor_client.model = "claude-opus-4-6"
+    tutor_client.generate.return_value = tutor_resp
+    student_client = MagicMock()
+    student_client.model = "claude-opus-4-6"
+    student_client.generate.return_value = MagicMock(text="ok", usage={})
+
+    run_exchange(
+        scenario=scenario,
+        tutor_client=tutor_client, student_client=student_client,
+        num_turns=1, tutor_max_tokens=100, student_max_tokens=100,
+        prompt_version="v1", images=images,
+    )
+
+    # With num_turns=1, exactly one tutor call (no student turn on the last round)
+    assert tutor_client.generate.called
+    for call in tutor_client.generate.call_args_list:
+        assert call.kwargs.get("images") == images
+
+
+def test_run_exchange_default_no_images():
+    """Sync mode without images= still works (back-compat)."""
+    from benchmark.core.exchange import run_exchange
+    from benchmark.core.scenarios import Scenario
+    from unittest.mock import MagicMock
+
+    scenario = Scenario(
+        scenario_id="x__0", conv_id="x", mode="detected",
+        cut_turn=5, transcript_prefix="Turn 1. TUTOR: hi",
+        student_context="ctx", last_student_message="hi",
+        detection=None,
+    )
+    tutor_resp = MagicMock(text="answer", usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+    tutor_client = MagicMock()
+    tutor_client.model = "x"
+    tutor_client.generate.return_value = tutor_resp
+    student_client = MagicMock()
+    student_client.model = "x"
+    student_client.generate.return_value = MagicMock(text="", usage={})
+
+    run_exchange(
+        scenario=scenario,
+        tutor_client=tutor_client, student_client=student_client,
+        num_turns=1, tutor_max_tokens=100, student_max_tokens=100,
+        prompt_version="v1",
+    )
+    for call in tutor_client.generate.call_args_list:
+        assert call.kwargs.get("images") in (None, [])

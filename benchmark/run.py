@@ -89,6 +89,11 @@ def run_benchmark(version: str, config: dict):
         logger.info("Screenshots: enabled -- validated vision support on all models (%s)",
                     ", ".join(sorted(set(resolved_models.values()))))
 
+    transcripts_for_screenshots = None
+    if with_screenshots:
+        from annotator.core.storage import load_all_transcripts
+        transcripts_for_screenshots = load_all_transcripts()
+
     save_benchmark_result(version, "config.json", data=config)
 
     # --- Step 0: Run detection on all transcripts ---
@@ -145,6 +150,22 @@ def run_benchmark(version: str, config: dict):
         # ---------------------------------------------------------------
         logger.info("--- Phase 1: Generate Exchanges (%d scenarios) ---", len(scenarios))
 
+        images_by_scenario = None
+        if with_screenshots:
+            from annotator.core.screenshots import load_anchored_screenshots
+            images_by_scenario = {}
+            for scenario in scenarios:
+                conv = transcripts_for_screenshots.get(scenario.conv_id)
+                if not conv:
+                    images_by_scenario[scenario.scenario_id] = []
+                    continue
+                anchored = load_anchored_screenshots(scenario.conv_id, conv["turns"])
+                visible = [s for s in anchored if s["anchor_turn"] <= scenario.cut_turn]
+                images_by_scenario[scenario.scenario_id] = [s["storage_path"] for s in visible]
+            total_images = sum(len(v) for v in images_by_scenario.values())
+            logger.info("Screenshots: loaded for %d scenarios (%d images total, filtered by cut_turn)",
+                        len(images_by_scenario), total_images)
+
         existing_files = list_benchmark_result_files(version, "exchanges", profile)
         existing = set()
         for f in existing_files:
@@ -195,6 +216,7 @@ def run_benchmark(version: str, config: dict):
                     poll_interval=exchange_cfg["poll_interval"],
                     save_callback=_save_exchange,
                     prompt_version=exchange_prompt_version,
+                    images_by_scenario=images_by_scenario,
                 )
             else:
                 new_exchanges = {}
@@ -208,6 +230,7 @@ def run_benchmark(version: str, config: dict):
                             tutor_max_tokens=tutor_cfg["max_tokens"],
                             student_max_tokens=student_cfg["max_tokens"],
                             prompt_version=exchange_prompt_version,
+                            images=(images_by_scenario or {}).get(scenario.scenario_id),
                         )
                         new_exchanges[scenario.scenario_id] = exchange
                         logger.debug("[%d/%d] %s -> %d turns",

@@ -113,8 +113,14 @@ def run_exchange(
     tutor_max_tokens: int,
     student_max_tokens: int,
     prompt_version: str,
+    images: list[str] | None = None,
 ) -> Exchange:
-    """Run a multi-turn exchange for a single scenario (sync mode)."""
+    """Run a multi-turn exchange for a single scenario (sync mode).
+
+    When images is provided, every tutor and student call receives them.
+    The image set is fixed for the duration of the exchange (no new
+    screenshots emerge from synthetic dialogue).
+    """
     exchange = Exchange(
         scenario_id=scenario.scenario_id,
         tutor_model=tutor_client.model,
@@ -126,7 +132,10 @@ def run_exchange(
     for i in range(num_turns):
         # Tutor turn(s)
         prompt = _build_role_prompt("TUTOR", running_transcript, scenario.student_context, prompt_version)
-        response = tutor_client.generate(prompt, json_mode=False, max_tokens=tutor_max_tokens)
+        response = tutor_client.generate(
+            prompt, json_mode=False, max_tokens=tutor_max_tokens,
+            images=images,
+        )
         _add_usage(exchange.tutor_usage, response.usage)
 
         messages = _split_messages(response.text) or ["..."]
@@ -137,7 +146,10 @@ def run_exchange(
         # Student turn(s) — skip on last round
         if i < num_turns - 1:
             prompt = _build_role_prompt("STUDENT", running_transcript, scenario.student_context, prompt_version)
-            response = student_client.generate(prompt, json_mode=False, max_tokens=student_max_tokens)
+            response = student_client.generate(
+                prompt, json_mode=False, max_tokens=student_max_tokens,
+                images=images,
+            )
             _add_usage(exchange.student_usage, response.usage)
 
             messages = _split_messages(response.text) or ["..."]
@@ -163,6 +175,7 @@ def run_exchanges_batch(
     poll_interval: int,
     save_callback: callable = None,
     prompt_version: str = "v1",
+    images_by_scenario: dict[str, list[str]] | None = None,
 ) -> dict[str, Exchange]:
     """Run multi-turn exchanges for all scenarios using batch API.
 
@@ -200,8 +213,10 @@ def run_exchanges_batch(
         for sid in active_ids:
             scenario = scenario_map[sid]
             prompt = _build_role_prompt("TUTOR", transcripts[sid], scenario.student_context, prompt_version)
+            scenario_images = (images_by_scenario or {}).get(sid)
             tutor_entries.append(
-                build_batch_entry(sid, prompt, json_mode=False, max_tokens=tutor_max_tokens)
+                build_batch_entry(sid, prompt, json_mode=False, max_tokens=tutor_max_tokens,
+                                  images=scenario_images)
             )
 
         tutor_raw = run_batch(
@@ -239,8 +254,10 @@ def run_exchanges_batch(
             for sid in active_ids:
                 scenario = scenario_map[sid]
                 prompt = _build_role_prompt("STUDENT", transcripts[sid], scenario.student_context, prompt_version)
+                scenario_images = (images_by_scenario or {}).get(sid)
                 student_entries.append(
-                    build_batch_entry(sid, prompt, json_mode=False, max_tokens=student_max_tokens)
+                    build_batch_entry(sid, prompt, json_mode=False, max_tokens=student_max_tokens,
+                                      images=scenario_images)
                 )
 
             student_raw = run_batch(
