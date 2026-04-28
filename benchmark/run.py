@@ -391,7 +391,37 @@ def run_benchmark(version: str, config: dict):
                   f"scaffolding={type_means.get('scaffolding', 0):.3f}, "
                   f"rapport={type_means.get('rapport', 0):.3f}")
 
-    print(f"\nResults saved (version: {version})")
+    logger.info("Results saved (version: %s)", version)
+    save_benchmark_result(version, "_complete.json", data={
+        "completed_at": datetime.datetime.now().isoformat(timespec="seconds"),
+    })
+
+
+def _resolve_or_create_version(config: dict) -> str:
+    """Return the version for this run, reusing an in-progress run if one exists.
+
+    Reads results/benchmark/_active_runs/{tutor_profile}.json. If that pointer
+    names a version whose _complete.json marker doesn't exist, reuse it; this
+    is what makes a ctrl-C'd run resumable across midnight. Otherwise generate
+    f'{profile}_{date}' and write a fresh pointer.
+    """
+    tutor_profile = config.get("tutor_profiles", ["anthropic"])[0]
+    pointer = load_benchmark_result("_active_runs", f"{tutor_profile}.json")
+    if pointer:
+        candidate = pointer.get("version")
+        if candidate:
+            complete = load_benchmark_result(candidate, "_complete.json")
+            if complete is None:
+                logger.info("Resuming in-progress version: %s", candidate)
+                return candidate
+
+    new_version = f"{tutor_profile}_{datetime.date.today().strftime('%Y-%m-%d')}"
+    save_benchmark_result("_active_runs", f"{tutor_profile}.json", data={
+        "version": new_version,
+        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+    })
+    logger.info("Auto-generated version: %s", new_version)
+    return new_version
 
 
 def main():
@@ -426,15 +456,7 @@ def main():
     if args.version:
         version = args.version
     else:
-        bm_version = config.get("version")
-        if bm_version:
-            version = bm_version
-        else:
-            import datetime
-            tutor_profile = config.get("tutor_profiles", ["anthropic"])[0]
-            date_str = datetime.date.today().strftime("%Y-%m-%d")
-            version = f"{tutor_profile}_{date_str}"
-            print(f"  Auto-generated version: {version}")
+        version = config.get("version") or _resolve_or_create_version(config)
 
     setup_logging(version=version)
 
