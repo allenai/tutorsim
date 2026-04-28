@@ -162,3 +162,5 @@ benchmark:
       effective: 1.0
       partial: 0.5
       ineffective: 0.0
+
+  with_screenshots: false  # opt-in; requires vision-capable models on tutor, student, annotator, detector, labeller

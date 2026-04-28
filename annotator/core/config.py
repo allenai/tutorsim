@@ -139,8 +139,9 @@ def get_benchmark_config(overrides: dict | None = None) -> dict:
     This is the single entry point for benchmark configuration.
     Replaces benchmark/run.py's local load_config().
     """
+    import copy
     config = load_config()
-    bm = config.get("benchmark", {})
+    bm = copy.deepcopy(config.get("benchmark", {}))
 
     if overrides:
         # Direct key overrides (e.g. tutor_profiles, exchange, etc.)
@@ -161,6 +162,8 @@ def get_benchmark_config(overrides: dict | None = None) -> dict:
             bm["annotator"]["mode"] = overrides["mode"]
         if overrides.get("test_transcripts"):
             bm["scenarios"]["test_transcripts"] = overrides["test_transcripts"]
+        if overrides.get("with_screenshots"):
+            bm["with_screenshots"] = True
 
     return bm
 

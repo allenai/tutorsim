@@ -81,6 +81,14 @@ def run_benchmark(version: str, config: dict):
     resolved_models["detector"] = get_phase_config("detect", detect_profile)["model"]
     config["resolved_models"] = resolved_models
 
+    with_screenshots = config.get("with_screenshots", False)
+    if with_screenshots:
+        from annotator.core.client import validate_vision_support
+        for role, model in resolved_models.items():
+            validate_vision_support(model)
+        logger.info("Screenshots: enabled -- validated vision support on all models (%s)",
+                    ", ".join(sorted(set(resolved_models.values()))))
+
     save_benchmark_result(version, "config.json", data=config)
 
     # --- Step 0: Run detection on all transcripts ---
@@ -101,6 +109,7 @@ def run_benchmark(version: str, config: dict):
             targets=["scaffolding", "rapport"],
             phase_cfg=detect_phase_cfg,
             test=config.get("scenarios", {}).get("test_transcripts", 0),
+            with_screenshots=with_screenshots,
         )
         detections_by_conv = detect_output["results"]
         save_benchmark_result(version, "detections.json", data=detect_output)
@@ -435,6 +444,8 @@ def main():
                         help="Limit detection to N transcripts (0 = all)")
     parser.add_argument("--mode", choices=["batch", "sync"],
                         help="Override execution mode (batch or sync)")
+    parser.add_argument("--with-screenshots", action="store_true",
+                        help="Attach anchored screenshots to detection, exchange, and annotation prompts. Requires vision-capable models.")
     args = parser.parse_args()
 
     overrides = {
@@ -444,6 +455,7 @@ def main():
         "tutor_profile": args.tutor_profile,
         "mode": args.mode,
         "test_transcripts": args.test,
+        "with_screenshots": args.with_screenshots if args.with_screenshots else None,
     }
     overrides = {k: v for k, v in overrides.items() if v is not None}
 
