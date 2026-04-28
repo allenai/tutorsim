@@ -7,7 +7,7 @@ Index of planned work and change log for the project. Plans live in this directo
 ### 2026-03-26 — [Factor IV storage refactor](2026-03-26-factor-iv-storage-refactor.md)
 
 **Goal**: The same pipeline needs to run on a laptop against local files and in production against S3. Before this, `if backend == "s3"` branching was smeared through the storage layer and paths were hardcoded — swapping environments required code edits.
-**Status**: Implemented; S3 end-to-end still blocked on AWS credentials from IT + cross-account bucket policy from Ai2.
+**Status**: Implemented. S3 access is unblocked as of 2026-04-28 — `aws sts get-caller-identity` works locally via the boto3 default credential chain, and `s3://kylel-alexisr-edu/` is reachable. Earlier "blocked on IT credentials" status no longer applies.
 **Result**: `StorageBackend` ABC with `LocalBackend` and `S3Backend` implementations, singleton delegate, zero branching. Every path (transcripts, ground truth, results) is overridable via env var. `STORAGE_BACKEND=local|s3` flips environments without touching code or config files. 13 tests (11 local, 2 with moto) passing.
 
 ### 2026-04-17 — [Codebase cleanup & CLI simplification](2026-04-17-codebase-cleanup.md)
@@ -39,14 +39,14 @@ Index of planned work and change log for the project. Plans live in this directo
 ### 2026-04-28 — [Benchmark screenshot ingestion](2026-04-28-benchmark-screenshots.md)
 
 **Goal**: The annotator side supported `--with-screenshots` (delivered 2026-04-24) but the benchmark didn't thread it through any phase. AI tutors were being graded text-only while the same human-tutor moments could be graded with full visual context — apples-to-oranges. Wire screenshots into Step 0 (detection), Phase 1 (tutor + synthetic student exchange), and Phase 2 (annotation) so the benchmark measures what the annotator was upgraded to measure.
-**Status**: Planned.
-**Result**: TBD — refactor `build_analysis_entries`/`build_detection_entries` to accept pre-loaded `screenshots_by_conv` (decoupling lookup from use); bridge loads per-scenario screenshots using `scenario.conv_id`; exchange attaches images to tutor + student calls (filtered to `anchor_turn ≤ cut_turn`).
+**Status**: Implemented (code + tests + smoke), validation blocked on data.
+**Result**: `build_analysis_entries` and `build_detection_entries` accept optional `screenshots_by_conv` so callers can inject pre-loaded screenshots keyed by any id (decouples lookup from use, fixing the conv_id -> scenario_id remap blocker). Bridge loads per-scenario screenshots using `scenario.conv_id` and passes them keyed by `scenario_id`. Phase 1 exchange attaches images filtered to `anchor_turn <= cut_turn` to both tutor and student in sync + batch modes. Vision validation runs once at run start. 6 new tests covering all three integration points. **End-to-end validation blocked**: S3's `deidentified/screenshots/` has 3 conv UUIDs that have no matching transcripts anywhere accessible — every smoke run currently degrades to text-only because the loader honestly returns `[]` for every conv. Code is correct and unit-tested; real-data verification awaits the deidentification pipeline producing transcripts paired with screenshot UUIDs.
 
 ### 2026-04-28 — [Benchmark production readiness](2026-04-28-benchmark-production-readiness.md)
 
 **Goal**: The benchmark pipeline lags behind the annotator on operational basics — Phase 2 has no resume, no in-flight batch sidecar, prints instead of logger, dead `annotate_exchange` code, vestigial `"annotator_profiles"` config branch, and auto-generated versions that flip across midnight. A long batch run can lose hours of work to a single ctrl-C. Bring benchmark up to the same floor as the annotator pipeline before attempting the first full run.
-**Status**: Planned.
-**Result**: TBD — port shard pre-filter + in-flight sidecar pattern from `annotator/core/annotate.py:313-402`, migrate prints to logger, delete dead code, stabilize version resolution across midnight, document text-only scoping for screenshots, then run end-to-end.
+**Status**: Implemented and smoke-verified.
+**Result**: Phase 2 resumable via shard pre-filter + per-(profile, style) in-flight sidecar (mirrors `annotator/core/annotate.py:313-402`). Stable version pointer at `_active_runs/{profile}.json` survives midnight resumes. ~35 `print()` calls migrated to structured logger; ~67 LOC of dead `annotate_exchange` and vestigial config branches removed. Smoke test verified resume in three modes: full cache hit (7s, no API), partial recovery (delete one shard, only that one re-runs), first run (18 min for 2 scenarios sync). Plus a latent config-mutation bug fixed in `get_benchmark_config` (added `deepcopy`). 5 new tests covering sidecar + bridge wiring.
 
 ### 2026-04-24 — [Screenshot enrichment](2026-04-24-screenshot-enrichment.md) · [spec](specs/2026-04-24-screenshot-enrichment-design.md)
 
@@ -193,7 +193,7 @@ Key changes:
 - **dotenv**: storage.py loads `.env` so env vars work without explicit export
 - `.env.example` created documenting all env vars
 
-Blocked on S3 testing: need AWS access keys from IT admin + cross-account bucket policy from Ai2.
+S3 access verified working 2026-04-28 (boto3 default credential chain + bucket `kylel-alexisr-edu`). The earlier "blocked on IT credentials" line was stale.
 
 ### 2026-03-26: Benchmark Decoupled from Ground Truth
 

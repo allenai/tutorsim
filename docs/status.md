@@ -48,7 +48,9 @@ The benchmark is now fully ground-truth-free. It uses synthetic detection to fin
 
 **Results naming**: `{tutor_model}_{date}` with `config.json` capturing all run conditions (resolved model names, prompt versions, turn counts).
 
-**Known limitation**: Benchmark annotation runs text-only. The annotator's `--with-screenshots` is not threaded through `annotator_bridge.prepare_bulk_entries`, and the bridge's `conv_id -> scenario_id` remap would defeat screenshot anchoring even if the kwarg were passed. Comparing benchmark scores to annotator gold runs produced with `--with-screenshots` is not apples-to-apples. See `docs/lessons_learned.md`.
+**Screenshots**: opt-in via `--with-screenshots` (or `benchmark.with_screenshots: true` in `config.yaml`). When on, all three phases (Step 0 detection, Phase 1 exchange, Phase 2 annotation) attach anchored screenshots from `deidentified/screenshots/{conv_id}/`. Default off — text-only runs reproduce prior numbers exactly. Wired but not yet validated end-to-end against real images: S3's `deidentified/screenshots/` has 3 conv UUIDs that have no matching transcripts anywhere accessible, so every screenshot-enabled run currently degrades to text-only. See `docs/lessons_learned.md` for the data-pairing gap.
+
+**Resume**: Phase 1 (exchange) and Phase 2 (annotation) both resumable via per-scenario shard pre-filter + in-flight batch sidecar. A ctrl-C or crash mid-batch is recoverable — re-run with the same `--version` and the pipeline picks up where it left off. Stable version pointer at `_active_runs/{profile}.json` survives midnight resumes.
 
 ### Key Technical Decisions
 

@@ -122,12 +122,16 @@ When a prompt has drifted through iteration, don't patch further. Go back to the
 
 ---
 
-## 2026-04-28: Benchmark annotation runs in text-only mode (screenshots not threaded)
+## 2026-04-28: Benchmark screenshots — wired, but data-pairing gap blocks validation
 
-**What happened:** The annotator pipeline supports `--with-screenshots` (anchors images to turns within the excerpt window, attaches them to the model call). The benchmark pipeline does not.
+**Original gap:** The annotator pipeline supports `--with-screenshots` (delivered 2026-04-24) but the benchmark — which reuses the annotator under the hood — never threaded the flag. Detection ran without images; tutor/student exchanges were text-only; annotation didn't see the screen even though the equivalent annotator-standalone run did.
 
-**Why:** `benchmark/core/annotator_bridge.py:prepare_bulk_entries` calls `build_analysis_entries(...)` without `with_screenshots=True`, and there's no CLI flag or config key to enable it. Even if you wired the flag through, the bridge deliberately remaps `conv_id -> scenario_id` (around line 142) to namespace bulk batch keys, but `load_anchored_screenshots(conv_id, ...)` looks up images on storage by the conv_id. With a remapped scenario id, it would silently find nothing.
+**Why the flag was a no-op:** `build_analysis_entries` and `build_detection_entries` were keying screenshot lookup on `conv_id`. The benchmark bridge remaps `conv_id -> scenario_id` to namespace bulk batch keys, so the lookup silently returned `[]`.
 
-**Implication:** AI tutors are evaluated text-only. Comparing benchmark scores to annotator gold scores produced with `--with-screenshots` is not apples-to-apples — the same tutor moment can score differently depending on whether the rater saw the screen. AI tutors that say "look at this diagram" are graded blind.
+**Fix (committed 2026-04-28):** Decoupled screenshot loading from screenshot use. Both functions now accept an optional `screenshots_by_conv` dict — if provided, the function uses it directly instead of looking up by conv_id. The bridge loads screenshots using the original `scenario.conv_id` and passes a dict keyed on `scenario_id` so the function's iteration key still matches. Phase 1 exchange similarly accepts `images=` (sync) and `images_by_scenario=` (batch). Vision validation runs once at run start when `--with-screenshots` is on. Default off — existing text-only runs are byte-for-byte unchanged.
 
-**Workaround:** When comparing benchmark numbers against annotator gold numbers, run the annotator side without `--with-screenshots`. Don't attempt to wire screenshots into benchmark without first redesigning the conv_id -> scenario_id remapping in `annotator_bridge.py`.
+**Caveat — data-pairing gap (not yet resolved):** Smoke-tested but **never exercised end-to-end with real images**. The S3 bucket has screenshots for only 3 conv UUIDs (`099bf759`, `202f38ab`, `9c6f61b1`) under `deidentified/screenshots/`, and *none* of those UUIDs appear anywhere else in the bucket — not in `deidentified/step_up.jsonl` (250 deidentified transcripts, all `has_video: False`), not in `transcripts/text transcripts.zip` (109 transcripts), not in our local 212 transcripts. Until someone deidentifies-and-publishes transcripts for those video sessions (or deidentifies more screenshots for already-published transcripts), every benchmark run with `--with-screenshots` degrades to text-only because the loader honestly returns `[]` for every conv. This isn't an S3 access problem (creds work fine via boto3 default chain) — it's a data-completeness problem owned by whoever runs the deidentification pipeline.
+
+**How to verify when data lands:** any conv that's in both the local transcript set and S3's `deidentified/screenshots/` will produce non-zero `total_images_sent` in `detections.json`. That's the cleanest single-field signal that real images flowed.
+
+**Latent gap noted but not fixed:** Benchmark annotation shards don't track `images_attached`/`images_seen` because `annotator_bridge.execute_and_parse_bulk` calls `parse_and_merge` directly, skipping the `_stamp_and_shard` step in `annotator/core/annotate.py:343-356` that adds those fields. Worth a follow-up so annotation-side image flow is visible per-shard, not only inferable from API request logs.
