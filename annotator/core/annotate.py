@@ -112,7 +112,8 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
                            context_window: int, version: str,
                            dialogue_only: bool = False,
                            annotator_style: str | None = None,
-                           with_screenshots: bool = False) -> list[dict]:
+                           with_screenshots: bool = False,
+                           screenshots_by_conv: dict[str, list[dict]] | None = None) -> list[dict]:
     """Build batch entries for analysis.
 
     annotator_style is accepted for API compatibility but NOT injected into
@@ -121,10 +122,11 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
     When with_screenshots=True, attaches per-moment images whose anchor turn
     falls inside the excerpt window (excerpt_start <= anchor_turn <= excerpt_end,
-    inclusive).
+    inclusive). If screenshots_by_conv is provided, it overrides per-conv lookup
+    by conv_id -- the caller has already done the loading, possibly with a
+    different conv_id than the iteration key (e.g. the benchmark bridge passes
+    scenario_id-keyed entries with screenshots loaded from the original conv_id).
     """
-    from .screenshots import load_anchored_screenshots
-
     prompt_cache = {}
     entries = []
 
@@ -134,10 +136,13 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
             logger.warning("No transcript found for %s, skipping", conv_id)
             continue
 
-        all_screenshots = (
-            load_anchored_screenshots(conv_id, conversation["turns"])
-            if with_screenshots else []
-        )
+        if screenshots_by_conv is not None:
+            all_screenshots = screenshots_by_conv.get(conv_id, [])
+        elif with_screenshots:
+            from .screenshots import load_anchored_screenshots
+            all_screenshots = load_anchored_screenshots(conv_id, conversation["turns"])
+        else:
+            all_screenshots = []
 
         turns = conversation.get("turns", [])
         min_turn = turns[0]["turn_number"] if turns else 1

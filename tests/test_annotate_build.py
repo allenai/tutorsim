@@ -71,3 +71,50 @@ class TestBuildAnalysisEntriesWithScreenshots:
         )
         for e in entries:
             assert "images" not in e["request"]
+
+
+def test_build_analysis_entries_uses_provided_screenshots(temp_data, monkeypatch):
+    """When screenshots_by_conv is passed, the function uses it directly
+    and does NOT call load_anchored_screenshots."""
+    from unittest.mock import patch
+    import annotator.core.annotate as a
+    from annotator.core.annotate import build_analysis_entries
+
+    monkeypatch.setattr(
+        a, "load_prompt",
+        lambda v, t: "P {brief_description} X {excerpt} X {turn_start} X {turn_end}",
+    )
+
+    detections_by_conv = {
+        "scen_abc": {"detections": [
+            {"turn_start": 5, "turn_end": 7,
+             "annotation_type": "scaffolding", "brief_description": "x"}
+        ]},
+    }
+    conversations_map = {
+        "scen_abc": {
+            "conversation_id": "scen_abc",
+            "turns": [
+                {"turn_number": i, "role": "TUTOR", "text": f"t{i}",
+                 "type": "DIALOGUE", "timestamp": "", "start_seconds": float(i)}
+                for i in range(1, 11)
+            ],
+        },
+    }
+    fake_screenshots = [
+        {"filename": "s1.jpg", "anchor_turn": 6, "storage_path": "deidentified/screenshots/REAL_CONV/s1.jpg",
+         "timestamp_seconds": 6.0},
+    ]
+    screenshots_by_conv = {"scen_abc": fake_screenshots}
+
+    with patch("annotator.core.screenshots.load_anchored_screenshots") as mock_load:
+        entries = build_analysis_entries(
+            detections_by_conv, conversations_map,
+            context_window=2, version="v4",
+            with_screenshots=True,
+            screenshots_by_conv=screenshots_by_conv,
+        )
+    mock_load.assert_not_called()
+    assert len(entries) == 1
+    request = entries[0]["request"]
+    assert request.get("images") == ["deidentified/screenshots/REAL_CONV/s1.jpg"]
