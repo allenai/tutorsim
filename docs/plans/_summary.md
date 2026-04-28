@@ -36,6 +36,12 @@ Index of planned work and change log for the project. Plans live in this directo
 
 **Follow-ups**: migrate remaining prints incrementally; add `--log-level` CLI flag if useful; upload `run.log` to S3 results dir at end-of-run when `STORAGE_BACKEND=s3`.
 
+### 2026-04-28 — [Benchmark production readiness](2026-04-28-benchmark-production-readiness.md)
+
+**Goal**: The benchmark pipeline lags behind the annotator on operational basics — Phase 2 has no resume, no in-flight batch sidecar, prints instead of logger, dead `annotate_exchange` code, vestigial `"annotator_profiles"` config branch, and auto-generated versions that flip across midnight. A long batch run can lose hours of work to a single ctrl-C. Bring benchmark up to the same floor as the annotator pipeline before attempting the first full run.
+**Status**: Planned.
+**Result**: TBD — port shard pre-filter + in-flight sidecar pattern from `annotator/core/annotate.py:313-402`, migrate prints to logger, delete dead code, stabilize version resolution across midnight, document text-only scoping for screenshots, then run end-to-end.
+
 ### 2026-04-24 — [Screenshot enrichment](2026-04-24-screenshot-enrichment.md) · [spec](specs/2026-04-24-screenshot-enrichment-design.md)
 
 **Goal**: Detection and annotation judge pedagogy from text alone, but transcripts often contain bare `[SCREEN UPDATE]` placeholders or narration-only enrichment turns. When a tutor says "look at this" or a student reacts to something visual, the pipeline is missing real context. Screenshots already exist on S3; wire them into the prompt path for the annotator pipeline only (benchmark stages stay text-only this iteration).
