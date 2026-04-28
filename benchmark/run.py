@@ -33,7 +33,6 @@ from annotator.core.storage import (
 from .core.scenarios import load_scenarios, Scenario
 from .core.exchange import run_exchange, run_exchanges_batch, Exchange
 from .core.annotator_bridge import (
-    annotate_exchange,
     prepare_bulk_entries, execute_and_parse_bulk, label_bulk,
 )
 from .core.aggregate import (
@@ -243,8 +242,7 @@ def run_benchmark(version: str, config: dict):
             return cached
 
         for style in styles:
-            # Resolve per-style prompt version (e.g. annotator_profiles/generous)
-            if prompt_version_base in ("annotator_profiles", "profiles"):
+            if prompt_version_base == "profiles":
                 prompt_version = f"profiles/{style}"
             else:
                 prompt_version = prompt_version_base

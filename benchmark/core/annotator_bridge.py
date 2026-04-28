@@ -1,22 +1,14 @@
 """Bridge to the synthetic annotator pipeline.
 
 Constructs in-memory transcripts and detections from benchmark exchanges,
-then calls the existing annotation and labeling functions directly.
-
-Supports two modes:
-- Per-scenario (sync): annotate_exchange() for one scenario at a time
-- Bulk (batch): prepare_bulk_entries() + execute_bulk() + finalize_bulk()
-  for efficient batch API usage across many scenarios
+then calls the existing annotation and labeling functions in bulk mode.
 """
-
-import json
-from pathlib import Path
 
 from annotator.core.annotate import (
     build_analysis_entries, parse_and_merge,
 )
 from annotator.core.client import (
-    ModelClient, build_batch_entry, run_sync_entries, run_batch,
+    ModelClient, run_sync_entries, run_batch,
 )
 from annotator.core.label import run_label
 from annotator.core.config import get_phase_config
@@ -113,65 +105,6 @@ def build_synthetic_detections(scenario: Scenario, exchange: Exchange) -> dict:
             "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         }
     }
-
-
-# ---------------------------------------------------------------------------
-# Per-scenario mode (sync)
-# ---------------------------------------------------------------------------
-
-def annotate_exchange(
-    exchange: Exchange,
-    scenario: Scenario,
-    annotator_style: str,
-    prompt_version: str,
-    annotator_profile: str,
-    context_window: int = 20,
-    mode: str = "sync",
-) -> dict | None:
-    """Run the synthetic annotator on a single exchange. Returns labeled annotations."""
-    synth_conv = build_synthetic_conversation(scenario, exchange)
-    detections = build_synthetic_detections(scenario, exchange)
-
-    if not detections:
-        return None
-
-    # Remap conv_id -> scenario_id for consistency with bulk mode
-    remapped_conv = dict(synth_conv)
-    remapped_conv["conversation_id"] = scenario.scenario_id
-    conversations_map = {scenario.scenario_id: remapped_conv}
-    remapped_detections = {
-        scenario.scenario_id: detections[scenario.conv_id]
-    }
-
-    entries = build_analysis_entries(
-        remapped_detections, conversations_map, context_window, prompt_version,
-        annotator_style=annotator_style,
-    )
-    if not entries:
-        return None
-
-    annotate_cfg = get_phase_config("annotate", annotator_profile)
-    client = ModelClient(annotate_cfg["model"])
-
-    if mode == "batch":
-        raw = run_batch(client, entries, display_name="benchmark_annotate",
-                        poll_interval=annotate_cfg["poll_interval"])
-    else:
-        raw = run_sync_entries(client, entries)
-
-    results = parse_and_merge(raw, remapped_detections)
-
-    annotations_data = {
-        "version": "benchmark", "model": annotate_cfg["model"],
-        "source": "benchmark_exchange", "annotator_style": annotator_style,
-        "results": results,
-    }
-
-    label_cfg = get_phase_config("label", annotator_profile)
-    return run_label(
-        version="benchmark", model=label_cfg["model"],
-        mode=mode, phase_cfg=label_cfg, annotations_data=annotations_data,
-    )
 
 
 # ---------------------------------------------------------------------------
