@@ -36,6 +36,12 @@ Index of planned work and change log for the project. Plans live in this directo
 
 **Follow-ups**: migrate remaining prints incrementally; add `--log-level` CLI flag if useful; upload `run.log` to S3 results dir at end-of-run when `STORAGE_BACKEND=s3`.
 
+### 2026-04-28 — [Benchmark screenshot ingestion](2026-04-28-benchmark-screenshots.md)
+
+**Goal**: The annotator side supported `--with-screenshots` (delivered 2026-04-24) but the benchmark didn't thread it through any phase. AI tutors were being graded text-only while the same human-tutor moments could be graded with full visual context — apples-to-oranges. Wire screenshots into Step 0 (detection), Phase 1 (tutor + synthetic student exchange), and Phase 2 (annotation) so the benchmark measures what the annotator was upgraded to measure.
+**Status**: Planned.
+**Result**: TBD — refactor `build_analysis_entries`/`build_detection_entries` to accept pre-loaded `screenshots_by_conv` (decoupling lookup from use); bridge loads per-scenario screenshots using `scenario.conv_id`; exchange attaches images to tutor + student calls (filtered to `anchor_turn ≤ cut_turn`).
+
 ### 2026-04-28 — [Benchmark production readiness](2026-04-28-benchmark-production-readiness.md)
 
 **Goal**: The benchmark pipeline lags behind the annotator on operational basics — Phase 2 has no resume, no in-flight batch sidecar, prints instead of logger, dead `annotate_exchange` code, vestigial `"annotator_profiles"` config branch, and auto-generated versions that flip across midnight. A long batch run can lose hours of work to a single ctrl-C. Bring benchmark up to the same floor as the annotator pipeline before attempting the first full run.
