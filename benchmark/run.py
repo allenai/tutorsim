@@ -14,7 +14,10 @@ Usage:
 """
 
 import argparse
+import datetime
+import hashlib
 import json
+import logging
 from pathlib import Path
 
 from common.logging_setup import setup_logging
@@ -23,6 +26,8 @@ from annotator.core.config import get_phase_config, get_annotation_types, get_be
 from annotator.core.detect import run_detect
 from annotator.core.storage import (
     save_benchmark_result, load_benchmark_result, list_benchmark_result_files,
+    save_benchmark_inflight_batch, load_benchmark_inflight_batch,
+    clear_benchmark_inflight_batch,
 )
 
 from .core.scenarios import load_scenarios, Scenario
@@ -38,6 +43,16 @@ from .core.aggregate import (
 
 BASE_DIR = Path(__file__).parent
 REPO_ROOT = BASE_DIR.parent
+
+logger = logging.getLogger(__name__)
+
+
+def _entries_keys_hash(entries: list[dict]) -> str:
+    """Stable short hash of an entries list, keyed on entry order + keys.
+    Mirrors annotator/core/annotate.py:_entries_keys_hash so the resume
+    guard catches a changed scenario set between runs."""
+    joined = "\n".join(e["key"] for e in entries)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 
 def save_json(data, path: Path):
@@ -213,9 +228,21 @@ def run_benchmark(version: str, config: dict):
         # ---------------------------------------------------------------
         # Phase 2: Annotate all exchanges (batch per style)
         # ---------------------------------------------------------------
-        print(f"\n--- Phase 2: Annotate ({ann_mode} mode, {len(styles)} styles) ---")
+        logger.info("=== Phase 2: Annotate (%s mode, %d styles) ===", ann_mode, len(styles))
 
         all_style_results = {}
+
+        def _load_cached_annotations(style):
+            """Return {scenario_id: labeled_data} for shards already on disk."""
+            cached = {}
+            for fname in list_benchmark_result_files(version, "annotations", profile, style):
+                if not fname.endswith(".json"):
+                    continue
+                sid = fname[:-5]
+                data = load_benchmark_result(version, "annotations", profile, style, fname)
+                if data is not None:
+                    cached[sid] = data
+            return cached
 
         for style in styles:
             # Resolve per-style prompt version (e.g. annotator_profiles/generous)
@@ -224,33 +251,69 @@ def run_benchmark(version: str, config: dict):
             else:
                 prompt_version = prompt_version_base
 
-            print(f"\n  [{style.upper()}] Preparing entries (prompts: {prompt_version})...")
-            entries, all_detections, all_conversations = prepare_bulk_entries(
-                scenarios=scenarios,
+            cached = _load_cached_annotations(style)
+            missing = [s for s in scenarios if s.scenario_id not in cached]
+            logger.info("[%s] %d cached, %d to annotate (prompts: %s)",
+                        style, len(cached), len(missing), prompt_version)
+
+            if not missing:
+                all_style_results[style] = cached
+                continue
+
+            entries, all_detections, _ = prepare_bulk_entries(
+                scenarios=missing,
                 exchanges=exchanges,
                 annotator_style=style,
                 prompt_version=prompt_version,
                 context_window=context_window,
             )
-            print(f"    {len(entries)} annotation entries across {len(all_detections)} scenarios")
+            logger.info("[%s] %d annotation entries across %d scenarios",
+                        style, len(entries), len(all_detections))
 
             if not entries:
-                all_style_results[style] = {}
+                all_style_results[style] = cached
                 continue
 
-            # Execute annotation
-            print(f"    Running annotation ({ann_mode})...")
+            sidecar = load_benchmark_inflight_batch(version, profile, style)
+            existing_batch_id = None
+            if sidecar:
+                expected = sidecar.get("entry_keys_hash")
+                actual = _entries_keys_hash(entries)
+                if expected == actual:
+                    existing_batch_id = sidecar["batch_id"]
+                    logger.info("[%s] resuming in-flight batch %s (submitted %s)",
+                                style, existing_batch_id, sidecar.get("submitted_at", "?"))
+                else:
+                    logger.error(
+                        "[%s] in-flight sidecar exists but entry-keys hash differs "
+                        "(sidecar=%s, current=%s). Scenario set changed between runs. "
+                        "Delete results/benchmark/%s/in_flight/%s_%s.json to start fresh.",
+                        style, expected, actual, version, profile, style,
+                    )
+                    raise RuntimeError("entry-keys mismatch on benchmark in-flight resume")
+
+            def _record(batch_id, _profile=profile, _style=style):
+                save_benchmark_inflight_batch(version, _profile, _style, {
+                    "provider": "unknown",
+                    "model": annotator_cfg.get("model", ""),
+                    "batch_id": batch_id,
+                    "n_entries": len(entries),
+                    "entry_keys_hash": _entries_keys_hash(entries),
+                    "display_name": "benchmark_annotate",
+                    "submitted_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                })
+
             per_scenario_results = execute_and_parse_bulk(
                 entries=entries,
                 all_detections=all_detections,
                 annotator_profile=annotator_profile,
                 mode=ann_mode,
+                existing_batch_id=existing_batch_id,
+                on_batch_created=_record,
             )
-            print(f"    Parsed {len(per_scenario_results)} scenario results")
+            logger.info("[%s] parsed %d scenario results", style, len(per_scenario_results))
 
-            # Label
             annotate_cfg_full = get_phase_config("annotate", annotator_profile)
-            print(f"    Running labeling ({ann_mode})...")
             per_scenario_labeled = label_bulk(
                 per_scenario_results=per_scenario_results,
                 annotator_style=style,
@@ -258,14 +321,17 @@ def run_benchmark(version: str, config: dict):
                 annotator_model=annotate_cfg_full["model"],
                 mode=ann_mode,
             )
-            print(f"    Labeled {len(per_scenario_labeled)} scenarios")
+            logger.info("[%s] labeled %d scenarios", style, len(per_scenario_labeled))
 
-            all_style_results[style] = per_scenario_labeled
-
-            # Save per-scenario annotations
             for scenario_id, labeled_data in per_scenario_labeled.items():
                 save_benchmark_result(version, "annotations", profile, style,
                                       f"{scenario_id}.json", data=labeled_data)
+
+            clear_benchmark_inflight_batch(version, profile, style)
+
+            merged = dict(cached)
+            merged.update(per_scenario_labeled)
+            all_style_results[style] = merged
 
         # ---------------------------------------------------------------
         # Phase 3: Per-style scores (no composite aggregation)
