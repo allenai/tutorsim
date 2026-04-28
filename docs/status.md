@@ -48,6 +48,8 @@ The benchmark is now fully ground-truth-free. It uses synthetic detection to fin
 
 **Results naming**: `{tutor_model}_{date}` with `config.json` capturing all run conditions (resolved model names, prompt versions, turn counts).
 
+**Known limitation**: Benchmark annotation runs text-only. The annotator's `--with-screenshots` is not threaded through `annotator_bridge.prepare_bulk_entries`, and the bridge's `conv_id -> scenario_id` remap would defeat screenshot anchoring even if the kwarg were passed. Comparing benchmark scores to annotator gold runs produced with `--with-screenshots` is not apples-to-apples. See `docs/lessons_learned.md`.
+
 ### Key Technical Decisions
 
 - **Detection ceiling is model-limited**, not prompt-limited. v4 detection prompts are final.

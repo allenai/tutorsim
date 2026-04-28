@@ -119,3 +119,15 @@ We confirmed this with variance checks (rerunning identical prompts). A +4pp ann
 ### 11. Go back to the source material
 
 When a prompt has drifted through iteration, don't patch further. Go back to the original research instructions and rewrite from scratch. The original research framing ("We are studying how tutors decide to push for rigor versus introduce scaffolds...") was clear and well-scoped. v3 had drifted away from it. Going back improved the prompts more than any advisor cycle.
+
+---
+
+## 2026-04-28: Benchmark annotation runs in text-only mode (screenshots not threaded)
+
+**What happened:** The annotator pipeline supports `--with-screenshots` (anchors images to turns within the excerpt window, attaches them to the model call). The benchmark pipeline does not.
+
+**Why:** `benchmark/core/annotator_bridge.py:prepare_bulk_entries` calls `build_analysis_entries(...)` without `with_screenshots=True`, and there's no CLI flag or config key to enable it. Even if you wired the flag through, the bridge deliberately remaps `conv_id -> scenario_id` (around line 142) to namespace bulk batch keys, but `load_anchored_screenshots(conv_id, ...)` looks up images on storage by the conv_id. With a remapped scenario id, it would silently find nothing.
+
+**Implication:** AI tutors are evaluated text-only. Comparing benchmark scores to annotator gold scores produced with `--with-screenshots` is not apples-to-apples — the same tutor moment can score differently depending on whether the rater saw the screen. AI tutors that say "look at this diagram" are graded blind.
+
+**Workaround:** When comparing benchmark numbers against annotator gold numbers, run the annotator side without `--with-screenshots`. Don't attempt to wire screenshots into benchmark without first redesigning the conv_id -> scenario_id remapping in `annotator_bridge.py`.
