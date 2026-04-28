@@ -729,6 +729,46 @@ def clear_inflight_batch(version: str, basename: str) -> None:
 
 
 # ===================================================================
+# Public API -- Benchmark in-flight batch sidecars (per profile + style)
+# ===================================================================
+#
+# Mirrors the annotator sidecar helpers above, but namespaced under
+# results/benchmark/{version}/in_flight/{profile}_{style}.json so each
+# (tutor profile, annotator style) batch tracks independently.
+
+def _bench_inflight_rel(version: str, profile: str, style: str) -> str:
+    base = _get_result_path("benchmark_results")
+    return f"{base}/{version}/in_flight/{profile}_{style}.json"
+
+
+def save_benchmark_inflight_batch(version: str, profile: str, style: str,
+                                   data: dict) -> None:
+    """Record an in-flight benchmark annotation batch's metadata."""
+    _get_backend().write_json(_bench_inflight_rel(version, profile, style), data)
+
+
+def load_benchmark_inflight_batch(version: str, profile: str,
+                                   style: str) -> dict | None:
+    """Return the recorded in-flight benchmark batch metadata, or None."""
+    return _get_backend().read_json(_bench_inflight_rel(version, profile, style))
+
+
+def clear_benchmark_inflight_batch(version: str, profile: str, style: str) -> None:
+    """Delete the benchmark in-flight sidecar after a batch completes."""
+    be = _get_backend()
+    rel = _bench_inflight_rel(version, profile, style)
+    if isinstance(be, LocalBackend):
+        path = be.root / rel
+        if path.exists():
+            path.unlink()
+    else:
+        try:
+            be.client.delete_object(Bucket=be.bucket, Key=be._key(rel))
+        except Exception:
+            pass
+
+
+# ===================================================================
 # Public API -- Results (benchmark)
 # ===================================================================
 

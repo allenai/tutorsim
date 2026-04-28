@@ -254,6 +254,35 @@ class TestLocalBackend:
         assert files == ["detections.json"]
 
 
+class TestBenchmarkInflightBatch:
+    def test_roundtrip(self, local_storage):
+        from annotator.core.storage import (
+            save_benchmark_inflight_batch, load_benchmark_inflight_batch,
+        )
+        save_benchmark_inflight_batch("v_test", "anthropic", "balanced", {
+            "provider": "anthropic", "model": "claude-opus-4-6",
+            "batch_id": "msgbatch_abc", "n_entries": 12,
+            "entry_keys_hash": "abc123def456", "display_name": "annotate",
+            "submitted_at": "2026-04-28T10:00:00",
+        })
+        loaded = load_benchmark_inflight_batch("v_test", "anthropic", "balanced")
+        assert loaded["batch_id"] == "msgbatch_abc"
+        assert loaded["n_entries"] == 12
+
+    def test_load_missing_returns_none(self, local_storage):
+        from annotator.core.storage import load_benchmark_inflight_batch
+        assert load_benchmark_inflight_batch("v_nope", "anthropic", "generous") is None
+
+    def test_clear_removes_sidecar(self, local_storage):
+        from annotator.core.storage import (
+            save_benchmark_inflight_batch, load_benchmark_inflight_batch,
+            clear_benchmark_inflight_batch,
+        )
+        save_benchmark_inflight_batch("v_test", "anthropic", "balanced", {"batch_id": "x"})
+        clear_benchmark_inflight_batch("v_test", "anthropic", "balanced")
+        assert load_benchmark_inflight_batch("v_test", "anthropic", "balanced") is None
+
+
 class TestS3Backend:
     @pytest.fixture
     def s3_env(self, monkeypatch):
