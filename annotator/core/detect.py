@@ -73,20 +73,27 @@ def load_prompt(version: str, target: str) -> str:
 
 def build_detection_entries(conversations: list[dict], targets: list[str],
                             version: str, dialogue_only: bool = False,
-                            with_screenshots: bool = False) -> list[dict]:
-    """Build batch entries for detection."""
-    from .screenshots import load_anchored_screenshots
+                            with_screenshots: bool = False,
+                            screenshots_by_conv: dict[str, list[dict]] | None = None) -> list[dict]:
+    """Build batch entries for detection.
 
+    When with_screenshots=True, attaches every image for the conversation.
+    If screenshots_by_conv is provided, the function uses it directly instead
+    of looking up by conv_id -- symmetric with build_analysis_entries.
+    """
     prompt_cache = {}
     entries = []
 
     for conv in conversations:
         conv_id = conv["conversation_id"]
 
-        screenshots = (
-            load_anchored_screenshots(conv_id, conv["turns"])
-            if with_screenshots else []
-        )
+        if screenshots_by_conv is not None:
+            screenshots = screenshots_by_conv.get(conv_id, [])
+        elif with_screenshots:
+            from .screenshots import load_anchored_screenshots
+            screenshots = load_anchored_screenshots(conv_id, conv["turns"])
+        else:
+            screenshots = []
         image_paths = [s["storage_path"] for s in screenshots]
 
         transcript_text = format_transcript(

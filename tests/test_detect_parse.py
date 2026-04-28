@@ -140,3 +140,30 @@ class TestBuildDetectionEntriesWithScreenshots:
             with_screenshots=False,
         )
         assert "images" not in entries[0]["request"]
+
+
+def test_build_detection_entries_uses_provided_screenshots(temp_data):
+    from unittest.mock import patch
+    from annotator.core.detect import build_detection_entries
+
+    conversations = [{
+        "conversation_id": "scen_abc",
+        "turns": [{"turn_number": i, "role": "TUTOR", "text": f"t{i}",
+                   "type": "DIALOGUE", "timestamp": "", "start_seconds": float(i)}
+                  for i in range(1, 5)],
+        "context": "ctx",
+    }]
+    fake = [{"filename": "s1.jpg", "anchor_turn": 2,
+             "storage_path": "deidentified/screenshots/REAL/s1.jpg",
+             "timestamp_seconds": 2.0}]
+    screenshots_by_conv = {"scen_abc": fake}
+
+    with patch("annotator.core.screenshots.load_anchored_screenshots") as mock_load:
+        entries = build_detection_entries(
+            conversations, targets=["scaffolding"], version="v4",
+            with_screenshots=True, screenshots_by_conv=screenshots_by_conv,
+        )
+
+    mock_load.assert_not_called()
+    assert len(entries) == 1
+    assert entries[0]["request"].get("images") == ["deidentified/screenshots/REAL/s1.jpg"]
