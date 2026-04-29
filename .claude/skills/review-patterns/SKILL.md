@@ -22,6 +22,8 @@ If there are no changes, say so and stop.
 
 Work through each category below. For each, inspect the diff for violations. Only report findings that are actually present in the diff — do not speculate. Reference specific files and line numbers from the diff.
 
+**Scope.** CI runs ruff + pyright on `tutor_bench tests` and pytest on `tests` (excluding `slow`/`integration`/`gpu`). Apply this checklist's full rigor to changes under `tutor_bench/` and `tests/`. Treat changes under `scripts/` lightly — type hints, test coverage, and file-organization rules are advisory there per the project's CLAUDE.md. Do not flag ruff/format/import-order issues that `make run-checks` already catches; this skill is for what CI cannot check.
+
 ### 1. Plans & Documentation
 - New or completed plans must add an entry to `plans/_summary.md` using the project's per-plan format: `## Plan [###] — [Title]` followed by `**Plan**:`. `**Script**:` and `**Output**:` are optional. `**Goal**` is the "so what" (the problem), not a restatement of changes, similarly `**Result**` captures the bottom line impact of the changes, not a list of changes.
 
@@ -45,6 +47,7 @@ Flag any of:
 - No PII or secrets in git: scan the diff for anything that looks like real names, email addresses, phone numbers, API keys, or credentials. Ignore test fixtures with obviously fake data.
 - This project is well-organized with meaningful filenames names. Long file names or file names so short as to be meaningless are a hint that the code may be an anti-pattern.
 - Flag orphan code
+- Type hints: CI runs `pyright tutor_bench`. New public functions and class methods in `tutor_bench/` should have parameter and return type annotations. Flag missing annotations on new public APIs. `Any` is allowed but should be deliberate. Type hints are not required in `scripts/` or `tests/`.
 
 ### 4. Prompts
 - All prompt content lives as `.md` files in `tutor_bench/prompts/` or `scripts/prompts`. Flag new prompts authored inline in Python source (multi-line strings, f-strings constructed at call time, string constants longer than a line or two).
@@ -54,6 +57,7 @@ Flag any of:
 - Check that no tests are deleted. Modified tests are fine; removed `def test_*` functions are a violation.
 - Tests should cover custom business logic, not trivial getters/setters.
 - Temporary scripts in `scripts/` do not need testing.
+- Markers: CI's fast lane runs `pytest -m "not slow and not integration and not gpu"`. Flag new tests that look slow, hit the network, hit disk in non-trivial ways, or require GPU but are not marked with `@pytest.mark.slow`, `@pytest.mark.integration`, or `@pytest.mark.gpu` — they will run in CI's fast lane and may flake or time out.
 
 ### 6. Idempotency & Resumability
 For any new long-running operation (LLM batch, multi-conversation pass, scenario generation, etc.):
