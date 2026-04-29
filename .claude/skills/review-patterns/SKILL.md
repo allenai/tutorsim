@@ -1,6 +1,6 @@
 ---
 name: review-patterns
-description: Review code changes against this project's established patterns for S3 data boundaries, LLM usage, storage abstraction, logging, testing, and code style. Use when reviewing a branch before PR or after making changes.
+description: Review code changes against this project's established patterns for LLM usage, logging, testing, and code style. Use when reviewing a branch before PR or after making changes.
 disable-model-invocation: true
 argument-hint: "[--staged | module-name]"
 ---
@@ -12,7 +12,7 @@ Review code changes on the current branch against this project's established pat
 1. Determine the diff to review:
    - If `$ARGUMENTS` contains `--staged`, run `git diff --cached`
    - Otherwise run `git diff main...HEAD` to get all changes on this branch
-   - If `$ARGUMENTS` contains a module name (e.g. `deidentify`, `normalize`, `receive_pii`), filter the diff to only files under that path
+   - If `$ARGUMENTS` contains a module name (e.g. `annotator`, `evaluator`, `toolkit`), filter the diff to only files under that path
 2. Also run `git diff main...HEAD --stat` to get the list of changed files
 3. Read the full diff content and the list of changed files before proceeding
 
@@ -23,7 +23,7 @@ If there are no changes, say so and stop.
 Work through each category below. For each, inspect the diff for violations. Only report findings that are actually present in the diff — do not speculate. Reference specific files and line numbers from the diff.
 
 ### 1. Plans & Documentation
-- New or completed plans must add an entry to [plans/_summary.md](./plans/_summary.md) using the project's per-plan format: `## Plan [###] — [Title]` followed by `**Plan**:`. `**Script**:` and `**Output**:` are optional. `**Goal**` is the "so what" (the problem), not a restatement of changes, similarly `**Result**` captures the bottom line impact of the changes, not a list of changes.
+- New or completed plans must add an entry to `plans/_summary.md` using the project's per-plan format: `## Plan [###] — [Title]` followed by `**Plan**:`. `**Script**:` and `**Output**:` are optional. `**Goal**` is the "so what" (the problem), not a restatement of changes, similarly `**Result**` captures the bottom line impact of the changes, not a list of changes.
 
 ### 2. Logging
 Flag any of:
@@ -31,12 +31,12 @@ Flag any of:
 - New `print()` calls 
 - Modules that emit logs without declaring a module-level `logger = logging.getLogger(__name__)`. Don't use the root logger directly (`logging.info(...)`) and don't hardcode logger names.
 - Manual `logging.basicConfig()`, `logger.addHandler(...)`, or any `FileHandler`/`StreamHandler` construction in business logic.
-- Changes to the log format string, level resolution, or env-var names (`LOG_LEVEL`, `LOG_FILE`, `LOG_REPO_ROOT`) without an accompanying entry in docs/plans/_summary.md — these are public contract for ops.
+- Changes to the log format string, level resolution, or env-var names (`LOG_LEVEL`, `LOG_FILE`, `LOG_REPO_ROOT`) without an accompanying entry in `plans/_summary.md` — these are public contract for ops.
 
 ### 3. Code Style
 - No temporal/historical names: flag any new identifier or filename containing "New", "Old", "Legacy", "Improved", "Enhanced", "Unified", "Refactored", or a bare version number (`v2`, `v3`).
 
-  **Carve-out — experiment iterations:** prompt versions, ground-truth dumps, detection iteration logs, and other artifacts that intentionally coexist at different revisions may use versioned names, but the name must convey *what changed*, not just increment a counter. Prefer a descriptive slug (e.g. `ground_truth_outcome_anchored/`, `prompts/annotator/v5r4_cast_wide_net/`) over bare `v1`/`v2`/`v3` (e.g. `ground_truth_v2/` is opaque the moment you forget what "v2" was). If bare versioning is unavoidable (tight iteration loop), the parent directory must carry a short mapping (in `docs/`, an adjacent iteration log, or an entry in [docs/plans/_summary.md](../../../docs/plans/_summary.md)) that says what each version represents.
+  **Carve-out — experiment iterations:** prompt versions, ground-truth dumps, evaluation iteration logs, and other artifacts that intentionally coexist at different revisions may use versioned names, but the name must convey *what changed*, not just increment a counter. Prefer a descriptive slug (e.g. `prompts/annotator/v5r4_cast_wide_net/`) over bare `v1`/`v2`/`v3` (e.g. `ground_truth_v2/` is opaque the moment you forget what "v2" was). If bare versioning is unavoidable (tight iteration loop), the parent directory must carry a short mapping (in `docs/`, an adjacent iteration log, or an entry in `plans/_summary.md`) that says what each version represents.
 - Import ordering: stdlib, then third-party, then local. Flag out-of-order imports.
 - Module length versus file proliferation: 
    - Lightly flag any file that exceeds ~200 lines. Longer files may be OK if they group similar logic. Don't create junk drawer files just to hit an arbitrary file length constraint.
@@ -47,7 +47,7 @@ Flag any of:
 - Flag orphan code
 
 ### 4. Prompts
-- All prompt content lives as `.md` files. Flag new prompts authored inline in Python source (multi-line strings, f-strings constructed at call time, string constants longer than a line or two) or as new `.txt` files — the repo has legacy `.txt` prompts and is migrating to `.md`, so `.txt` is tolerated for edits but not for new files.
+- All prompt content lives as `.md` files in `tutor_bench/prompts/` or `scripts/prompts`. Flag new prompts authored inline in Python source (multi-line strings, f-strings constructed at call time, string constants longer than a line or two).
 
 ### 5. Testing
 - New features or bug fixes should have corresponding test changes. If the diff adds substantial new logic but no test files are modified, flag it.
