@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tutor_bench.toolkit.io_utils import load_jsonl, read_stems_file, save_jsonl
+import pytest
+
+from tutor_bench.toolkit.io_utils import load_jsonl, read_stems_file, resolve_path, save_jsonl
 from tutor_bench.toolkit.llm_utils import compute_cost_usd, extract_json_array, extract_json_object
 
 
@@ -19,6 +21,33 @@ def test_save_and_load_jsonl_roundtrip(tmp_path: Path) -> None:
     save_jsonl(p, rows)
     loaded = load_jsonl(p)
     assert loaded == rows
+
+
+def test_storage_root_resolves_relative_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+    resolved = resolve_path("sub/file.jsonl")
+    assert str(resolved) == str(tmp_path / "sub" / "file.jsonl")
+
+
+def test_storage_root_passthrough_for_absolute_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "other_root"))
+    abs_path = tmp_path / "explicit.jsonl"
+    resolved = resolve_path(abs_path)
+    assert str(resolved) == str(abs_path)
+
+
+def test_storage_root_unset_passthrough(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("STORAGE_ROOT", raising=False)
+    resolved = resolve_path(tmp_path / "x.jsonl")
+    assert str(resolved) == str(tmp_path / "x.jsonl")
+
+
+def test_save_and_load_jsonl_with_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
+    rows = [{"a": 1}, {"b": "x"}]
+    save_jsonl("nested/rows.jsonl", rows)
+    assert (tmp_path / "nested" / "rows.jsonl").exists()
+    assert load_jsonl("nested/rows.jsonl") == rows
 
 
 def test_extract_json_array_and_object_with_wrapped_text() -> None:
