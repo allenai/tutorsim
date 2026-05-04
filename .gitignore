@@ -14,6 +14,10 @@ pip-wheel-metadata/
 /*.iml
 .claude/settings.local.json
 
+# environment / secret files
+.env
+.env.*
+
 # notebook and cache artifacts
 .ipynb_checkpoints/
 .cache/
