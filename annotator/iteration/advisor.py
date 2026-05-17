@@ -184,6 +184,7 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     """
     from ..eval.eval import (
         EFFECTIVENESS_LABELS, match_gold_direct, map_to_binary,
+        compute_mean_consensus_label,
     )
 
     if ground_truth is None:
@@ -212,6 +213,12 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     if llm_data is None:
         raise FileNotFoundError(f"No annotations found for version {version}")
 
+    # Results use compound keys (tutor_student_uuid); ground truth uses bare UUIDs.
+    uuid_to_llm_conv = {
+        compound.rsplit("_", 1)[-1]: conv_data
+        for compound, conv_data in llm_data.get("results", {}).items()
+    }
+
     agreements = []
     disagreements = []
     confusion_counts = Counter()
@@ -219,14 +226,15 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     for conv_id, conv_data in gt["conversations"].items():
         if conv_id in EXAMPLE_CONV_IDS:
             continue
-        llm_conv = llm_data.get("results", {}).get(conv_id)
+        llm_conv = uuid_to_llm_conv.get(conv_id)
         if not llm_conv:
             continue
 
         human_moments = [m for m in conv_data["key_moments"] if m.get("annotation_type") == ann_type]
         llm_moments = [m for m in llm_conv.get("annotations", []) if m.get("annotation_type") == ann_type]
 
-        matches = match_gold_direct(human_moments, llm_moments)
+        matches = match_gold_direct(human_moments, llm_moments,
+                                    consensus_fn=compute_mean_consensus_label)
 
         for match in matches:
             human_label = match["consensus_3way"]
