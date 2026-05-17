@@ -42,6 +42,9 @@ import copy
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import numpy as np
+import krippendorff
+
 from ..core.config import get_valid_styles
 from ..core.utils import (
     compute_iou, merge_overlapping_ranges, load_ground_truth, load_split_ids,
@@ -89,6 +92,46 @@ def compute_mean_consensus_label(labels):
     if mean <= -0.6:
         return "ineffective"
     return "partial"
+
+
+_ORDINAL_CODE = {"effective": 0, "partial": 1, "ineffective": 2}
+
+
+def compute_krippendorff_alpha(all_matches):
+    """Compute Krippendorff's alpha (ordinal) treating LLM as one rater alongside humans.
+
+    Each matched unit is a column. Raters are all individual human annotators
+    who appear in any cluster, plus a single 'llm' row. NaN where not rated.
+    Units where only one rater has a value are excluded by the library automatically.
+    """
+    if not all_matches:
+        return {"alpha": None, "n_units": 0, "n_raters": 0}
+
+    all_rater_ids = set()
+    for m in all_matches:
+        all_rater_ids.update(m["per_annotator_labels"].keys())
+    all_rater_ids = sorted(all_rater_ids) + ["llm"]
+    rater_idx = {r: i for i, r in enumerate(all_rater_ids)}
+
+    matrix = np.full((len(all_rater_ids), len(all_matches)), np.nan)
+    for j, match in enumerate(all_matches):
+        for ann_id, label in match["per_annotator_labels"].items():
+            code = _ORDINAL_CODE.get(label)
+            if code is not None:
+                matrix[rater_idx[ann_id], j] = code
+        llm_code = _ORDINAL_CODE.get(match["llm_label_3way"])
+        if llm_code is not None:
+            matrix[rater_idx["llm"], j] = llm_code
+
+    try:
+        alpha = round(
+            krippendorff.alpha(reliability_data=matrix, level_of_measurement="ordinal"),
+            4,
+        )
+    except ValueError:
+        alpha = 1.0
+
+    return {"alpha": alpha, "n_units": len(all_matches), "n_raters": len(all_rater_ids)}
 
 
 def map_to_binary(label):
@@ -638,6 +681,15 @@ def print_scorecard(output):
               f"{det['total_human_clusters']} clusters | "
               f"{det['novel_llm_annotations']} novel")
 
+    # --- IAA (new annotations mode) ---
+    iaa = output.get("iaa")
+    if iaa and iaa.get("alpha") is not None:
+        print(f"\n  INTER-ANNOTATOR AGREEMENT (new annotations mode)")
+        print(f"  {'-' * 40}")
+        print(f"  Krippendorff's α:    {iaa['alpha']:.4f}  (ordinal, LLM as one rater)")
+        print(f"  Units:               {iaa['n_units']}  matched moments")
+        print(f"  Raters:              {iaa['n_raters']}  (human annotators + LLM)")
+
     # --- Effectiveness metrics ---
     eff = output.get("effectiveness")
     if eff and eff.get("binary_n", 0) > 0:
@@ -1042,12 +1094,17 @@ def main():
     detection = None
     effectiveness = None
     guardrails = None
+    iaa = None
 
     if args.mode in ("full", "detections"):
         detection = compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv)
 
-    if args.mode in ("full", "annotations_old", "annotations"):
+    if args.mode in ("full", "annotations_old"):
         effectiveness = compute_effectiveness_metrics(all_matches)
+        guardrails = compute_guardrails(annotations_by_conv)
+
+    if args.mode == "annotations":
+        iaa = compute_krippendorff_alpha(all_matches)
         guardrails = compute_guardrails(annotations_by_conv)
 
     ceiling = compute_human_ceiling(ground_truth)
@@ -1068,6 +1125,12 @@ def main():
             type_result["effectiveness"] = compute_effectiveness_metrics(m_filtered)
             type_result["guardrails"] = compute_guardrails(a_filtered)
 
+        if iaa:
+            m_filtered = filter_matches_by_type(all_matches, ann_type)
+            a_filtered = filter_annotations_by_type(annotations_by_conv, ann_type)
+            type_result["iaa"] = compute_krippendorff_alpha(m_filtered)
+            type_result["guardrails"] = compute_guardrails(a_filtered)
+
         type_result["human_ceiling"] = compute_human_ceiling(
             ground_truth, ann_type_filter=ann_type)
 
@@ -1083,6 +1146,8 @@ def main():
         output["detection"] = detection
     if effectiveness:
         output["effectiveness"] = effectiveness
+    if iaa:
+        output["iaa"] = iaa
     if guardrails:
         output["guardrails"] = guardrails
     output["human_ceiling"] = ceiling
