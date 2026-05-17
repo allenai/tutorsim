@@ -339,45 +339,59 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
     return matches
 
 
-def match_gold_direct(human_moments, llm_moments):
-    """Direct 1-to-1 matching for annotations mode (gold moments).
+def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
+    """Matching for gold moments, grouping by (turn_start, turn_end, annotation_type).
 
-    When LLM annotated gold truth moments, turn ranges are identical.
-    Match by exact (turn_start, turn_end, annotation_type) -- no IoU needed.
-    Each human moment gets compared to its corresponding LLM annotation.
+    Multiple annotators may label the same turn range; their labels are collected
+    and aggregated into a consensus. Multiple LLM annotations for the same turn
+    range (produced when the LLM was run once per annotator detection) are also
+    aggregated via consensus_fn.
     """
-    # Index LLM moments by (turn_start, turn_end, annotation_type)
-    llm_index = {}
+    fn = consensus_fn or compute_consensus_label
+
+    # Group LLM annotations by turn range key; aggregate if multiple
+    llm_groups = defaultdict(list)
     for l in llm_moments:
         key = (l["turn_start"], l["turn_end"], l.get("annotation_type", ""))
-        llm_index[key] = l
+        llm_groups[key].append(l.get("effectiveness", "unclear"))
 
-    matches = []
+    # Group human moments by turn range key
+    human_groups = defaultdict(list)
     for m in human_moments:
         key = (m["turn_start"], m["turn_end"], m.get("annotation_type", ""))
-        llm_moment = llm_index.get(key)
-        if not llm_moment:
+        human_groups[key].append(m)
+
+    matches = []
+    for key, group_moments in human_groups.items():
+        if key not in llm_groups:
             continue
 
-        human_label = m.get("strategy_label", "unclear")
-        llm_label_3way = llm_moment.get("effectiveness", "unclear")
+        per_annotator = {}
+        for m in group_moments:
+            ann_id = m.get("annotator_id", "unknown")
+            if ann_id not in per_annotator:
+                per_annotator[ann_id] = m.get("strategy_label", "unclear")
+
+        valid_human = [l for l in per_annotator.values() if l in EFFECTIVENESS_LABELS]
+        consensus_3way = fn(valid_human) if valid_human else "unclear"
+
+        valid_llm = [l for l in llm_groups[key] if l in EFFECTIVENESS_LABELS]
+        llm_label_3way = fn(valid_llm) if valid_llm else "unclear"
 
         matches.append({
             "cluster": {
-                "turn_start": m["turn_start"],
-                "turn_end": m["turn_end"],
-                "annotation_type": m.get("annotation_type", ""),
-                "moments": [m],
+                "turn_start": key[0],
+                "turn_end": key[1],
+                "annotation_type": key[2],
+                "moments": group_moments,
             },
-            "llm_moment": llm_moment,
+            "llm_moment": {"effectiveness": llm_label_3way},
             "iou": 1.0,
-            "consensus_3way": human_label,
-            "consensus_binary": map_to_binary(human_label),
+            "consensus_3way": consensus_3way,
+            "consensus_binary": map_to_binary(consensus_3way),
             "llm_label_3way": llm_label_3way,
             "llm_label_binary": map_to_binary(llm_label_3way),
-            "per_annotator_labels": {
-                m.get("annotator_id", "unknown"): human_label,
-            },
+            "per_annotator_labels": per_annotator,
         })
 
     return matches
@@ -1085,8 +1099,8 @@ def main():
         if args.mode != "detections":
             llm_moments = annotations_by_conv.get(conv_id, [])
             if is_gold:
-                # Direct 1-to-1 matching (gold moments have identical turn ranges)
-                matches = match_gold_direct(human_moments, llm_moments)
+                matches = match_gold_direct(human_moments, llm_moments,
+                                            consensus_fn=consensus_fn)
             else:
                 # IoU-based cluster matching (detected moments have different ranges)
                 matches = match_for_effectiveness(human_moments, llm_moments,
