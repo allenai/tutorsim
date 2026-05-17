@@ -20,7 +20,7 @@ from .client import (
 )
 from .config import get_phase_config, get_valid_styles, get_annotation_types
 from .storage import load_all_transcripts, save_annotator_result, get_annotator_result_path
-from .utils import format_transcript
+from .utils import format_transcript, load_split_ids
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "annotator"
 
@@ -29,14 +29,18 @@ VALID_ANNOTATION_TYPES = set(get_annotation_types())
 
 
 def load_conversations(limit: int = 0) -> list[dict]:
-    """Load all consolidated transcript JSON files via storage layer."""
+    """Load train-split transcripts via storage layer."""
     transcripts = load_all_transcripts()
     if not transcripts:
         raise FileNotFoundError(
             "No transcripts found. Ensure data/transcripts/ contains JSON files, "
             "or configure transcript paths in config.yaml under storage.paths.transcripts."
         )
-    conversations = sorted(transcripts.values(), key=lambda c: c.get("conversation_id", ""))
+    train_ids = load_split_ids("train")
+    conversations = sorted(
+        (c for c in transcripts.values() if c.get("transcript_id", "") in train_ids),
+        key=lambda c: c.get("conversation_id", ""),
+    )
     if limit > 0:
         conversations = conversations[:limit]
     return conversations

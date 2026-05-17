@@ -15,7 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ..core.utils import load_ground_truth
+from ..core.utils import load_ground_truth, load_split_ids
 from ..core.storage import (
     load_annotator_result, annotator_result_exists, load_transcript,
     save_annotator_result, get_annotator_result_path,
@@ -47,6 +47,10 @@ def find_llm_file(version: str, gold: bool = False):
 def load_data(version: str, gold: bool = False):
     """Load ground truth, LLM results, and consolidated transcripts."""
     ground_truth = load_ground_truth()
+    train_ids = load_split_ids("train")
+    ground_truth["conversations"] = {
+        k: v for k, v in ground_truth["conversations"].items() if k in train_ids
+    }
 
     llm_filename, llm_type = find_llm_file(version, gold=gold)
     if not llm_filename:

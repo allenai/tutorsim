@@ -29,7 +29,7 @@ from .storage import (
     load_all_transcripts, load_annotator_result, save_annotator_result,
     annotator_result_exists, get_annotator_result_path,
 )
-from .utils import format_excerpt, load_ground_truth
+from .utils import format_excerpt, load_ground_truth, load_split_ids
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,13 @@ VALID_ANNOTATOR_STYLES = get_valid_styles()
 
 
 def load_conversations_map() -> dict[str, dict]:
-    """Load transcripts as {conv_id: conversation} via storage layer."""
-    return load_all_transcripts()
+    """Load train-split transcripts as {conv_id: conversation} via storage layer."""
+    train_ids = load_split_ids("train")
+    return {
+        conv_id: conv
+        for conv_id, conv in load_all_transcripts().items()
+        if conv.get("transcript_id", "") in train_ids
+    }
 
 
 def load_detections_from_version(version: str) -> dict[str, dict] | None:
@@ -55,15 +60,18 @@ def load_detections_from_version(version: str) -> dict[str, dict] | None:
 
 def load_gold_moments(targets: list[str],
                       annotator_style: str | None = None) -> dict[str, dict]:
-    """Load ground truth moments as detection-like dicts.
+    """Load train-split ground truth moments as detection-like dicts.
 
     Converts gold annotations into the same format as detect.py output
     so the rest of the pipeline works identically.
     """
     ground_truth = load_ground_truth(annotator_style=annotator_style)
+    train_ids = load_split_ids("train")
 
     detections_by_conv = {}
     for conv_id, conv_data in ground_truth.get("conversations", {}).items():
+        if conv_id not in train_ids:
+            continue
         dets = []
         for moment in conv_data.get("key_moments", []):
             ann_type = moment.get("annotation_type", "")

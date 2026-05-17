@@ -324,6 +324,7 @@ def _transform_normalized_record(rec: dict) -> dict:
 
     return {
         "conversation_id": conv_id,
+        "transcript_id": source_id,
         "tutor_id": tutor_id,
         "student_id": student_id,
         "context": context,

@@ -70,6 +70,14 @@ def merge_overlapping_ranges(moments):
     return clusters
 
 
+def load_split_ids(split: str = "train") -> set[str]:
+    """Return the set of transcript UUIDs for the given split from data/split.json."""
+    split_path = REPO_ROOT / "data" / "split.json"
+    with open(split_path) as f:
+        data = json.load(f)
+    return set(data[split])
+
+
 def load_transcripts():
     """Load all transcripts into a dict keyed by conversation ID."""
     from .storage import load_all_transcripts

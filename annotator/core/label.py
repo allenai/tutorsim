@@ -26,6 +26,7 @@ from .storage import (
     load_annotator_result, save_annotator_result, annotator_result_exists,
     get_annotator_result_path,
 )
+from .utils import load_split_ids
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "annotator" / "labeller"
 
 
@@ -64,7 +65,14 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             print(f"ERROR: {filename} not found for version {version}. Run annotate first.")
             return None
 
-    results = data["results"]
+    # The transcript UUID is the last _-delimited segment of the compound conv_id.
+    # Filter to train split as a safety net (detect/annotate already filter upstream).
+    train_ids = load_split_ids("train")
+    results = {
+        conv_id: conv_data
+        for conv_id, conv_data in data["results"].items()
+        if conv_id.rsplit("_", 1)[-1] in train_ids
+    }
 
     # Load template once
     from .config import get_annotator_defaults
