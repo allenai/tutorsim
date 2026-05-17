@@ -254,9 +254,9 @@ def _transform_normalized_record(rec: dict) -> dict:
     Our format: turns[] (all interleaved, with turn_number, role, text, type).
     """
     sess = rec.get("session", {})
-    source_id = rec.get("source_id", "")
-    tutor_id = sess.get("source_tutor_id", "")
-    student_id = sess.get("source_student_id", "")
+    source_id = rec.get("transcript_id", "") or rec.get("source_id", "")
+    tutor_id = sess.get("tutor_id", "") or sess.get("source_tutor_id", "")
+    student_id = sess.get("student_id", "") or sess.get("source_student_id", "")
 
     # source_id format varies by batch:
     #   older batches: UUID only (e.g. "69b80b21-...")
@@ -324,8 +324,8 @@ def _transform_normalized_record(rec: dict) -> dict:
 
     return {
         "conversation_id": conv_id,
-        "tutor_id": sess.get("source_tutor_id", ""),
-        "student_id": sess.get("source_student_id", ""),
+        "tutor_id": tutor_id,
+        "student_id": student_id,
         "context": context,
         "platform": rec.get("source", "step_up"),
         "num_turns": len(numbered),
