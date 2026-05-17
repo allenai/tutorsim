@@ -942,6 +942,14 @@ def main():
         print("ERROR: --mode annotations is not yet implemented.")
         return
 
+    if args.mode == "full":
+        print("ERROR: --mode full is temporarily disabled.")
+        print("  Choose an explicit annotations mode:")
+        print("    --mode detections      (detection metrics only)")
+        print("    --mode annotations_old (labeling quality, original approach)")
+        print("    --mode annotations     (new approach, not yet implemented)")
+        return
+
     # --- Load LLM data based on mode ---
     llm_moments_by_conv = {}
     annotations_by_conv = {}
