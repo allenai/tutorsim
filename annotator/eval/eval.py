@@ -681,14 +681,14 @@ def print_scorecard(output):
               f"{det['total_human_clusters']} clusters | "
               f"{det['novel_llm_annotations']} novel")
 
-    # --- IAA (new annotations mode) ---
+    # --- Model-human agreement (new annotations mode) ---
     iaa = output.get("iaa")
     if iaa and iaa.get("alpha") is not None:
-        print(f"\n  INTER-ANNOTATOR AGREEMENT (new annotations mode)")
+        print(f"\n  MODEL-HUMAN AGREEMENT")
         print(f"  {'-' * 40}")
-        print(f"  Krippendorff's α:    {iaa['alpha']:.4f}  (ordinal, LLM as one rater)")
+        print(f"  Krippendorff's α:    {iaa['alpha']:.4f}  (ordinal, LLM treated as one rater)")
         print(f"  Units:               {iaa['n_units']}  matched moments")
-        print(f"  Raters:              {iaa['n_raters']}  (human annotators + LLM)")
+        print(f"  Raters:              {iaa['n_raters']}  ({iaa['n_raters'] - 1} human annotators + LLM)")
 
     # --- Effectiveness metrics ---
     eff = output.get("effectiveness")
@@ -735,10 +735,10 @@ def print_scorecard(output):
         print(f"     Distribution:       {dist_str}")
         print(f"     Per conversation:   {guard['annotations_per_conversation']} annotations")
 
-    # --- Human ceiling ---
+    # --- Human ceiling (human-human agreement, for context) ---
     ceiling = output.get("human_ceiling", {})
     if ceiling.get("overlapping_pairs", 0) > 0:
-        print(f"\n  HUMAN CEILING")
+        print(f"\n  HUMAN-HUMAN AGREEMENT (ceiling context)")
         print(f"  {'-' * 40}")
         print(f"  Binary Kappa:          {ceiling.get('binary_kappa', 0):.4f}  "
               f"(agreement: {ceiling.get('binary_agreement', 0):.1%})")
@@ -759,6 +759,7 @@ def print_scorecard(output):
 
             t_det = td.get("detection", {})
             t_eff = td.get("effectiveness", {})
+            t_iaa = td.get("iaa", {})
             t_guard = td.get("guardrails", {})
             t_ceil = td.get("human_ceiling", {})
 
@@ -777,13 +778,19 @@ def print_scorecard(output):
                 print(f"  Within Human Range: {t_eff.get('within_human_range_pct', 0):.4f}  "
                       f"({t_eff.get('within_human_range', 0)}/{t_eff.get('total_matched', 0)})")
 
+            if t_iaa.get("alpha") is not None:
+                n_r = t_iaa.get("n_raters", 0)
+                print(f"  Model-Human α:      {t_iaa['alpha']:.4f}  "
+                      f"(Krippendorff ordinal, {t_iaa.get('n_units', 0)} units, "
+                      f"{n_r - 1} human raters + LLM)")
+
             if t_guard.get("total_annotations", 0) > 0:
                 print(f"  Effective Rate:     {t_guard.get('effective_rate', 0):.1%}  |  "
                       f"Invalid: {t_guard.get('invalid_labels', 0)}")
 
             if t_ceil.get("overlapping_pairs", 0) > 0:
-                print(f"  Human ceiling:      kappa={t_ceil.get('binary_kappa', 0):.4f}  "
-                      f"({t_ceil['overlapping_pairs']} pairs)")
+                print(f"  Human-human α:      kappa={t_ceil.get('binary_kappa', 0):.4f}  "
+                      f"({t_ceil['overlapping_pairs']} pairs, ceiling)")
 
     print(f"\n{'=' * 68}")
 
