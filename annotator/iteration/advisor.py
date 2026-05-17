@@ -13,6 +13,7 @@ Two entry points:
 
 import argparse
 import json
+import random
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -174,6 +175,17 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
 # Annotation error collection
 # ===================================================================
 
+def _format_human_annotators(annotators: list[dict]) -> str:
+    """Format up to 5 sampled human annotators' SAR text for display."""
+    lines = []
+    for j, ann in enumerate(annotators):
+        lines.append(f"    Annotator {j+1} [{ann['label']}]:\n"
+                     f"      S: {ann['situation'][:300]}\n"
+                     f"      A: {ann['action'][:300]}\n"
+                     f"      R: {ann['result'][:300]}\n")
+    return "".join(lines)
+
+
 def collect_annotation_errors(version, ann_type, transcripts, limit=10,
                                ground_truth=None, annotator_style=None,
                                profile=None):
@@ -244,17 +256,26 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
 
             confusion_counts[f"{human_label}_vs_{llm_label}" if human_label != llm_label else "agree"] += 1
 
-            human_m = match["cluster"]["moments"][0]
             llm_m = match["llm_moment"]
+            moments = match["cluster"]["moments"]
+            sampled = random.sample(moments, min(5, len(moments)))
+            human_annotators = [
+                {
+                    "annotator_id": m.get("annotator_id", "unknown"),
+                    "label": m.get("strategy_label", "unclear"),
+                    "situation": m.get("situation", ""),
+                    "action": m.get("action", ""),
+                    "result": m.get("result", ""),
+                }
+                for m in sampled
+            ]
             entry = {
                 "conv_id": conv_id,
                 "turn_start": match["cluster"]["turn_start"],
                 "turn_end": match["cluster"]["turn_end"],
                 "human_label": human_label,
                 "llm_label": llm_label,
-                "human_situation": human_m.get("situation", ""),
-                "human_action": human_m.get("action", ""),
-                "human_result": human_m.get("result", ""),
+                "human_annotators": human_annotators,
                 "llm_situation": llm_m.get("situation", ""),
                 "llm_action": llm_m.get("action", ""),
                 "llm_result": llm_m.get("result", ""),
@@ -272,13 +293,11 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     examples.append("These are cases where human and LLM annotations produced the same label. Study what makes these work.\n")
     for i, d in enumerate(agreements[:limit]):
         excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
+        human_block = _format_human_annotators(d["human_annotators"])
         examples.append(
             f"Agreement {i+1}: turns {d['turn_start']}-{d['turn_end']} (both={d['human_label']})\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  HUMAN:\n"
-            f"    S: {d['human_situation'][:300]}\n"
-            f"    A: {d['human_action'][:300]}\n"
-            f"    R: {d['human_result'][:300]}\n"
+            f"  HUMAN ({len(d['human_annotators'])} annotator(s) sampled):\n{human_block}"
             f"  LLM:\n"
             f"    S: {d['llm_situation'][:300]}\n"
             f"    A: {d['llm_action'][:300]}\n"
@@ -296,13 +315,12 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
 
         for i, d in enumerate(cases[:limit]):
             excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
+            human_block = _format_human_annotators(d["human_annotators"])
             examples.append(
                 f"Disagreement {total_shown + i + 1}: turns {d['turn_start']}-{d['turn_end']}\n"
                 f"  Transcript:\n{excerpt}\n"
-                f"  HUMAN ({d['human_label']}):\n"
-                f"    S: {d['human_situation'][:300]}\n"
-                f"    A: {d['human_action'][:300]}\n"
-                f"    R: {d['human_result'][:300]}\n"
+                f"  HUMAN consensus={d['human_label']} ({len(d['human_annotators'])} annotator(s) sampled):\n"
+                f"{human_block}"
                 f"  LLM ({d['llm_label']}):\n"
                 f"    S: {d['llm_situation'][:300]}\n"
                 f"    A: {d['llm_action'][:300]}\n"
@@ -583,8 +601,9 @@ def main():
         advice = {"raw_text": response.text}
 
     # Save to results directory
+    profile_suffix = f"_{profile_name}" if profile_name else ""
     style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
-    filename = f"advisor_{args.pass_type}_{args.type}{style_suffix}.json"
+    filename = f"advisor_{args.pass_type}_{args.type}{profile_suffix}{style_suffix}.json"
     save_annotator_result(args.version, filename, advice)
     print(f"\nSaved: {filename} (version: {args.version})")
 
