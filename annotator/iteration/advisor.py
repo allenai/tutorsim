@@ -175,7 +175,8 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
 # ===================================================================
 
 def collect_annotation_errors(version, ann_type, transcripts, limit=10,
-                               ground_truth=None, annotator_style=None):
+                               ground_truth=None, annotator_style=None,
+                               profile=None):
     """Collect annotation disagreements and agreements for comprehensive analysis.
 
     If ground_truth is provided, uses it directly (allows archetype filtering).
@@ -190,11 +191,16 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     else:
         gt = ground_truth
 
-    # Try style-specific gold annotations, then gold, then regular
+    # Try profile+style-specific, then profile-specific, then style-specific, then baseline
+    profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     candidates = [
+        f"annotations_gold{profile_suffix}{style_suffix}.json",
+        f"annotations_gold{profile_suffix}.json",
         f"annotations_gold{style_suffix}.json",
         "annotations_gold.json",
+        f"annotations{profile_suffix}{style_suffix}.json",
+        f"annotations{profile_suffix}.json",
         f"annotations{style_suffix}.json",
         "annotations.json",
     ]
@@ -509,6 +515,7 @@ def main():
             args.version, args.type, transcripts, limit=args.limit,
             ground_truth=filtered_gt,
             annotator_style=args.annotator_style,
+            profile=profile_name,
         )
         confusion_summary = ", ".join(f"{k}: {v}" for k, v in stats["confusion_counts"].items())
 

@@ -254,7 +254,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  dialogue_only: bool = False, context_window: int = 20,
                  gold: bool = False, annotator_style: str | None = None,
                  detections_by_conv: dict | None = None,
-                 dry_run: bool = False) -> dict:
+                 dry_run: bool = False,
+                 profile: str | None = None) -> dict:
     """Run annotation pass. Returns the full output dict (with 'results' key).
 
     If detections_by_conv is provided, uses it directly instead of reading
@@ -292,7 +293,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
         detections_by_conv, conversations_map, context_window, prompt_version,
         dialogue_only=dialogue_only, annotator_style=annotator_style
     )
-    jsonl_path = str(output_dir / "annotate_requests.jsonl")
+    profile_suffix = f"_{profile}" if profile else ""
+    jsonl_path = str(output_dir / f"annotate_requests{profile_suffix}.jsonl")
     write_jsonl(entries, jsonl_path)
     logger.info("Wrote %d analysis entries", len(entries))
 
@@ -341,9 +343,9 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
 
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     if gold:
-        filename = f"annotations_gold{style_suffix}.json"
+        filename = f"annotations_gold{profile_suffix}{style_suffix}.json"
     else:
-        filename = f"annotations{style_suffix}.json"
+        filename = f"annotations{profile_suffix}{style_suffix}.json"
     save_annotator_result(version, filename, output)
 
     logger.info("Saved: %s (version: %s)", filename, version)
@@ -410,7 +412,8 @@ def main():
                           prompt_version=prompt_version, targets=args.target,
                           phase_cfg=phase_cfg, dialogue_only=args.dialogue_only,
                           context_window=context_window, gold=args.gold,
-                          annotator_style=style, dry_run=args.dry_run)
+                          annotator_style=style, dry_run=args.dry_run,
+                          profile=profile)
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""

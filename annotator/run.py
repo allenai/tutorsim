@@ -128,6 +128,7 @@ def main():
             gold=args.gold,
             annotator_style=style,
             detections_by_conv=detections_data,
+            profile=profile,
         )
         if annotations_data is None:
             print("Annotation failed. Aborting.")
@@ -146,6 +147,7 @@ def main():
         gold=args.gold,
         annotator_style=style,
         annotations_data=annotations_data,
+        profile=profile,
     )
 
     print("\n" + "=" * 60)

@@ -529,27 +529,41 @@ def load_detections_as_moments(version: str) -> dict[str, list[dict]] | None:
 
 
 def resolve_annotations_filename(version: str, mode: str,
-                                  annotator_style: str | None = None) -> str | None:
-    """Resolve the correct annotations filename given mode and optional style.
+                                  annotator_style: str | None = None,
+                                  profile: str | None = None) -> str | None:
+    """Resolve the correct annotations filename given mode, optional style, and profile.
 
     Preference order (annotations mode):
-      1. annotations_gold_{style}.json  (style-specific gold run)
-      2. annotations_gold.json          (baseline gold run, any style eval)
-      3. annotations_{style}.json       (style-specific detected-moments run)
-      4. annotations.json               (baseline detected-moments run)
+      1. annotations_gold_{profile}_{style}.json  (profile + style-specific gold run)
+      2. annotations_gold_{profile}.json          (profile-specific gold run)
+      3. annotations_gold_{style}.json            (style-specific gold run, no profile)
+      4. annotations_gold.json                    (baseline gold run)
+      5. annotations_{profile}_{style}.json       (profile + style-specific)
+      6. annotations_{profile}.json               (profile-specific)
+      7. annotations_{style}.json                 (style-specific, no profile)
+      8. annotations.json                         (baseline)
     """
+    profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
 
     if mode == "annotations":
-        f = f"annotations_gold{style_suffix}.json"
+        for f in [
+            f"annotations_gold{profile_suffix}{style_suffix}.json",
+            f"annotations_gold{profile_suffix}.json",
+            f"annotations_gold{style_suffix}.json",
+            "annotations_gold.json",
+        ]:
+            if annotator_result_exists(version, f):
+                return f
+
+    for f in [
+        f"annotations{profile_suffix}{style_suffix}.json",
+        f"annotations{profile_suffix}.json",
+        f"annotations{style_suffix}.json",
+        "annotations.json",
+    ]:
         if annotator_result_exists(version, f):
             return f
-        if annotator_result_exists(version, "annotations_gold.json"):
-            return "annotations_gold.json"
-
-    f = f"annotations{style_suffix}.json"
-    if annotator_result_exists(version, f):
-        return f
     return "annotations.json"
 
 
@@ -873,6 +887,8 @@ def main():
     parser.add_argument("--annotator-style", "--style", choices=get_valid_styles(),
                         default=None, dest="annotator_style",
                         help="Evaluate against only this annotator archetype's ground truth")
+    parser.add_argument("--profile", default=None,
+                        help="Config profile used when generating annotations (e.g. anthropic, gemini)")
     args = parser.parse_args()
 
     # --- Compare mode ---
@@ -933,7 +949,7 @@ def main():
             return
         print(f"Loaded detections for version {version}")
     else:
-        ann_filename = resolve_annotations_filename(version, args.mode, style)
+        ann_filename = resolve_annotations_filename(version, args.mode, style, profile=args.profile)
         annotations_by_conv, is_gold = load_annotations(version, ann_filename)
         if annotations_by_conv is None:
             print(f"ERROR: {ann_filename} not found for version {version}")

@@ -44,18 +44,20 @@ JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 def run_label(version: str, model: str, mode: str, phase_cfg: dict,
               gold: bool = False, binary: bool = False,
               annotator_style: str | None = None,
-              annotations_data: dict | None = None) -> dict:
+              annotations_data: dict | None = None,
+              profile: str | None = None) -> dict:
     """Run labeling pass. Returns the labeled annotations data dict.
 
     If annotations_data is provided, uses it directly instead of reading
     from disk. This allows in-memory chaining from run_annotate().
     """
     in_memory = annotations_data is not None
+    profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     if gold:
-        filename = f"annotations_gold{style_suffix}.json"
+        filename = f"annotations_gold{profile_suffix}{style_suffix}.json"
     else:
-        filename = f"annotations{style_suffix}.json"
+        filename = f"annotations{profile_suffix}{style_suffix}.json"
 
     if in_memory:
         data = annotations_data
@@ -117,7 +119,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     client = ModelClient(model)
     if not in_memory:
         output_dir = get_annotator_result_path(version)
-        jsonl_path = str(output_dir / "label_requests.jsonl")
+        jsonl_path = str(output_dir / f"label_requests{profile_suffix}.jsonl")
         write_jsonl(entries, jsonl_path)
 
     if mode == "batch":
@@ -206,7 +208,8 @@ def main():
 
     output = run_label(version=version, model=model, mode=mode,
                        phase_cfg=phase_cfg, gold=args.gold,
-                       binary=args.binary, annotator_style=style)
+                       binary=args.binary, annotator_style=style,
+                       profile=profile)
     if output:
         mode_hint = " --mode annotations" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
