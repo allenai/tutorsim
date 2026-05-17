@@ -248,7 +248,7 @@ def compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv,
 # 2. EFFECTIVENESS -- Binary Kappa + Within-Human-Range (IoU >= 0.5)
 # ===================================================================
 
-def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.5,
+def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
                             consensus_fn=None):
     """Match LLM moments to human clusters by IoU for effectiveness comparison."""
     clusters = merge_overlapping_ranges(human_moments)
