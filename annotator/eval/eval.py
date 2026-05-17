@@ -114,9 +114,11 @@ def compute_krippendorff_alpha(all_matches, consensus_label="unknown"):
     be set by the calling match function using the appropriate consensus_fn.
     """
     if not all_matches:
-        return {"alpha": None, "n_units": 0, "consensus": consensus_label}
+        return {"alpha": None, "n_units": 0, "consensus": consensus_label,
+                "confusion": {}}
 
     matrix = np.full((2, len(all_matches)), np.nan)
+    pairs = []
     for j, match in enumerate(all_matches):
         human_code = _ORDINAL_CODE.get(match["consensus_3way"])
         llm_code = _ORDINAL_CODE.get(match["llm_label_3way"])
@@ -124,6 +126,8 @@ def compute_krippendorff_alpha(all_matches, consensus_label="unknown"):
             matrix[0, j] = human_code
         if llm_code is not None:
             matrix[1, j] = llm_code
+        if match["consensus_3way"] in EFFECTIVENESS_LABELS and match["llm_label_3way"] in EFFECTIVENESS_LABELS:
+            pairs.append((match["consensus_3way"], match["llm_label_3way"]))
 
     try:
         alpha = round(
@@ -133,7 +137,12 @@ def compute_krippendorff_alpha(all_matches, consensus_label="unknown"):
     except ValueError:
         alpha = 1.0
 
-    return {"alpha": alpha, "n_units": len(all_matches), "consensus": consensus_label}
+    return {
+        "alpha": alpha,
+        "n_units": len(all_matches),
+        "consensus": consensus_label,
+        "confusion": build_confusion(pairs, EFFECTIVENESS_LABELS),
+    }
 
 
 def map_to_binary(label):
@@ -837,6 +846,14 @@ def print_scorecard(output):
                 print(f"  Model-Human α:      {t_iaa['alpha']:.4f}  "
                       f"(Krippendorff ordinal, {t_iaa.get('n_units', 0)} units, "
                       f"consensus: {t_iaa.get('consensus', '?')})")
+                cm = t_iaa.get("confusion", {})
+                if cm:
+                    print(f"  Confusion (rows=human consensus, cols=LLM):")
+                    print(f"    {'':>12s}  {'effective':>10s}  {'partial':>10s}  {'ineffective':>12s}")
+                    for h in EFFECTIVENESS_LABELS:
+                        row = cm.get(h, {})
+                        print(f"    {h:>12s}  {row.get('effective', 0):>10d}  "
+                              f"{row.get('partial', 0):>10d}  {row.get('ineffective', 0):>12d}")
 
             if t_ceil.get("alpha") is not None:
                 print(f"  Human-Human α:      {t_ceil['alpha']:.4f}  "
