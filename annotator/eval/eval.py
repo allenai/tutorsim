@@ -3,36 +3,45 @@
 
 Supports four modes:
   --mode detections      : evaluate only key moment detection (reads detections.json)
-  --mode annotations_old : evaluate only labeling quality (reads annotations.json) -- original approach
-  --mode annotations     : [NEW] placeholder for new annotation evaluation approach
-  --mode full            : evaluate everything (reads annotations.json)
+  --mode annotations_old : evaluate only labeling quality -- original approach (Cohen's kappa,
+                           majority-vote consensus)
+  --mode annotations     : evaluate labeling quality -- new approach (Krippendorff's alpha,
+                           mean-score consensus)
+  --mode full            : temporarily disabled; choose an explicit annotations mode
 
-Metrics:
-  PRIMARY (optimize):
-    1. Cluster Recall (IoU >= 0.3)  -- fraction of human clusters found
-    2. Binary Kappa                 -- effective vs not-effective agreement
+Annotation evaluation approach (annotations and annotations_old modes)
+-----------------------------------------------------------------------
+For each conversation, human moments and LM annotations are compared as follows:
 
-  DIAGNOSTIC (understand quality):
-    3. Moment Precision (IoU >= 0.3) -- fraction of LLM moments matching a human cluster
-    4. Mean IoU                      -- average overlap quality of matched pairs
-    5. Within-Human-Range            -- % of LLM labels matching at least one annotator
+  1. UNIQUENESS: moments are deduplicated by (conversation, turn_start, turn_end,
+     annotation_type). Each unique span is one unit of evaluation.
 
-  GUARDRAILS (flag regressions):
-    6. Effective Rate                -- flag if >60% (rubber-stamping)
-    7. Zero-Partial Rate             -- flag if >30% (missing nuance)
-    8. Invalid Labels                -- flag if >0 (hallucinated values)
+  2. CONSENSUS: when multiple human annotators labeled the same span, their
+     effectiveness labels are aggregated into a single consensus label.
+     - annotations_old: majority vote with ordinal median tiebreak
+     - annotations:     mean score (effective=1, partial=0, ineffective=-1);
+                        threshold >=0.6 -> effective, <=-0.6 -> ineffective, else partial
 
-  CONTEXT (not for hill-climbing):
-    - Human ceiling, confusion matrix, counts, binary accuracy
+  3. MATCHING: each unique human span is matched to a single LM annotation.
+     - gold mode (--gold):     exact (turn_start, turn_end, annotation_type) lookup;
+                               first LM annotation wins if duplicates exist
+     - non-gold mode:          highest-IoU LM annotation (threshold 0.3);
+                               each LM annotation can only be matched once
+
+  4. AGREEMENT metric:
+     - annotations_old: Cohen's kappa (binary and 3-way) between consensus and LM label
+     - annotations:     Krippendorff's alpha (ordinal) between consensus and LM label
+
+All agreement metrics are reported per annotation type (scaffolding / rapport) only —
+no aggregated totals across types.
 
 Usage:
-    python -m annotator.eval.eval --version v1
+    python -m annotator.eval.eval --version v1 --mode annotations --profile anthropic
     python -m annotator.eval.eval --version v1 --mode detections
-    python -m annotator.eval.eval --version v1 --mode annotations_old
+    python -m annotator.eval.eval --version v1 --mode annotations_old --profile anthropic
 
     # Compare versions side-by-side
     python -m annotator.eval.eval --compare v1 v2 --mode detections
-    python -m annotator.eval.eval --compare v1 v2 v3 --mode full
 
 Ported from archive_per_annotator/eval.py with multi-mode support.
 """
