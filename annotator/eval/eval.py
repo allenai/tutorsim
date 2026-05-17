@@ -286,23 +286,27 @@ def compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv,
 
 def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
                             consensus_fn=None):
-    """Match LLM moments to human clusters by IoU for effectiveness comparison."""
-    clusters = merge_overlapping_ranges(human_moments)
+    """Match each human moment to the best LLM moment by IoU.
+
+    Each human moment is treated as a unique unit — no IoU-based clustering
+    of overlapping human moments before matching.
+    """
+    fn = consensus_fn or compute_consensus_label
     matches = []
     used_llm = set()
 
-    for cluster in clusters:
-        c_range = (cluster["turn_start"], cluster["turn_end"])
-        c_type = cluster["annotation_type"]
+    for m in human_moments:
+        h_range = (m["turn_start"], m["turn_end"])
+        h_type = m.get("annotation_type", "")
         best_iou = 0
         best_idx = None
 
         for i, l in enumerate(llm_moments):
             if i in used_llm:
                 continue
-            if l.get("annotation_type") != c_type:
+            if l.get("annotation_type") != h_type:
                 continue
-            iou = compute_iou(c_range, (l["turn_start"], l["turn_end"]))
+            iou = compute_iou(h_range, (l["turn_start"], l["turn_end"]))
             if iou > best_iou:
                 best_iou = iou
                 best_idx = i
@@ -311,29 +315,26 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
             llm_moment = llm_moments[best_idx]
             used_llm.add(best_idx)
 
-            labels_3way = [m.get("strategy_label", "unclear") for m in cluster["moments"]]
-            valid_labels = [l for l in labels_3way if l in EFFECTIVENESS_LABELS]
-            fn = consensus_fn or compute_consensus_label
-            consensus_3way = fn(valid_labels) if valid_labels else "unclear"
-            consensus_binary = map_to_binary(consensus_3way)
-
+            human_label = m.get("strategy_label", "unclear")
+            consensus_3way = human_label if human_label in EFFECTIVENESS_LABELS else "unclear"
             llm_label_3way = llm_moment.get("effectiveness", "unclear")
-            llm_label_binary = map_to_binary(llm_label_3way)
-
-            per_annotator = {
-                m.get("annotator_id", "unknown"): m.get("strategy_label", "unclear")
-                for m in cluster["moments"]
-            }
 
             matches.append({
-                "cluster": cluster,
+                "cluster": {
+                    "turn_start": m["turn_start"],
+                    "turn_end": m["turn_end"],
+                    "annotation_type": h_type,
+                    "moments": [m],
+                },
                 "llm_moment": llm_moment,
                 "iou": round(best_iou, 4),
                 "consensus_3way": consensus_3way,
-                "consensus_binary": consensus_binary,
+                "consensus_binary": map_to_binary(consensus_3way),
                 "llm_label_3way": llm_label_3way,
-                "llm_label_binary": llm_label_binary,
-                "per_annotator_labels": per_annotator,
+                "llm_label_binary": map_to_binary(llm_label_3way),
+                "per_annotator_labels": {
+                    m.get("annotator_id", "unknown"): human_label,
+                },
             })
 
     return matches
@@ -349,11 +350,15 @@ def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
     """
     fn = consensus_fn or compute_consensus_label
 
-    # Group LLM annotations by turn range key; aggregate if multiple
-    llm_groups = defaultdict(list)
+    # Index LLM annotations by turn range key; warn and take first if multiple
+    llm_groups = {}
     for l in llm_moments:
         key = (l["turn_start"], l["turn_end"], l.get("annotation_type", ""))
-        llm_groups[key].append(l.get("effectiveness", "unclear"))
+        if key in llm_groups:
+            print(f"WARNING: multiple LLM annotations for gold moment "
+                  f"turns {key[0]}-{key[1]} ({key[2]}); using first")
+        else:
+            llm_groups[key] = l.get("effectiveness", "unclear")
 
     # Group human moments by turn range key
     human_groups = defaultdict(list)
@@ -375,8 +380,8 @@ def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
         valid_human = [l for l in per_annotator.values() if l in EFFECTIVENESS_LABELS]
         consensus_3way = fn(valid_human) if valid_human else "unclear"
 
-        valid_llm = [l for l in llm_groups[key] if l in EFFECTIVENESS_LABELS]
-        llm_label_3way = fn(valid_llm) if valid_llm else "unclear"
+        raw_llm = llm_groups[key]
+        llm_label_3way = raw_llm if raw_llm in EFFECTIVENESS_LABELS else "unclear"
 
         matches.append({
             "cluster": {
