@@ -380,7 +380,7 @@ def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
             print(f"WARNING: multiple LLM annotations for gold moment "
                   f"turns {key[0]}-{key[1]} ({key[2]}); using first")
         else:
-            llm_groups[key] = l.get("effectiveness", "unclear")
+            llm_groups[key] = l  # store full annotation to preserve action/result text
 
     # Group human moments by turn range key
     human_groups = defaultdict(list)
@@ -402,8 +402,19 @@ def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
         valid_human = [l for l in per_annotator.values() if l in EFFECTIVENESS_LABELS]
         consensus_3way = fn(valid_human) if valid_human else "unclear"
 
-        raw_llm = llm_groups[key]
-        llm_label_3way = raw_llm if raw_llm in EFFECTIVENESS_LABELS else "unclear"
+        llm_ann = llm_groups[key]
+        llm_label_3way = llm_ann.get("effectiveness", "unclear")
+        if llm_label_3way not in EFFECTIVENESS_LABELS:
+            llm_label_3way = "unclear"
+
+        # In gold mode the situation was the human's input to the LLM; use the
+        # longest human situation as the canonical situation for the LLM side.
+        human_situation = max(
+            (m.get("situation", "") for m in group_moments),
+            key=len,
+            default="",
+        )
+        llm_moment = {**llm_ann, "situation": human_situation}
 
         matches.append({
             "cluster": {
@@ -412,7 +423,7 @@ def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
                 "annotation_type": key[2],
                 "moments": group_moments,
             },
-            "llm_moment": {"effectiveness": llm_label_3way},
+            "llm_moment": llm_moment,
             "iou": 1.0,
             "consensus_3way": consensus_3way,
             "consensus_binary": map_to_binary(consensus_3way),

@@ -82,20 +82,27 @@ def load_gold_moments(targets: list[str],
         if gt_id not in train_ids:
             continue
         conv_id = transcript_id_to_conv_id.get(gt_id, gt_id)
-        dets = []
+
+        # Deduplicate by (turn_start, turn_end, annotation_type), keeping
+        # the longest situation text across all annotators who labeled that moment.
+        best: dict[tuple, dict] = {}
         for moment in conv_data.get("key_moments", []):
             ann_type = moment.get("annotation_type", "")
             if ann_type not in targets:
                 continue
-            dets.append({
-                "turn_start": moment["turn_start"],
-                "turn_end": moment["turn_end"],
-                "annotation_type": ann_type,
-                "situation": moment.get("situation", "Human-identified moment"),
-            })
-        if dets:
+            key = (moment["turn_start"], moment["turn_end"], ann_type)
+            situation = moment.get("situation", "")
+            if key not in best or len(situation) > len(best[key]["situation"]):
+                best[key] = {
+                    "turn_start": moment["turn_start"],
+                    "turn_end": moment["turn_end"],
+                    "annotation_type": ann_type,
+                    "situation": situation or "Human-identified moment",
+                }
+
+        if best:
             detections_by_conv[conv_id] = {
-                "detections": dets,
+                "detections": list(best.values()),
                 "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
             }
 
@@ -217,7 +224,7 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
                     "annotation_type": a.get("annotation_type", ann_type),
                     "turn_start": a.get("turn_start", det.get("turn_start")),
                     "turn_end": a.get("turn_end", det.get("turn_end")),
-                    "situation": a.get("situation", ""),
+                    "situation": a.get("situation", "") or det.get("situation", ""),
                     "action": a.get("action", ""),
                     "result": a.get("result", ""),
                 })
