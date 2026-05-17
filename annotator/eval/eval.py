@@ -364,10 +364,11 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
 def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
     """Matching for gold moments, grouping by (turn_start, turn_end, annotation_type).
 
-    Multiple annotators may label the same turn range; their labels are collected
-    and aggregated into a consensus. Multiple LLM annotations for the same turn
-    range (produced when the LLM was run once per annotator detection) are also
-    aggregated via consensus_fn.
+    Multiple human annotators may label the same turn range; their labels are
+    collected and aggregated into a single consensus via consensus_fn.
+    For the LLM side, the first annotation for each key is used; a warning is
+    printed if duplicates are found (they should not exist after load_gold_moments
+    deduplication).
     """
     fn = consensus_fn or compute_consensus_label
 
@@ -944,7 +945,7 @@ def print_comparison(versions, evals, mode):
             row += f" {fmt_delta(bv, ev, as_pct=False):>{delta_w}}"
         print(row)
 
-    # --- RQ2: Effectiveness ---
+    # --- RQ2: Effectiveness (annotations_old) ---
     if mode in ("annotations_old", "full"):
         print(f"\n  EFFECTIVENESS (RQ2)")
         for key, label in [
@@ -980,6 +981,20 @@ def print_comparison(versions, evals, mode):
                 bv = baseline.get("guardrails", {}).get(key, 0)
                 ev = latest.get("guardrails", {}).get(key, 0)
                 row += f" {fmt_delta(bv, ev, as_pct=not is_count):>{delta_w}}"
+            print(row)
+
+    # --- RQ2: Agreement (annotations) ---
+    if mode == "annotations":
+        for ann_type in ANNOTATION_TYPES:
+            print(f"\n  MODEL-HUMAN α ({ann_type.upper()})")
+            row = f"  {'Krippendorff alpha':<{metric_w}}"
+            for e in evals:
+                val = e.get("by_type", {}).get(ann_type, {}).get("iaa", {}).get("alpha")
+                row += f" {fmt_pct(val) if val is not None else 'n/a':>{val_w}}"
+            if n >= 2:
+                bv = baseline.get("by_type", {}).get(ann_type, {}).get("iaa", {}).get("alpha", 0)
+                ev = latest.get("by_type", {}).get(ann_type, {}).get("iaa", {}).get("alpha", 0)
+                row += f" {fmt_delta(bv, ev):>{delta_w}}"
             print(row)
 
     print(f"\n{'=' * 68}")
@@ -1056,8 +1071,8 @@ def main():
         print("ERROR: --mode full is temporarily disabled.")
         print("  Choose an explicit annotations mode:")
         print("    --mode detections      (detection metrics only)")
-        print("    --mode annotations_old (labeling quality, original approach)")
-        print("    --mode annotations     (new approach, not yet implemented)")
+        print("    --mode annotations_old (labeling quality, majority-vote consensus, Cohen's kappa)")
+        print("    --mode annotations     (labeling quality, mean-score consensus, Krippendorff alpha)")
         return
 
     # --- Load LLM data based on mode ---
@@ -1128,7 +1143,6 @@ def main():
                 matches = match_gold_direct(human_moments, llm_moments,
                                             consensus_fn=consensus_fn)
             else:
-                # IoU-based cluster matching (detected moments have different ranges)
                 matches = match_for_effectiveness(human_moments, llm_moments,
                                                   consensus_fn=consensus_fn)
             all_matches.extend(matches)
