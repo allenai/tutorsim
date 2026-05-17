@@ -74,6 +74,23 @@ def compute_consensus_label(labels):
     return reverse[values[len(values) // 2]]
 
 
+def compute_mean_consensus_label(labels):
+    """Mean score with thresholds: effective=1, partial=0, ineffective=-1.
+
+    Score >= 0.6 -> effective, score <= -0.6 -> ineffective, else partial.
+    """
+    _score = {"effective": 1, "partial": 0, "ineffective": -1}
+    scores = [_score[l] for l in labels if l in _score]
+    if not scores:
+        return "unclear"
+    mean = sum(scores) / len(scores)
+    if mean >= 0.6:
+        return "effective"
+    if mean <= -0.6:
+        return "ineffective"
+    return "partial"
+
+
 def map_to_binary(label):
     """effective -> 'right', partial/ineffective -> 'wrong'."""
     if label == "effective":
@@ -231,7 +248,8 @@ def compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv,
 # 2. EFFECTIVENESS -- Binary Kappa + Within-Human-Range (IoU >= 0.5)
 # ===================================================================
 
-def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.5):
+def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.5,
+                            consensus_fn=None):
     """Match LLM moments to human clusters by IoU for effectiveness comparison."""
     clusters = merge_overlapping_ranges(human_moments)
     matches = []
@@ -259,7 +277,8 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.5):
 
             labels_3way = [m.get("strategy_label", "unclear") for m in cluster["moments"]]
             valid_labels = [l for l in labels_3way if l in EFFECTIVENESS_LABELS]
-            consensus_3way = compute_consensus_label(valid_labels) if valid_labels else "unclear"
+            fn = consensus_fn or compute_consensus_label
+            consensus_3way = fn(valid_labels) if valid_labels else "unclear"
             consensus_binary = map_to_binary(consensus_3way)
 
             llm_label_3way = llm_moment.get("effectiveness", "unclear")
@@ -547,7 +566,7 @@ def resolve_annotations_filename(version: str, mode: str,
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
 
-    if mode == "annotations_old":
+    if mode in ("annotations_old", "annotations"):
         for f in [
             f"annotations_gold{profile_suffix}{style_suffix}.json",
             f"annotations_gold{profile_suffix}.json",
@@ -938,10 +957,6 @@ def main():
         print(f"  Conversations with matching annotations: "
               f"{len(ground_truth['conversations'])}")
 
-    if args.mode == "annotations":
-        print("ERROR: --mode annotations is not yet implemented.")
-        return
-
     if args.mode == "full":
         print("ERROR: --mode full is temporarily disabled.")
         print("  Choose an explicit annotations mode:")
@@ -986,6 +1001,8 @@ def main():
 
     print(f"Evaluating {len(eval_conv_ids)} conversations (mode: {args.mode})")
 
+    consensus_fn = compute_mean_consensus_label if args.mode == "annotations" else compute_consensus_label
+
     human_moments_by_conv = {}
     all_matches = []
 
@@ -1017,7 +1034,8 @@ def main():
                 matches = match_gold_direct(human_moments, llm_moments)
             else:
                 # IoU-based cluster matching (detected moments have different ranges)
-                matches = match_for_effectiveness(human_moments, llm_moments)
+                matches = match_for_effectiveness(human_moments, llm_moments,
+                                                  consensus_fn=consensus_fn)
             all_matches.extend(matches)
 
     # --- Compute metrics ---
@@ -1028,7 +1046,7 @@ def main():
     if args.mode in ("full", "detections"):
         detection = compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv)
 
-    if args.mode in ("full", "annotations_old"):
+    if args.mode in ("full", "annotations_old", "annotations"):
         effectiveness = compute_effectiveness_metrics(all_matches)
         guardrails = compute_guardrails(annotations_by_conv)
 
