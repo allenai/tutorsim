@@ -1,10 +1,11 @@
 """
 8-metric evaluation scorecard.
 
-Supports three modes:
-  --mode detections   : evaluate only key moment detection (reads detections.json)
-  --mode annotations  : evaluate only labeling quality (reads annotations.json)
-  --mode full         : evaluate everything (reads annotations.json)
+Supports four modes:
+  --mode detections      : evaluate only key moment detection (reads detections.json)
+  --mode annotations_old : evaluate only labeling quality (reads annotations.json) -- original approach
+  --mode annotations     : [NEW] placeholder for new annotation evaluation approach
+  --mode full            : evaluate everything (reads annotations.json)
 
 Metrics:
   PRIMARY (optimize):
@@ -27,7 +28,7 @@ Metrics:
 Usage:
     python -m annotator.eval.eval --version v1
     python -m annotator.eval.eval --version v1 --mode detections
-    python -m annotator.eval.eval --version v1 --mode annotations
+    python -m annotator.eval.eval --version v1 --mode annotations_old
 
     # Compare versions side-by-side
     python -m annotator.eval.eval --compare v1 v2 --mode detections
@@ -546,7 +547,7 @@ def resolve_annotations_filename(version: str, mode: str,
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
 
-    if mode == "annotations":
+    if mode == "annotations_old":
         for f in [
             f"annotations_gold{profile_suffix}{style_suffix}.json",
             f"annotations_gold{profile_suffix}.json",
@@ -823,7 +824,7 @@ def print_comparison(versions, evals, mode):
         print(row)
 
     # --- RQ2: Effectiveness ---
-    if mode in ("annotations", "full"):
+    if mode in ("annotations_old", "full"):
         print(f"\n  EFFECTIVENESS (RQ2)")
         for key, label in [
             ("binary_kappa", "Binary Kappa"),
@@ -879,7 +880,7 @@ def main():
         description="8-metric evaluation scorecard")
     parser.add_argument("--version", default=None,
                         help="Results version (e.g. v1)")
-    parser.add_argument("--mode", choices=["full", "detections", "annotations"],
+    parser.add_argument("--mode", choices=["full", "detections", "annotations_old", "annotations"],
                         default="full",
                         help="What to evaluate (default: full)")
     parser.add_argument("--compare", nargs="+", metavar="VERSION",
@@ -936,6 +937,10 @@ def main():
         print(f"Filtered ground truth to '{style}' annotators")
         print(f"  Conversations with matching annotations: "
               f"{len(ground_truth['conversations'])}")
+
+    if args.mode == "annotations":
+        print("ERROR: --mode annotations is not yet implemented.")
+        return
 
     # --- Load LLM data based on mode ---
     llm_moments_by_conv = {}
@@ -1015,7 +1020,7 @@ def main():
     if args.mode in ("full", "detections"):
         detection = compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv)
 
-    if args.mode in ("full", "annotations"):
+    if args.mode in ("full", "annotations_old"):
         effectiveness = compute_effectiveness_metrics(all_matches)
         guardrails = compute_guardrails(annotations_by_conv)
 
