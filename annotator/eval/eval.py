@@ -97,31 +97,24 @@ def compute_mean_consensus_label(labels):
 _ORDINAL_CODE = {"effective": 0, "partial": 1, "ineffective": 2}
 
 
-def compute_krippendorff_alpha(all_matches):
-    """Compute Krippendorff's alpha (ordinal) treating LLM as one rater alongside humans.
+def compute_krippendorff_alpha(all_matches, consensus_label="unknown"):
+    """Compute Krippendorff's alpha (ordinal) between human consensus and LLM.
 
-    Each matched unit is a column. Raters are all individual human annotators
-    who appear in any cluster, plus a single 'llm' row. NaN where not rated.
-    Units where only one rater has a value are excluded by the library automatically.
+    Builds a 2-row matrix: row 0 = human consensus label per unit,
+    row 1 = LLM label per unit. consensus_3way on each match must already
+    be set by the calling match function using the appropriate consensus_fn.
     """
     if not all_matches:
-        return {"alpha": None, "n_units": 0, "n_raters": 0}
+        return {"alpha": None, "n_units": 0, "consensus": consensus_label}
 
-    all_rater_ids = set()
-    for m in all_matches:
-        all_rater_ids.update(m["per_annotator_labels"].keys())
-    all_rater_ids = sorted(all_rater_ids) + ["llm"]
-    rater_idx = {r: i for i, r in enumerate(all_rater_ids)}
-
-    matrix = np.full((len(all_rater_ids), len(all_matches)), np.nan)
+    matrix = np.full((2, len(all_matches)), np.nan)
     for j, match in enumerate(all_matches):
-        for ann_id, label in match["per_annotator_labels"].items():
-            code = _ORDINAL_CODE.get(label)
-            if code is not None:
-                matrix[rater_idx[ann_id], j] = code
+        human_code = _ORDINAL_CODE.get(match["consensus_3way"])
         llm_code = _ORDINAL_CODE.get(match["llm_label_3way"])
+        if human_code is not None:
+            matrix[0, j] = human_code
         if llm_code is not None:
-            matrix[rater_idx["llm"], j] = llm_code
+            matrix[1, j] = llm_code
 
     try:
         alpha = round(
@@ -131,7 +124,7 @@ def compute_krippendorff_alpha(all_matches):
     except ValueError:
         alpha = 1.0
 
-    return {"alpha": alpha, "n_units": len(all_matches), "n_raters": len(all_rater_ids)}
+    return {"alpha": alpha, "n_units": len(all_matches), "consensus": consensus_label}
 
 
 def map_to_binary(label):
@@ -672,7 +665,10 @@ def load_annotations(version: str, filename: str) -> tuple[dict[str, list[dict]]
 
     annotations_by_conv = {}
     for conv_id, conv_data in data["results"].items():
-        annotations_by_conv[conv_id] = conv_data.get("annotations", [])
+        # Annotation results use compound keys (tutor_student_<uuid>);
+        # ground truth uses the bare transcript UUID as its key.
+        transcript_id = conv_id.rsplit("_", 1)[-1]
+        annotations_by_conv[transcript_id] = conv_data.get("annotations", [])
     return annotations_by_conv, is_gold
 
 
@@ -786,10 +782,9 @@ def print_scorecard(output):
                       f"({t_eff.get('within_human_range', 0)}/{t_eff.get('total_matched', 0)})")
 
             if t_iaa.get("alpha") is not None:
-                n_r = t_iaa.get("n_raters", 0)
                 print(f"  Model-Human α:      {t_iaa['alpha']:.4f}  "
                       f"(Krippendorff ordinal, {t_iaa.get('n_units', 0)} units, "
-                      f"{n_r - 1} human raters + LLM)")
+                      f"consensus: {t_iaa.get('consensus', '?')})")
 
             if t_ceil.get("alpha") is not None:
                 print(f"  Human-Human α:      {t_ceil['alpha']:.4f}  "
@@ -1132,7 +1127,8 @@ def main():
         if args.mode == "annotations":
             m_filtered = filter_matches_by_type(all_matches, ann_type)
             a_filtered = filter_annotations_by_type(annotations_by_conv, ann_type)
-            type_result["iaa"] = compute_krippendorff_alpha(m_filtered)
+            type_result["iaa"] = compute_krippendorff_alpha(
+                m_filtered, consensus_label="mean (±0.6 threshold)")
             type_result["guardrails"] = compute_guardrails(a_filtered)
 
         type_result["human_ceiling"] = compute_human_ceiling(
