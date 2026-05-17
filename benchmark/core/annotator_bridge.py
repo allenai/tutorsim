@@ -80,14 +80,14 @@ def build_synthetic_detections(scenario: Scenario, exchange: Exchange) -> dict:
         ann_type = scenario.detection.get("annotation_type", "scaffolding")
         description = (
             f"Detected moment + AI tutor continuation: "
-            f"{scenario.detection.get('brief_description', scenario.mode)}"
+            f"{scenario.detection.get('situation', scenario.mode)}"
         )
         # Use the detection's annotation type (scaffolding or rapport)
         detections = [
             {
                 "turn_start": first_turn, "turn_end": last_gen,
                 "annotation_type": ann_type,
-                "brief_description": description,
+                "situation": description,
             },
         ]
     else:
@@ -98,12 +98,12 @@ def build_synthetic_detections(scenario: Scenario, exchange: Exchange) -> dict:
             {
                 "turn_start": first_turn, "turn_end": last_gen,
                 "annotation_type": "scaffolding",
-                "brief_description": description,
+                "situation": description,
             },
             {
                 "turn_start": first_turn, "turn_end": last_gen,
                 "annotation_type": "rapport",
-                "brief_description": description,
+                "situation": description,
             },
         ]
 

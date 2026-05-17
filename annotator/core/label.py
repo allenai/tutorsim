@@ -186,6 +186,9 @@ def main():
                         help="Match the annotations_{style}.json file from annotate --style")
     args = parser.parse_args()
 
+    from common.logging_setup import setup_logging
+    setup_logging()
+
     from .config import resolve_run_params
     params = resolve_run_params(
         cli_version=args.version,

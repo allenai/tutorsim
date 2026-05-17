@@ -68,10 +68,20 @@ def load_gold_moments(targets: list[str],
     ground_truth = load_ground_truth(annotator_style=annotator_style)
     train_ids = load_split_ids("train")
 
+    # Ground truth keys by UUID (transcript_id), but conversations_map keys by
+    # the full conversation_id (e.g. {tutor_id}_{student_id}_{UUID}). Build a
+    # mapping so detections use the same key as conversations_map.
+    transcript_id_to_conv_id = {
+        conv.get("transcript_id", ""): conv_id
+        for conv_id, conv in load_all_transcripts().items()
+        if conv.get("transcript_id")
+    }
+
     detections_by_conv = {}
-    for conv_id, conv_data in ground_truth.get("conversations", {}).items():
-        if conv_id not in train_ids:
+    for gt_id, conv_data in ground_truth.get("conversations", {}).items():
+        if gt_id not in train_ids:
             continue
+        conv_id = transcript_id_to_conv_id.get(gt_id, gt_id)
         dets = []
         for moment in conv_data.get("key_moments", []):
             ann_type = moment.get("annotation_type", "")
@@ -81,7 +91,7 @@ def load_gold_moments(targets: list[str],
                 "turn_start": moment["turn_start"],
                 "turn_end": moment["turn_end"],
                 "annotation_type": ann_type,
-                "brief_description": moment.get("situation", "Human-identified moment"),
+                "situation": moment.get("situation", "Human-identified moment"),
             })
         if dets:
             detections_by_conv[conv_id] = {
@@ -131,7 +141,7 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
             turn_start = det.get("turn_start", 0)
             turn_end = det.get("turn_end", turn_start)
-            brief_desc = det.get("brief_description", "")
+            situation = det.get("situation", "")
 
             if ann_type not in prompt_cache:
                 prompt_cache[ann_type] = load_prompt(version, ann_type)
@@ -144,7 +154,7 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
             prompt = prompt_cache[ann_type]
             prompt = prompt.replace("{annotator_style}", "")
-            prompt = prompt.replace("{brief_description}", brief_desc)
+            prompt = prompt.replace("{situation}", situation)
             prompt = prompt.replace("{excerpt}", excerpt)
             prompt = prompt.replace("{turn_start}", str(turn_start))
             prompt = prompt.replace("{turn_end}", str(turn_end))
@@ -220,7 +230,7 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
                     "annotation_type": ann_type,
                     "turn_start": det.get("turn_start", 0),
                     "turn_end": det.get("turn_end", 0),
-                    "situation": det.get("brief_description", ""),
+                    "situation": det.get("situation", ""),
                     "action": "[Analysis unavailable -- batch failed for this moment]",
                     "result": "",
                 })
@@ -243,11 +253,15 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  targets: list[str], phase_cfg: dict,
                  dialogue_only: bool = False, context_window: int = 20,
                  gold: bool = False, annotator_style: str | None = None,
-                 detections_by_conv: dict | None = None) -> dict:
+                 detections_by_conv: dict | None = None,
+                 dry_run: bool = False) -> dict:
     """Run annotation pass. Returns the full output dict (with 'results' key).
 
     If detections_by_conv is provided, uses it directly instead of reading
     from disk. This allows in-memory chaining from run_detect().
+
+    If dry_run is True, loads data and builds all entries but stops before
+    any API call. Writes annotate_requests.jsonl and prints the first prompt.
     """
     output_dir = get_annotator_result_path(version)
 
@@ -281,6 +295,10 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     jsonl_path = str(output_dir / "annotate_requests.jsonl")
     write_jsonl(entries, jsonl_path)
     logger.info("Wrote %d analysis entries", len(entries))
+
+    if dry_run:
+        logger.info("DRY RUN: stopping before API call. Requests written to %s", jsonl_path)
+        return None
 
     if mode == "batch":
         poll_interval = phase_cfg["poll_interval"]
@@ -360,7 +378,12 @@ def main():
     parser.add_argument("--annotator-style", "--style", choices=VALID_ANNOTATOR_STYLES,
                         default=None, dest="annotator_style",
                         help="Annotator archetype to simulate (generous/balanced/demanding)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Build and write all entries but stop before any API call")
     args = parser.parse_args()
+
+    from common.logging_setup import setup_logging
+    setup_logging()
 
     from .config import resolve_run_params
     params = resolve_run_params(
@@ -387,7 +410,7 @@ def main():
                           prompt_version=prompt_version, targets=args.target,
                           phase_cfg=phase_cfg, dialogue_only=args.dialogue_only,
                           context_window=context_window, gold=args.gold,
-                          annotator_style=style)
+                          annotator_style=style, dry_run=args.dry_run)
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
