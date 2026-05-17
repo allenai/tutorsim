@@ -226,10 +226,12 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
         raise FileNotFoundError(f"No annotations found for version {version}")
 
     # Results use compound keys (tutor_student_uuid); ground truth uses bare UUIDs.
-    uuid_to_llm_conv = {
-        compound.rsplit("_", 1)[-1]: conv_data
-        for compound, conv_data in llm_data.get("results", {}).items()
-    }
+    uuid_to_llm_conv = {}
+    uuid_to_compound_key = {}
+    for compound, conv_data in llm_data.get("results", {}).items():
+        uuid = compound.rsplit("_", 1)[-1]
+        uuid_to_llm_conv[uuid] = conv_data
+        uuid_to_compound_key[uuid] = compound
 
     agreements = []
     disagreements = []
@@ -270,7 +272,7 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
                 for m in sampled
             ]
             entry = {
-                "conv_id": conv_id,
+                "conv_id": uuid_to_compound_key.get(conv_id, conv_id),
                 "turn_start": match["cluster"]["turn_start"],
                 "turn_end": match["cluster"]["turn_end"],
                 "human_label": human_label,
