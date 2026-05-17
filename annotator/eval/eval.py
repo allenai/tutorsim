@@ -286,18 +286,26 @@ def compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv,
 
 def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
                             consensus_fn=None):
-    """Match each human moment to the best LLM moment by IoU.
+    """Match unique human spans to the best LLM moment by IoU.
 
-    Each human moment is treated as a unique unit — no IoU-based clustering
-    of overlapping human moments before matching.
+    Groups human moments by (turn_start, turn_end, annotation_type) first,
+    collecting all annotators' labels for each unique span into a consensus.
+    Then finds the best-matching LLM annotation by IoU for each unique span.
     """
     fn = consensus_fn or compute_consensus_label
+
+    # Group human moments by unique span, collecting all annotators' labels
+    human_groups = defaultdict(list)
+    for m in human_moments:
+        key = (m["turn_start"], m["turn_end"], m.get("annotation_type", ""))
+        human_groups[key].append(m)
+
     matches = []
     used_llm = set()
 
-    for m in human_moments:
-        h_range = (m["turn_start"], m["turn_end"])
-        h_type = m.get("annotation_type", "")
+    for key, group_moments in human_groups.items():
+        h_range = (key[0], key[1])
+        h_type = key[2]
         best_iou = 0
         best_idx = None
 
@@ -315,16 +323,22 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
             llm_moment = llm_moments[best_idx]
             used_llm.add(best_idx)
 
-            human_label = m.get("strategy_label", "unclear")
-            consensus_3way = human_label if human_label in EFFECTIVENESS_LABELS else "unclear"
+            per_annotator = {}
+            for m in group_moments:
+                ann_id = m.get("annotator_id", "unknown")
+                if ann_id not in per_annotator:
+                    per_annotator[ann_id] = m.get("strategy_label", "unclear")
+
+            valid_labels = [l for l in per_annotator.values() if l in EFFECTIVENESS_LABELS]
+            consensus_3way = fn(valid_labels) if valid_labels else "unclear"
             llm_label_3way = llm_moment.get("effectiveness", "unclear")
 
             matches.append({
                 "cluster": {
-                    "turn_start": m["turn_start"],
-                    "turn_end": m["turn_end"],
+                    "turn_start": key[0],
+                    "turn_end": key[1],
                     "annotation_type": h_type,
-                    "moments": [m],
+                    "moments": group_moments,
                 },
                 "llm_moment": llm_moment,
                 "iou": round(best_iou, 4),
@@ -332,9 +346,7 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
                 "consensus_binary": map_to_binary(consensus_3way),
                 "llm_label_3way": llm_label_3way,
                 "llm_label_binary": map_to_binary(llm_label_3way),
-                "per_annotator_labels": {
-                    m.get("annotator_id", "unknown"): human_label,
-                },
+                "per_annotator_labels": per_annotator,
             })
 
     return matches
