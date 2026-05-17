@@ -23,7 +23,7 @@ Output format — one JSON file per conversation:
         "situation": "<str>",
         "action": "<str>",
         "result": "<str>",
-        "strategy_label": "effective" | "partial" | "ineffective" | "unclear"
+        "strategy_label": "effective" | "partial" | "ineffective"
       },
       ...
     ]
@@ -276,10 +276,12 @@ def main():
         moments = []
         for kind, ann, val in plan:
             if kind == "reuse":
-                moments.append(build_moment(ann, val))
+                if val != "unclear":
+                    moments.append(build_moment(ann, val))
             else:
                 label = new_labels.get(val, "unclear")
-                moments.append(build_moment(ann, label))
+                if label != "unclear":
+                    moments.append(build_moment(ann, label))
         out = {
             "conversation_id": conv_id,
             "num_turns": conv_data.get("num_turns", 0),
