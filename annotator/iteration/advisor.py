@@ -175,6 +175,75 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
 # Annotation error collection
 # ===================================================================
 
+ANNOTATOR_PROMPTS_DIR = REPO_ROOT / "prompts" / "annotator"
+
+
+def collect_teacher_examples(ann_type: str, transcripts: dict,
+                              batch_size: int = 100, batch_idx: int = 0,
+                              ground_truth=None, annotator_style=None) -> tuple[str, str]:
+    """Collect human SAR examples for annotation_draft mode.
+
+    Groups ground truth moments by unique (conv_id, turn_start, turn_end),
+    batches them, and formats up to 5 sampled annotators per moment.
+    Returns (formatted_examples, batch_info).
+    """
+    if ground_truth is None:
+        gt = _load_ground_truth_train(annotator_style=annotator_style)
+    else:
+        gt = ground_truth
+
+    # Build UUID -> compound transcript key mapping
+    uuid_to_compound = {k.rsplit("_", 1)[-1]: k for k in transcripts.keys()}
+
+    # Collect all unique moments across conversations
+    all_units = []
+    for conv_id, conv_data in gt["conversations"].items():
+        if conv_id in EXAMPLE_CONV_IDS:
+            continue
+        moments = [m for m in conv_data.get("key_moments", [])
+                   if m.get("annotation_type") == ann_type]
+        by_span = defaultdict(list)
+        for m in moments:
+            by_span[(m["turn_start"], m["turn_end"])].append(m)
+        for (turn_start, turn_end), span_moments in by_span.items():
+            all_units.append({
+                "conv_id": conv_id,
+                "compound_key": uuid_to_compound.get(conv_id, conv_id),
+                "turn_start": turn_start,
+                "turn_end": turn_end,
+                "moments": span_moments,
+            })
+
+    total = len(all_units)
+    n_batches = max(1, (total + batch_size - 1) // batch_size)
+    start = batch_idx * batch_size
+    end = min(start + batch_size, total)
+    batch = all_units[start:end]
+
+    lines = []
+    for i, unit in enumerate(batch):
+        excerpt = get_excerpt(transcripts, unit["compound_key"],
+                              unit["turn_start"], unit["turn_end"])
+        sampled = random.sample(unit["moments"], min(5, len(unit["moments"])))
+        lines.append(
+            f"Example {i + 1}: turns {unit['turn_start']}-{unit['turn_end']} "
+            f"({len(unit['moments'])} annotator(s), showing {len(sampled)})\n"
+            f"  Transcript:\n{excerpt}\n"
+        )
+        for j, m in enumerate(sampled):
+            label = m.get("strategy_label", "unclear")
+            lines.append(
+                f"  Annotator {j + 1} [{label}]:\n"
+                f"    S: {m.get('situation', '')[:300]}\n"
+                f"    A: {m.get('action', '')[:300]}\n"
+                f"    R: {m.get('result', '')[:300]}\n"
+            )
+
+    batch_info = (f"Batch {batch_idx + 1} of {n_batches} "
+                  f"(moments {start + 1}-{end} of {total} total for {ann_type})")
+    return "".join(lines), batch_info, n_batches
+
+
 def _format_human_annotators(annotators: list[dict]) -> str:
     """Format up to 5 sampled human annotators' SAR text for display."""
     lines = []
@@ -445,7 +514,7 @@ def main():
         description="Single-shot Gemini advisor for prompt iteration"
     )
     parser.add_argument("--pass", dest="pass_type", required=True,
-                        choices=["detection", "annotation"],
+                        choices=["detection", "annotation", "annotation_draft"],
                         help="Which pass to iterate on")
     parser.add_argument("--version", required=True,
                         help="Results version to analyze (e.g. v2)")
@@ -466,6 +535,8 @@ def main():
                         default=None,
                         help="Filter ground truth to this annotator archetype and tune the "
                              "## Annotator Calibration section of the prompt")
+    parser.add_argument("--batch-size", type=int, default=100,
+                        help="Number of moments per batch for annotation_draft (default: 100)")
     args = parser.parse_args()
 
     profile_name = args.profile or load_config().get("profile")
@@ -479,7 +550,7 @@ def main():
     if args.pass_type == "detection":
         pass_dir = "p1"
     else:
-        pass_dir = "p2"
+        pass_dir = "p2"  # both annotation and annotation_draft use the p2 prompt
 
     prompt_path = None
     for ext in ("md", "txt"):
@@ -526,6 +597,75 @@ def main():
             false_positives=stats["false_positives"],
             error_examples=error_examples,
         )
+    elif args.pass_type == "annotation_draft":
+        meta_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_drafting_annotations.md"
+        if not meta_prompt_path.exists():
+            print(f"ERROR: Meta-prompt not found at {meta_prompt_path}")
+            return
+        with open(meta_prompt_path, "r", encoding="utf-8") as f:
+            meta_template = f.read()
+
+        filtered_gt = None
+        if args.annotator_style:
+            filtered_gt = _load_ground_truth_train(annotator_style=args.annotator_style)
+            print(f"Ground truth filtered to '{args.annotator_style}' annotators")
+
+        current_prompt = current_prompt.replace("{annotator_style}", "")
+
+        profile_suffix = f"_{profile_name}" if profile_name else ""
+        style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
+        client = ModelClient(model)
+
+        # Determine total batch count from batch 0
+        _, _, n_batches = collect_teacher_examples(
+            ann_type=args.type, transcripts=transcripts,
+            batch_size=args.batch_size, batch_idx=0,
+            ground_truth=filtered_gt, annotator_style=args.annotator_style,
+        )
+        print(f"annotation_draft: {n_batches} batch(es) of {args.batch_size} moments each")
+
+        for batch_idx in range(n_batches):
+            teacher_examples, batch_info, _ = collect_teacher_examples(
+                ann_type=args.type, transcripts=transcripts,
+                batch_size=args.batch_size, batch_idx=batch_idx,
+                ground_truth=filtered_gt, annotator_style=args.annotator_style,
+            )
+            meta_prompt = meta_template.format(
+                ann_type=args.type,
+                current_prompt=current_prompt,
+                teacher_examples=teacher_examples,
+                batch_info=batch_info,
+            )
+            print(f"\n[{batch_info}] {len(meta_prompt)} chars (~{len(meta_prompt)//4} tokens)")
+
+            if args.dry_run:
+                print(f"--- DRY RUN (batch 0 of {n_batches} shown) ---\n")
+                print(meta_prompt.encode("ascii", errors="replace").decode("ascii"))
+                return
+
+            response = client.generate(
+                meta_prompt,
+                json_mode=True,
+                max_tokens=phase_cfg.get("max_tokens", 16384),
+                timeout=phase_cfg.get("timeout", 300),
+                thinking=phase_cfg.get("thinking", False),
+                thinking_budget=phase_cfg.get("thinking_budget", 0),
+            )
+            print(f"  Tokens: {response.usage}")
+
+            try:
+                advice = json.loads(response.text)
+            except json.JSONDecodeError:
+                print("  WARNING: Response is not valid JSON. Saving raw text.")
+                advice = {"raw_text": response.text}
+
+            filename = (f"advisor_annotation_draft_{args.type}"
+                        f"{profile_suffix}{style_suffix}_batch{batch_idx}.json")
+            save_annotator_result(args.version, filename, advice)
+            print(f"  Saved: {filename}")
+
+        return
+
     else:
         # --- Archetype filtering ---
         # Filter ground truth to the archetype's annotators only.
