@@ -1,6 +1,5 @@
 {
   "seed": 42,
-  "ground_truth_dir": "/Users/lucyli/Documents/Projects/ai2-synthetic-annotations/data/ground_truth_v2",
   "train": [
     "de7f09e8-df69-51da-8646-1b55a143301f",
     "dec141d6-3bc2-5c04-81e0-a212602574dc",

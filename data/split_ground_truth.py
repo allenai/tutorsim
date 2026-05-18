@@ -124,7 +124,6 @@ def main():
 
     out = {
         "seed": args.seed,
-        "ground_truth_dir": str(gt_dir),
         "train": train_ids,
         "test": test_ids,
     }
