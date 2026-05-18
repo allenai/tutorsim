@@ -117,13 +117,16 @@ def compute_per_annotator_alpha(matches, ground_truth, ann_type):
     in the ground truth for this annotation type. Alpha is computed over the
     subset of matched moments where that annotator has a label.
     """
-    # Count total ground truth annotations per annotator for this type
-    annotator_totals = Counter()
-    for conv_data in ground_truth.get("conversations", {}).values():
+    # Count unique spans per annotator for this type (an annotator may appear
+    # multiple times for the same span in the raw ground truth).
+    annotator_spans: dict[str, set] = defaultdict(set)
+    for conv_id, conv_data in ground_truth.get("conversations", {}).items():
         for m in conv_data.get("key_moments", []):
             if (m.get("annotation_type") == ann_type
                     and m.get("strategy_label") in EFFECTIVENESS_LABELS):
-                annotator_totals[m.get("annotator_id")] += 1
+                annotator_spans[m.get("annotator_id")].add(
+                    (conv_id, m["turn_start"], m["turn_end"]))
+    annotator_totals = {aid: len(spans) for aid, spans in annotator_spans.items()}
 
     results = {}
     for annotator_id, n_total in annotator_totals.items():
@@ -408,8 +411,7 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
             per_annotator = {}
             for m in group_moments:
                 ann_id = m.get("annotator_id", "unknown")
-                if ann_id not in per_annotator:
-                    per_annotator[ann_id] = m.get("strategy_label", "unclear")
+                per_annotator[ann_id] = m.get("strategy_label", "unclear")  # last entry wins
 
             valid_labels = [l for l in per_annotator.values() if l in EFFECTIVENESS_LABELS]
             consensus_3way = fn(valid_labels) if valid_labels else "unclear"
@@ -927,10 +929,10 @@ def print_scorecard(output):
                 per_ann = td.get("per_annotator_alpha", {})
                 if per_ann:
                     print(f"  Per-annotator α vs LLM (>{MIN_ANNOTATOR_MOMENTS} moments in GT):")
-                    print(f"    {'annotator':>10s}  {'α':>8s}  {'matched':>8s}  {'total GT':>9s}")
+                    print(f"    {'annotator':>10s}  {'α':>8s}  {'matched':>8s}  {'unique GT':>10s}")
                     for ann_id, info in sorted(per_ann.items(), key=lambda x: -x[1]["alpha"]):
                         print(f"    {ann_id[:10]:>10s}  {info['alpha']:>8.4f}  "
-                              f"{info['n_matched']:>8d}  {info['n_total']:>9d}")
+                              f"{info['n_matched']:>8d}  {info['n_total']:>10d}")
 
             if t_ceil.get("alpha") is not None:
                 print(f"  Human-Human α:      {t_ceil['alpha']:.4f}  "
