@@ -903,20 +903,24 @@ def print_scorecard(output):
 
             if t_iaa.get("alpha") is not None:
                 n_all = t_iaa.get('n_units', 0)
-                n_dense = td.get("iaa_dense", {}).get("n_units", 0)
+                n_dense3 = td.get("iaa_dense", {}).get("n_units", 0)
+                n_dense5 = td.get("iaa_dense5", {}).get("n_units", 0)
                 print(f"  Model-Human α (Krippendorff ordinal):")
-                print(f"    {'threshold':<14s}  {'all units':>10s}  {'>3 annotators':>14s}")
+                print(f"    {'threshold':<14s}  {'all units':>10s}  {'>=3 annotators':>14s}  {'>=5 annotators':>14s}")
                 by_thresh = td.get("iaa_by_threshold", {})
-                by_thresh_dense = td.get("iaa_dense_by_threshold", {})
+                by_thresh_dense3 = td.get("iaa_dense_by_threshold", {})
+                by_thresh_dense5 = td.get("iaa_dense5_by_threshold", {})
                 for t in ALPHA_THRESHOLDS:
                     a_all = by_thresh.get(t, {}).get("alpha")
-                    a_dense = by_thresh_dense.get(t, {}).get("alpha")
+                    a_d3 = by_thresh_dense3.get(t, {}).get("alpha")
+                    a_d5 = by_thresh_dense5.get(t, {}).get("alpha")
                     marker = " *" if t == 0.7 else ""
                     print(f"    ±{t:<13}  "
                           f"{(f'{a_all:.4f}' if a_all is not None else 'n/a'):>10s}  "
-                          f"{(f'{a_dense:.4f}' if a_dense is not None else 'n/a'):>14s}"
+                          f"{(f'{a_d3:.4f}' if a_d3 is not None else 'n/a'):>14s}  "
+                          f"{(f'{a_d5:.4f}' if a_d5 is not None else 'n/a'):>14s}"
                           f"{marker}")
-                print(f"    {'n units':<14s}  {n_all:>10d}  {n_dense:>14d}")
+                print(f"    {'n units':<14s}  {n_all:>10d}  {n_dense3:>14d}  {n_dense5:>14d}")
                 cm = t_iaa.get("confusion", {})
                 if cm:
                     print(f"  Confusion at ±0.7 (rows=human consensus, cols=LLM):")
@@ -1288,7 +1292,8 @@ def main():
         if args.mode == "annotations":
             m_filtered = filter_matches_by_type(all_matches, ann_type)
             a_filtered = filter_annotations_by_type(annotations_by_conv, ann_type)
-            m_dense = [m for m in m_filtered if len(m["per_annotator_labels"]) > 3]
+            m_dense3 = [m for m in m_filtered if len(m["per_annotator_labels"]) >= 3]
+            m_dense5 = [m for m in m_filtered if len(m["per_annotator_labels"]) >= 5]
             type_result["iaa"] = compute_krippendorff_alpha(
                 m_filtered, consensus_label="mean (±0.7 threshold)")
             type_result["iaa_by_threshold"] = {
@@ -1299,11 +1304,20 @@ def main():
                 for t in ALPHA_THRESHOLDS
             }
             type_result["iaa_dense"] = compute_krippendorff_alpha(
-                m_dense, consensus_label="mean (±0.7 threshold), >3 annotators")
+                m_dense3, consensus_label="mean (±0.7 threshold), >=3 annotators")
             type_result["iaa_dense_by_threshold"] = {
                 t: compute_krippendorff_alpha(
-                    recompute_consensus(m_dense, t),
-                    consensus_label=f"mean (±{t} threshold), >3 annotators",
+                    recompute_consensus(m_dense3, t),
+                    consensus_label=f"mean (±{t} threshold), >=3 annotators",
+                )
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["iaa_dense5"] = compute_krippendorff_alpha(
+                m_dense5, consensus_label="mean (±0.7 threshold), >=5 annotators")
+            type_result["iaa_dense5_by_threshold"] = {
+                t: compute_krippendorff_alpha(
+                    recompute_consensus(m_dense5, t),
+                    consensus_label=f"mean (±{t} threshold), >=5 annotators",
                 )
                 for t in ALPHA_THRESHOLDS
             }
