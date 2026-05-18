@@ -107,6 +107,56 @@ _ORDINAL_CODE = {"effective": 0, "partial": 1, "ineffective": 2}
 
 
 ALPHA_THRESHOLDS = [0.4, 0.5, 0.6, 0.7, 0.8]
+MIN_ANNOTATOR_MOMENTS = 50
+
+
+def compute_per_annotator_alpha(matches, ground_truth, ann_type):
+    """Compute Krippendorff's alpha between each prolific annotator and the LLM.
+
+    Only includes annotators with more than MIN_ANNOTATOR_MOMENTS key moments
+    in the ground truth for this annotation type. Alpha is computed over the
+    subset of matched moments where that annotator has a label.
+    """
+    # Count total ground truth annotations per annotator for this type
+    annotator_totals = Counter()
+    for conv_data in ground_truth.get("conversations", {}).values():
+        for m in conv_data.get("key_moments", []):
+            if (m.get("annotation_type") == ann_type
+                    and m.get("strategy_label") in EFFECTIVENESS_LABELS):
+                annotator_totals[m.get("annotator_id")] += 1
+
+    results = {}
+    for annotator_id, n_total in annotator_totals.items():
+        if n_total <= MIN_ANNOTATOR_MOMENTS:
+            continue
+
+        pairs = [
+            (_ORDINAL_CODE[m["per_annotator_labels"][annotator_id]],
+             _ORDINAL_CODE[m["llm_label_3way"]])
+            for m in matches
+            if annotator_id in m["per_annotator_labels"]
+            and m["per_annotator_labels"][annotator_id] in EFFECTIVENESS_LABELS
+            and m["llm_label_3way"] in EFFECTIVENESS_LABELS
+        ]
+        if not pairs:
+            continue
+
+        matrix = np.full((2, len(pairs)), np.nan)
+        for j, (ann_code, llm_code) in enumerate(pairs):
+            matrix[0, j] = ann_code
+            matrix[1, j] = llm_code
+
+        try:
+            alpha = round(
+                krippendorff.alpha(reliability_data=matrix, level_of_measurement="ordinal"),
+                4,
+            )
+        except ValueError:
+            alpha = 1.0
+
+        results[annotator_id] = {"alpha": alpha, "n_matched": len(pairs), "n_total": n_total}
+
+    return results
 
 
 def recompute_consensus(matches, threshold):
@@ -874,6 +924,14 @@ def print_scorecard(output):
                         print(f"    {h:>12s}  {row.get('effective', 0):>10d}  "
                               f"{row.get('partial', 0):>10d}  {row.get('ineffective', 0):>12d}")
 
+                per_ann = td.get("per_annotator_alpha", {})
+                if per_ann:
+                    print(f"  Per-annotator α vs LLM (>{MIN_ANNOTATOR_MOMENTS} moments in GT):")
+                    print(f"    {'annotator':>10s}  {'α':>8s}  {'matched':>8s}  {'total GT':>9s}")
+                    for ann_id, info in sorted(per_ann.items(), key=lambda x: -x[1]["alpha"]):
+                        print(f"    {ann_id[:10]:>10s}  {info['alpha']:>8.4f}  "
+                              f"{info['n_matched']:>8d}  {info['n_total']:>9d}")
+
             if t_ceil.get("alpha") is not None:
                 print(f"  Human-Human α:      {t_ceil['alpha']:.4f}  "
                       f"(ceiling, {t_ceil.get('n_units', 0)} units, "
@@ -1247,6 +1305,8 @@ def main():
                 )
                 for t in ALPHA_THRESHOLDS
             }
+            type_result["per_annotator_alpha"] = compute_per_annotator_alpha(
+                m_filtered, ground_truth, ann_type)
             type_result["guardrails"] = compute_guardrails(a_filtered)
 
         type_result["human_ceiling"] = compute_human_ceiling(
