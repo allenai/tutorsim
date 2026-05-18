@@ -140,6 +140,9 @@ def get_excerpt(transcripts, conv_id, turn_start, turn_end, context=5,
         if n < start or n > end:
             continue
         text = turn["text"][:200]
+        if turn.get("is_enrichment"):
+            lines.append(f"  {text}")
+            continue
         if bold_range:
             marker = ""
             if n == turn_start:
