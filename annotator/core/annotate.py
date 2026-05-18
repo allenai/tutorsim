@@ -148,7 +148,7 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
             turn_start = det.get("turn_start", 0)
             turn_end = det.get("turn_end", turn_start)
-            situation = det.get("situation", "")
+            situation = det.get("situation", "") or det.get("brief_description", "")
 
             if ann_type not in prompt_cache:
                 prompt_cache[ann_type] = load_prompt(version, ann_type)
@@ -224,7 +224,7 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
                     "annotation_type": a.get("annotation_type", ann_type),
                     "turn_start": a.get("turn_start", det.get("turn_start")),
                     "turn_end": a.get("turn_end", det.get("turn_end")),
-                    "situation": a.get("situation", "") or det.get("situation", ""),
+                    "situation": a.get("situation", "") or det.get("situation", "") or det.get("brief_description", ""),
                     "action": a.get("action", ""),
                     "result": a.get("result", ""),
                 })
