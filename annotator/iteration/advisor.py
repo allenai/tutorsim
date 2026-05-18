@@ -287,12 +287,16 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
         "annotations.json",
     ]
     llm_data = None
+    loaded_file = None
     for candidate in candidates:
         llm_data = load_annotator_result(version, candidate)
         if llm_data is not None:
+            loaded_file = candidate
             break
     if llm_data is None:
-        raise FileNotFoundError(f"No annotations found for version {version}")
+        raise FileNotFoundError(
+            f"No annotations found for version {version}. Tried: {', '.join(candidates)}")
+    print(f"Loaded annotations: {loaded_file} (version: {version})")
 
     # Results use compound keys (tutor_student_uuid); ground truth uses bare UUIDs.
     uuid_to_llm_conv = {}
@@ -347,6 +351,7 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
                 "human_label": human_label,
                 "llm_label": llm_label,
                 "human_annotators": human_annotators,
+                "n_annotators": len(match["per_annotator_labels"]),
                 "llm_situation": llm_m.get("situation", ""),
                 "llm_action": llm_m.get("action", ""),
                 "llm_result": llm_m.get("result", ""),
@@ -382,9 +387,12 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
 
     total_shown = 0
     for confusion_type, cases in sorted(by_confusion.items(), key=lambda x: -len(x[1])):
-        examples.append(f"\n=== {confusion_type.upper()} ({len(cases)} total, showing {min(limit, len(cases))}) ===\n")
+        dense = [d for d in cases if d["n_annotators"] >= 3]
+        pool = dense if dense else cases
+        source_note = "" if dense else " (no >=3-annotator cases; using full pool)"
+        examples.append(f"\n=== {confusion_type.upper()} ({len(cases)} total, showing {min(limit, len(pool))}{source_note}) ===\n")
 
-        for i, d in enumerate(cases[:limit]):
+        for i, d in enumerate(pool[:limit]):
             excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
             human_block = _format_human_annotators(d["human_annotators"])
             examples.append(
