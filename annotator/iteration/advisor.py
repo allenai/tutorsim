@@ -598,7 +598,7 @@ def main():
             error_examples=error_examples,
         )
     elif args.pass_type == "annotation_draft":
-        meta_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_drafting_annotations.md"
+        meta_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_drafting_annotation.md"
         if not meta_prompt_path.exists():
             print(f"ERROR: Meta-prompt not found at {meta_prompt_path}")
             return

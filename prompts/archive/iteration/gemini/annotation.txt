@@ -2,11 +2,13 @@ You are an expert in educational assessment and NLP prompt engineering. You are 
 
 ## Task Context
 
-An LLM reads a tutoring transcript excerpt around a detected key moment and produces a situation/action/result analysis. A separate labeler then classifies the result text as effective/partial/ineffective. The same labeler is applied to human annotations. We compare labels using Cohen's kappa.
+An LLM reads a tutoring transcript excerpt around a detected key moment and produces a situation/action/result analysis. A separate labeler then classifies the result text as effective/partial/ineffective. We compare this result against mean-aggregated human teacher annotations. 
 
 ## Optimization Goal
 
-We want to maximize binary kappa (effective vs not-effective agreement with human consensus) and 3-way kappa (effective/partial/ineffective). The LLM's result text should lead the labeler to the same classification as the human's result text. Focus on what the LLM writes in the result field -- that's what determines the label.
+The LLM annotator aims to capture different teachers' perspectives, yet its output should nudge the labeller to produce an overall judgement. If teachers are likely to convey that a moment as effective, the LLMs' output should also lean effective, and similarly, if teachers are likely to deem a moment as ineffective, the LLM's output should also lean ineffective. If teachers provide mixed responses for a contentious moment, then the LLM's output should convey partial effectiveness, and provide evidence for and against effectiveness. 
+
+Prompt guidelines for the LLM should reflect the types of considerations teachers make, and cover the range of situations and actions that teachers assess.
 
 ## Current Metrics ({ann_type})
 
@@ -26,7 +28,7 @@ We want to maximize binary kappa (effective vs not-effective agreement with huma
 
 ## Examples
 
-Below are examples of both agreements (where human and LLM labels match) and disagreements (where they differ). Each shows the transcript excerpt, the human's situation/action/result, and the LLM's situation/action/result.
+Below are examples of agreements and disagreements between teachers and the LM. 
 
 {error_examples}
 
@@ -34,13 +36,11 @@ Below are examples of both agreements (where human and LLM labels match) and dis
 
 Analyze the disagreement examples above and identify:
 
-1. **Semantic patterns**: What systematic biases does the LLM have? Does it consistently rate too harsh or too generous? On what types of moments? Read the actual annotations carefully -- focus on WHAT the LLM writes differently, not just the label.
+1. **Semantic patterns**: Does the LM consistently rate too harshly or too generously? Read the action and result descriptions carefully -- focus on what the LLM writes and argues differently, and not just the label.
 
-2. **Root causes**: For each pattern, trace it to specific language in the prompt that causes the bias. Is the prompt emphasizing the wrong criteria? Missing important context? Priming toward certain conclusions?
+2. **Root causes**: What factors, criteria, or context do teachers weigh that the LM is overlooking? What types of evidence suggest a tutor's strategy to be effective or ineffective? What leads to a mixed and/or partial outcome among teachers? 
 
-3. **Proposed changes**: For each root cause, propose a SPECIFIC edit to the prompt. Quote the exact text to change and provide the replacement. You may add new sections, modify existing text, remove text, restructure, add calibration notes, or anything else -- whatever you think will work best based on the error patterns.
-
-4. **Directional prediction**: For each change, predict whether it will make the LLM harsher or more generous, and on which type of moment.
+3. **Proposed changes**: For each root cause, propose a SPECIFIC edit to the prompt. Fit proposed edits under the following prompt headings: "Your Task", "Ineffectiveness Considerations", and "Effectiveness Considerations". If changing text, quote the exact text to change and provide the replacement. 
 
 Respond in JSON:
 {{
