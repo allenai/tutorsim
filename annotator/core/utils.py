@@ -107,6 +107,14 @@ def load_ground_truth(annotator_style: str | None = None) -> dict:
         if filter_ids:
             moments = [m for m in moments if m.get("annotator_id") in filter_ids]
 
+        # Keep the last entry per (annotator_id, annotation_type, turn_start, turn_end).
+        # Later entries represent revisions by the same annotator on the same span.
+        deduped: dict[tuple, dict] = {}
+        for m in moments:
+            key = (m.get("annotator_id"), m.get("annotation_type"), m.get("turn_start"), m.get("turn_end"))
+            deduped[key] = m
+        moments = list(deduped.values())
+
         if moments:
             conversations[conv_id] = {
                 "num_turns": data["num_turns"],

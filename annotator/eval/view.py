@@ -73,16 +73,6 @@ def load_data(version: str, gold: bool = False):
         gt_conv = ground_truth["conversations"][conv_id]
         llm_conv = llm_results[conv_id]
 
-        # Deduplicate human annotations
-        seen_human = set()
-        deduped_moments = []
-        for m in gt_conv["key_moments"]:
-            key = (m.get("annotator_id"), m.get("annotation_type"), m.get("turn_start"), m.get("turn_end"))
-            if key not in seen_human:
-                seen_human.add(key)
-                deduped_moments.append(m)
-        gt_conv["key_moments"] = deduped_moments
-
         # Only keep LLM annotations whose type exists in this conversation's ground truth
         human_types = {m.get("annotation_type") for m in gt_conv["key_moments"]}
 
