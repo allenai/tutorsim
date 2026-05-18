@@ -930,6 +930,11 @@ def print_scorecard(output):
                         print(f"    {h:>12s}  {row.get('effective', 0):>10d}  "
                               f"{row.get('partial', 0):>10d}  {row.get('ineffective', 0):>12d}")
 
+                t_eff = td.get("effectiveness", {})
+                if t_eff.get("three_way_n", 0) > 0:
+                    print(f"  Cohen's κ (3-way):   {t_eff.get('three_way_kappa', 0):.4f}  "
+                          f"(n={t_eff.get('three_way_n', 0)})")
+
                 per_ann = td.get("per_annotator_alpha", {})
                 if per_ann:
                     print(f"  Per-annotator α vs LLM (>{MIN_ANNOTATOR_MOMENTS} moments in GT):")
@@ -1321,6 +1326,7 @@ def main():
                 )
                 for t in ALPHA_THRESHOLDS
             }
+            type_result["effectiveness"] = compute_effectiveness_metrics(m_filtered)
             type_result["per_annotator_alpha"] = compute_per_annotator_alpha(
                 m_filtered, ground_truth, ann_type)
             type_result["guardrails"] = compute_guardrails(a_filtered)
