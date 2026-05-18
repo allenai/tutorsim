@@ -430,14 +430,7 @@ def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
         if llm_label_3way not in EFFECTIVENESS_LABELS:
             llm_label_3way = "unclear"
 
-        # In gold mode the situation was the human's input to the LLM; use the
-        # longest human situation as the canonical situation for the LLM side.
-        human_situation = max(
-            (m.get("situation", "") for m in group_moments),
-            key=len,
-            default="",
-        )
-        llm_moment = {**llm_ann, "situation": human_situation}
+        llm_moment = llm_ann
 
         matches.append({
             "cluster": {
