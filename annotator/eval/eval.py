@@ -20,7 +20,7 @@ For each conversation, human moments and LM annotations are compared as follows:
      effectiveness labels are aggregated into a single consensus label.
      - annotations_old: majority vote with ordinal median tiebreak
      - annotations:     mean score (effective=1, partial=0, ineffective=-1);
-                        threshold >=0.7 -> effective, <=-0.7 -> ineffective, else partial
+                        threshold >=0.5 -> effective, <=-0.5 -> ineffective, else partial
 
   3. MATCHING: each unique human span is matched to a single LM annotation.
      - gold mode (--gold):     exact (turn_start, turn_end, annotation_type) lookup;
@@ -86,7 +86,7 @@ def compute_consensus_label(labels):
     return reverse[values[len(values) // 2]]
 
 
-def compute_mean_consensus_label(labels, threshold=0.7):
+def compute_mean_consensus_label(labels, threshold=0.5):
     """Mean score with thresholds: effective=1, partial=0, ineffective=-1.
 
     Score >= threshold -> effective, score <= -threshold -> ineffective, else partial.
@@ -914,7 +914,7 @@ def print_scorecard(output):
                     a_all = by_thresh.get(t, {}).get("alpha")
                     a_d3 = by_thresh_dense3.get(t, {}).get("alpha")
                     a_d5 = by_thresh_dense5.get(t, {}).get("alpha")
-                    marker = " *" if t == 0.7 else ""
+                    marker = " *" if t == 0.5 else ""
                     print(f"    ±{t:<13}  "
                           f"{(f'{a_all:.4f}' if a_all is not None else 'n/a'):>10s}  "
                           f"{(f'{a_d3:.4f}' if a_d3 is not None else 'n/a'):>14s}  "
@@ -923,17 +923,29 @@ def print_scorecard(output):
                 print(f"    {'n units':<14s}  {n_all:>10d}  {n_dense3:>14d}  {n_dense5:>14d}")
                 cm = t_iaa.get("confusion", {})
                 if cm:
-                    print(f"  Confusion at ±0.7 (rows=human consensus, cols=LLM):")
+                    print(f"  Confusion at ±0.5 (rows=human consensus, cols=LLM):")
                     print(f"    {'':>12s}  {'effective':>10s}  {'partial':>10s}  {'ineffective':>12s}")
                     for h in EFFECTIVENESS_LABELS:
                         row = cm.get(h, {})
                         print(f"    {h:>12s}  {row.get('effective', 0):>10d}  "
                               f"{row.get('partial', 0):>10d}  {row.get('ineffective', 0):>12d}")
 
-                t_eff = td.get("effectiveness", {})
-                if t_eff.get("three_way_n", 0) > 0:
-                    print(f"  Cohen's κ (3-way):   {t_eff.get('three_way_kappa', 0):.4f}  "
-                          f"(n={t_eff.get('three_way_n', 0)})")
+                kappa_thresh = td.get("kappa_by_threshold", {})
+                if kappa_thresh:
+                    print(f"  Cohen's κ 3-way (mean consensus):")
+                    print(f"    {'threshold':<14s}  {'all units':>10s}  {'>=3 annotators':>14s}  {'>=5 annotators':>14s}")
+                    kappa_d3 = td.get("kappa_dense_by_threshold", {})
+                    kappa_d5 = td.get("kappa_dense5_by_threshold", {})
+                    for t in ALPHA_THRESHOLDS:
+                        k_all = kappa_thresh.get(t, {}).get("three_way_kappa")
+                        k_d3  = kappa_d3.get(t, {}).get("three_way_kappa")
+                        k_d5  = kappa_d5.get(t, {}).get("three_way_kappa")
+                        marker = " *" if t == 0.5 else ""
+                        print(f"    ±{t:<13}  "
+                              f"{(f'{k_all:.4f}' if k_all is not None else 'n/a'):>10s}  "
+                              f"{(f'{k_d3:.4f}'  if k_d3  is not None else 'n/a'):>14s}  "
+                              f"{(f'{k_d5:.4f}'  if k_d5  is not None else 'n/a'):>14s}"
+                              f"{marker}")
 
                 per_ann = td.get("per_annotator_alpha", {})
                 if per_ann:
@@ -1300,7 +1312,7 @@ def main():
             m_dense3 = [m for m in m_filtered if len(m["per_annotator_labels"]) >= 3]
             m_dense5 = [m for m in m_filtered if len(m["per_annotator_labels"]) >= 5]
             type_result["iaa"] = compute_krippendorff_alpha(
-                m_filtered, consensus_label="mean (±0.7 threshold)")
+                m_filtered, consensus_label="mean (±0.5 threshold)")
             type_result["iaa_by_threshold"] = {
                 t: compute_krippendorff_alpha(
                     recompute_consensus(m_filtered, t),
@@ -1309,7 +1321,7 @@ def main():
                 for t in ALPHA_THRESHOLDS
             }
             type_result["iaa_dense"] = compute_krippendorff_alpha(
-                m_dense3, consensus_label="mean (±0.7 threshold), >=3 annotators")
+                m_dense3, consensus_label="mean (±0.5 threshold), >=3 annotators")
             type_result["iaa_dense_by_threshold"] = {
                 t: compute_krippendorff_alpha(
                     recompute_consensus(m_dense3, t),
@@ -1318,7 +1330,7 @@ def main():
                 for t in ALPHA_THRESHOLDS
             }
             type_result["iaa_dense5"] = compute_krippendorff_alpha(
-                m_dense5, consensus_label="mean (±0.7 threshold), >=5 annotators")
+                m_dense5, consensus_label="mean (±0.5 threshold), >=5 annotators")
             type_result["iaa_dense5_by_threshold"] = {
                 t: compute_krippendorff_alpha(
                     recompute_consensus(m_dense5, t),
@@ -1326,7 +1338,18 @@ def main():
                 )
                 for t in ALPHA_THRESHOLDS
             }
-            type_result["effectiveness"] = compute_effectiveness_metrics(m_filtered)
+            type_result["kappa_by_threshold"] = {
+                t: compute_effectiveness_metrics(recompute_consensus(m_filtered, t))
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["kappa_dense_by_threshold"] = {
+                t: compute_effectiveness_metrics(recompute_consensus(m_dense3, t))
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["kappa_dense5_by_threshold"] = {
+                t: compute_effectiveness_metrics(recompute_consensus(m_dense5, t))
+                for t in ALPHA_THRESHOLDS
+            }
             type_result["per_annotator_alpha"] = compute_per_annotator_alpha(
                 m_filtered, ground_truth, ann_type)
             type_result["guardrails"] = compute_guardrails(a_filtered)
