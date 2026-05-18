@@ -88,10 +88,14 @@ def load_from_jsonl(path):
                     "situation": ta.get("situation", ""),
                     "action": ta.get("action", ""),
                     "result": ta.get("result", ""),
+                    "_timestamp": ta.get("annotation_timestamp", ""),
                 })
 
     result = []
     for conv_id, annotations in sorted(groups.items()):
+        annotations.sort(key=lambda a: a["_timestamp"])
+        for a in annotations:
+            del a["_timestamp"]
         num_turns = max((a["turn_end"] for a in annotations if a["turn_end"] is not None), default=0)
         result.append((conv_id, {"annotations": annotations, "num_turns": num_turns}))
     return result
