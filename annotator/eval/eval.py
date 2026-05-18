@@ -86,24 +86,38 @@ def compute_consensus_label(labels):
     return reverse[values[len(values) // 2]]
 
 
-def compute_mean_consensus_label(labels):
+def compute_mean_consensus_label(labels, threshold=0.6):
     """Mean score with thresholds: effective=1, partial=0, ineffective=-1.
 
-    Score >= 0.6 -> effective, score <= -0.6 -> ineffective, else partial.
+    Score >= threshold -> effective, score <= -threshold -> ineffective, else partial.
     """
     _score = {"effective": 1, "partial": 0, "ineffective": -1}
     scores = [_score[l] for l in labels if l in _score]
     if not scores:
         return "unclear"
     mean = sum(scores) / len(scores)
-    if mean >= 0.6:
+    if mean >= threshold:
         return "effective"
-    if mean <= -0.6:
+    if mean <= -threshold:
         return "ineffective"
     return "partial"
 
 
 _ORDINAL_CODE = {"effective": 0, "partial": 1, "ineffective": 2}
+
+
+ALPHA_THRESHOLDS = [0.4, 0.5, 0.6, 0.7, 0.8]
+
+
+def recompute_consensus(matches, threshold):
+    """Return a copy of matches with consensus_3way recomputed at a given threshold."""
+    result = []
+    for m in matches:
+        labels = [l for l in m["per_annotator_labels"].values() if l in EFFECTIVENESS_LABELS]
+        consensus = compute_mean_consensus_label(labels, threshold=threshold) if labels else "unclear"
+        result.append({**m, "consensus_3way": consensus,
+                        "consensus_binary": map_to_binary(consensus)})
+    return result
 
 
 def compute_krippendorff_alpha(all_matches, consensus_label="unknown"):
@@ -843,12 +857,17 @@ def print_scorecard(output):
                       f"({t_eff.get('within_human_range', 0)}/{t_eff.get('total_matched', 0)})")
 
             if t_iaa.get("alpha") is not None:
-                print(f"  Model-Human α:      {t_iaa['alpha']:.4f}  "
-                      f"(Krippendorff ordinal, {t_iaa.get('n_units', 0)} units, "
-                      f"consensus: {t_iaa.get('consensus', '?')})")
+                print(f"  Model-Human α ({t_iaa.get('n_units', 0)} units, Krippendorff ordinal):")
+                by_thresh = td.get("iaa_by_threshold", {})
+                for t in ALPHA_THRESHOLDS:
+                    entry = by_thresh.get(t, {})
+                    alpha = entry.get("alpha")
+                    marker = " *" if t == 0.6 else ""
+                    alpha_str = f"{alpha:.4f}" if alpha is not None else "n/a"
+                    print(f"    threshold ±{t}:  {alpha_str}{marker}")
                 cm = t_iaa.get("confusion", {})
                 if cm:
-                    print(f"  Confusion (rows=human consensus, cols=LLM):")
+                    print(f"  Confusion at ±0.6 (rows=human consensus, cols=LLM):")
                     print(f"    {'':>12s}  {'effective':>10s}  {'partial':>10s}  {'ineffective':>12s}")
                     for h in EFFECTIVENESS_LABELS:
                         row = cm.get(h, {})
@@ -1211,6 +1230,13 @@ def main():
             a_filtered = filter_annotations_by_type(annotations_by_conv, ann_type)
             type_result["iaa"] = compute_krippendorff_alpha(
                 m_filtered, consensus_label="mean (±0.6 threshold)")
+            type_result["iaa_by_threshold"] = {
+                t: compute_krippendorff_alpha(
+                    recompute_consensus(m_filtered, t),
+                    consensus_label=f"mean (±{t} threshold)",
+                )
+                for t in ALPHA_THRESHOLDS
+            }
             type_result["guardrails"] = compute_guardrails(a_filtered)
 
         type_result["human_ceiling"] = compute_human_ceiling(
