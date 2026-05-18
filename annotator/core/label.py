@@ -45,7 +45,8 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
               gold: bool = False, binary: bool = False,
               annotator_style: str | None = None,
               annotations_data: dict | None = None,
-              profile: str | None = None) -> dict:
+              profile: str | None = None,
+              targets: list[str] | None = None) -> dict:
     """Run labeling pass. Returns the labeled annotations data dict.
 
     If annotations_data is provided, uses it directly instead of reading
@@ -54,10 +55,14 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     in_memory = annotations_data is not None
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    from .config import get_annotation_types
+    all_types = set(get_annotation_types())
+    effective_targets = set(targets) if targets else all_types
+    target_suffix = "" if effective_targets == all_types else "_" + "_".join(sorted(effective_targets))
     if gold:
-        filename = f"annotations_gold{profile_suffix}{style_suffix}.json"
+        filename = f"annotations_gold{profile_suffix}{style_suffix}{target_suffix}.json"
     else:
-        filename = f"annotations{profile_suffix}{style_suffix}.json"
+        filename = f"annotations{profile_suffix}{style_suffix}{target_suffix}.json"
 
     if in_memory:
         data = annotations_data
@@ -186,6 +191,9 @@ def main():
     parser.add_argument("--annotator-style", "--style", choices=get_valid_styles(),
                         default=None, dest="annotator_style",
                         help="Match the annotations_{style}.json file from annotate --style")
+    parser.add_argument("--target", nargs="+", choices=get_annotation_types(),
+                        default=None,
+                        help="Annotation targets (must match what was passed to annotate)")
     args = parser.parse_args()
 
     from common.logging_setup import setup_logging
@@ -209,7 +217,7 @@ def main():
     output = run_label(version=version, model=model, mode=mode,
                        phase_cfg=phase_cfg, gold=args.gold,
                        binary=args.binary, annotator_style=style,
-                       profile=profile)
+                       profile=profile, targets=args.target)
     if output:
         mode_hint = " --mode annotations" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""

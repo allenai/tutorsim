@@ -148,6 +148,7 @@ def main():
         annotator_style=style,
         annotations_data=annotations_data,
         profile=profile,
+        targets=args.target,
     )
 
     print("\n" + "=" * 60)

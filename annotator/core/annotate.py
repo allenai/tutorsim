@@ -349,10 +349,12 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     }
 
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    all_types = set(get_annotation_types())
+    target_suffix = "" if set(targets) == all_types else "_" + "_".join(sorted(targets))
     if gold:
-        filename = f"annotations_gold{profile_suffix}{style_suffix}.json"
+        filename = f"annotations_gold{profile_suffix}{style_suffix}{target_suffix}.json"
     else:
-        filename = f"annotations{profile_suffix}{style_suffix}.json"
+        filename = f"annotations{profile_suffix}{style_suffix}{target_suffix}.json"
     save_annotator_result(version, filename, output)
 
     logger.info("Saved: %s (version: %s)", filename, version)
