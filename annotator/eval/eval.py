@@ -20,7 +20,7 @@ For each conversation, human moments and LM annotations are compared as follows:
      effectiveness labels are aggregated into a single consensus label.
      - annotations_old: majority vote with ordinal median tiebreak
      - annotations:     mean score (effective=1, partial=0, ineffective=-1);
-                        threshold >=0.6 -> effective, <=-0.6 -> ineffective, else partial
+                        threshold >=0.7 -> effective, <=-0.7 -> ineffective, else partial
 
   3. MATCHING: each unique human span is matched to a single LM annotation.
      - gold mode (--gold):     exact (turn_start, turn_end, annotation_type) lookup;
@@ -86,7 +86,7 @@ def compute_consensus_label(labels):
     return reverse[values[len(values) // 2]]
 
 
-def compute_mean_consensus_label(labels, threshold=0.6):
+def compute_mean_consensus_label(labels, threshold=0.7):
     """Mean score with thresholds: effective=1, partial=0, ineffective=-1.
 
     Score >= threshold -> effective, score <= -threshold -> ineffective, else partial.
@@ -911,7 +911,7 @@ def print_scorecard(output):
                 for t in ALPHA_THRESHOLDS:
                     a_all = by_thresh.get(t, {}).get("alpha")
                     a_dense = by_thresh_dense.get(t, {}).get("alpha")
-                    marker = " *" if t == 0.6 else ""
+                    marker = " *" if t == 0.7 else ""
                     print(f"    ±{t:<13}  "
                           f"{(f'{a_all:.4f}' if a_all is not None else 'n/a'):>10s}  "
                           f"{(f'{a_dense:.4f}' if a_dense is not None else 'n/a'):>14s}"
@@ -919,7 +919,7 @@ def print_scorecard(output):
                 print(f"    {'n units':<14s}  {n_all:>10d}  {n_dense:>14d}")
                 cm = t_iaa.get("confusion", {})
                 if cm:
-                    print(f"  Confusion at ±0.6 (rows=human consensus, cols=LLM):")
+                    print(f"  Confusion at ±0.7 (rows=human consensus, cols=LLM):")
                     print(f"    {'':>12s}  {'effective':>10s}  {'partial':>10s}  {'ineffective':>12s}")
                     for h in EFFECTIVENESS_LABELS:
                         row = cm.get(h, {})
@@ -1290,7 +1290,7 @@ def main():
             a_filtered = filter_annotations_by_type(annotations_by_conv, ann_type)
             m_dense = [m for m in m_filtered if len(m["per_annotator_labels"]) > 3]
             type_result["iaa"] = compute_krippendorff_alpha(
-                m_filtered, consensus_label="mean (±0.6 threshold)")
+                m_filtered, consensus_label="mean (±0.7 threshold)")
             type_result["iaa_by_threshold"] = {
                 t: compute_krippendorff_alpha(
                     recompute_consensus(m_filtered, t),
@@ -1299,7 +1299,7 @@ def main():
                 for t in ALPHA_THRESHOLDS
             }
             type_result["iaa_dense"] = compute_krippendorff_alpha(
-                m_dense, consensus_label="mean (±0.6 threshold), >3 annotators")
+                m_dense, consensus_label="mean (±0.7 threshold), >3 annotators")
             type_result["iaa_dense_by_threshold"] = {
                 t: compute_krippendorff_alpha(
                     recompute_consensus(m_dense, t),
