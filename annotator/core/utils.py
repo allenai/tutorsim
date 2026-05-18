@@ -166,22 +166,28 @@ def _filter_turns(turns: list[dict], dialogue_only: bool) -> list[dict]:
     """
     if not dialogue_only:
         return turns
-    return [t for t in turns if t.get("type", "DIALOGUE") == "DIALOGUE"]
+    return [t for t in turns if not t.get("is_enrichment", False)]
 
 
 def format_transcript(conversation: dict, dialogue_only: bool = False) -> str:
     """Format conversation turns as: Turn {n}. {ROLE}: {text}
 
+    Enrichments are shown inline without a turn number (they share the turn_number
+    of the following dialogue turn but are flagged with is_enrichment=True).
+
     Args:
         conversation: Consolidated conversation dict with "turns" key.
-        dialogue_only: If True, exclude non-dialogue turns (enrichments).
+        dialogue_only: If True, exclude enrichment turns.
     """
     lines = []
     for turn in _filter_turns(conversation["turns"], dialogue_only):
         n = turn["turn_number"]
         role = turn["role"]
         text = turn["text"]
-        lines.append(f"Turn {n}. {role}: {text}")
+        if turn.get("is_enrichment"):
+            lines.append(text)  # no turn number prefix
+        else:
+            lines.append(f"Turn {n}. {role}: {text}")
     return "\n".join(lines)
 
 
@@ -221,20 +227,29 @@ def format_excerpt(conversation: dict, turn_start: int, turn_end: int,
         lines.append(f"[... turns 1-{excerpt_start - 1} omitted ...]")
         lines.append("")
 
+    marker_start_emitted = False
     for turn in turns:
         n = turn["turn_number"]
         if n < excerpt_start or n > excerpt_end:
             continue
 
-        # Add markers around the detected moment
-        if n == turn_start:
+        is_enrichment = turn.get("is_enrichment", False)
+
+        # Emit start marker before the first dialogue turn at turn_start
+        if n == turn_start and not is_enrichment and not marker_start_emitted:
             lines.append(f">>> DETECTED MOMENT START (Turn {turn_start}) <<<")
+            marker_start_emitted = True
 
         role = turn["role"]
         text = turn["text"]
-        lines.append(f"Turn {n}. {role}: {text}")
+        if is_enrichment:
+            lines.append(text)  # no turn number prefix
+        else:
+            marker = " <<<" if turn_start <= n <= turn_end else ""
+            lines.append(f"Turn {n}. {role}: {text}{marker}")
 
-        if n == turn_end:
+        # Emit end marker after the last dialogue turn at turn_end
+        if n == turn_end and not is_enrichment:
             lines.append(f">>> DETECTED MOMENT END (Turn {turn_end}) <<<")
 
     # Footer if we're not ending at the last turn

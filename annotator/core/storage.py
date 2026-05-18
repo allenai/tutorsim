@@ -251,7 +251,10 @@ def _transform_normalized_record(rec: dict) -> dict:
     """Transform an S3 normalized JSONL record to our internal transcript format.
 
     S3 format: turns[] (dialogue only) + enrichments[] (non-dialogue, with before_turn).
-    Our format: turns[] (all interleaved, with turn_number, role, text, type).
+    Our format: turns[] with dialogue turns keeping their ORIGINAL turn_number (so they
+    match human-annotated turn ranges in the ground truth). Enrichments are inserted
+    before their associated dialogue turn with the same turn_number and is_enrichment=True,
+    so they appear in excerpts as context but don't shift turn numbering.
     """
     sess = rec.get("session", {})
     source_id = rec.get("transcript_id", "") or rec.get("source_id", "")
@@ -266,21 +269,16 @@ def _transform_normalized_record(rec: dict) -> dict:
     else:
         conv_id = f"{tutor_id}_{student_id}_{source_id}"
 
-    # Build unified turn list: dialogue turns + enrichments merged by position
-    dialogue_turns = []
-    for t in rec.get("turns", []):
-        dialogue_turns.append({
-            "_sort_key": (t["turn_number"], 1),  # dialogue after enrichments at same position
-            "role": t["role"].upper(),
-            "text": t["text"],
-            "type": "DIALOGUE",
-            "timestamp": f"{t.get('start_seconds', 0)}s",
-        })
+    # Index dialogue turns by their original turn_number
+    raw_turns = rec.get("turns", [])
+    max_dialogue_turn = max((t["turn_number"] for t in raw_turns), default=0)
 
-    enrichment_turns = []
+    # Group enrichments by the dialogue turn they precede
+    from collections import defaultdict as _defaultdict
+    enrichments_by_turn = _defaultdict(list)
+    trailing_enrichments = []
     for e in rec.get("enrichments", []):
         etype = e.get("type", "").upper().replace(" ", "_")
-        role = "TUTOR"  # enrichments are typically tutor actions
         label = e.get("label", "")
         content = e.get("content", "")
         text = f"[{etype}]"
@@ -288,29 +286,35 @@ def _transform_normalized_record(rec: dict) -> dict:
             text = f"[{etype}: {label}]"
         if content:
             text = f"{text} {content}"
-
-        enrichment_turns.append({
-            "_sort_key": (e.get("before_turn") or 0, 0),  # enrichments before their turn
-            "role": role,
+        entry = {
+            "role": "TUTOR",
             "text": text,
             "type": etype,
             "timestamp": f"{e.get('start_seconds', 0)}s",
-        })
+            "is_enrichment": True,
+        }
+        before = e.get("before_turn") or 1  # None/0 → before turn 1
+        if before <= max_dialogue_turn:
+            enrichments_by_turn[before].append(entry)
+        else:
+            trailing_enrichments.append(entry)
 
-    # Merge and sort: enrichments come before their associated turn
-    all_turns = dialogue_turns + enrichment_turns
-    all_turns.sort(key=lambda t: t["_sort_key"])
-
-    # Assign sequential turn numbers, strip sort keys
-    numbered = []
-    for i, t in enumerate(all_turns, start=1):
-        numbered.append({
-            "turn_number": i,
-            "role": t["role"],
+    # Build final list: enrichments before each dialogue turn, preserving original numbering
+    final_turns = []
+    for t in raw_turns:
+        turn_num = t["turn_number"]
+        for e_entry in enrichments_by_turn.get(turn_num, []):
+            final_turns.append({**e_entry, "turn_number": turn_num})
+        final_turns.append({
+            "turn_number": turn_num,
+            "role": t["role"].upper(),
             "text": t["text"],
-            "type": t["type"],
-            "timestamp": t["timestamp"],
+            "type": "DIALOGUE",
+            "timestamp": f"{t.get('start_seconds', 0)}s",
+            "is_enrichment": False,
         })
+    for e_entry in trailing_enrichments:
+        final_turns.append({**e_entry, "turn_number": max_dialogue_turn})
 
     # Build context from demographics if available
     demo = rec.get("demographics", {})
@@ -329,8 +333,8 @@ def _transform_normalized_record(rec: dict) -> dict:
         "student_id": student_id,
         "context": context,
         "platform": rec.get("source", "step_up"),
-        "num_turns": len(numbered),
-        "turns": numbered,
+        "num_turns": len(raw_turns),  # dialogue turns only
+        "turns": final_turns,
     }
 
 
