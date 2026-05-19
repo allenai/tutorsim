@@ -145,7 +145,9 @@ def parse_detection_results(raw_entries: dict) -> dict[str, dict]:
 
 def run_detect(version: str, model: str, mode: str, prompt_version: str,
                targets: list[str], phase_cfg: dict,
-               test: int = 0, dialogue_only: bool = False) -> dict:
+               test: int = 0, dialogue_only: bool = False,
+               profile: str | None = None,
+               annotator_style: str | None = None) -> dict:
     """Run detection pass. Returns the full output dict (with 'results' key)."""
     output_dir = get_annotator_result_path(version)
 
@@ -192,9 +194,14 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
         "results": detections_by_conv,
     }
 
-    save_annotator_result(version, "detections.json", output)
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    all_types = set(get_annotation_types())
+    target_suffix = "" if set(targets) == all_types else "_" + "_".join(sorted(targets))
+    filename = f"detections{profile_suffix}{style_suffix}{target_suffix}.json"
+    save_annotator_result(version, filename, output)
 
-    print(f"\nSaved: detections.json (version: {version})")
+    print(f"\nSaved: {filename} (version: {version})")
     print(f"  {total_dets} detections across {len(detections_by_conv)} conversations (avg {avg:.1f}/conv)")
 
     return output
@@ -222,6 +229,8 @@ def main():
     parser.add_argument("--style", choices=get_valid_styles(),
                         default=None,
                         help="Use per-style detection prompts from profiles/{style}/p1/")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print an example prompt without calling the API")
     args = parser.parse_args()
 
     from common.logging_setup import setup_logging
@@ -249,10 +258,19 @@ def main():
         if style_p1_dir.exists():
             prompt_version = f"profiles/{style}"
 
+    if args.dry_run:
+        conversations = load_conversations(limit=args.test or 1)
+        entries = build_detection_entries(conversations, args.target, prompt_version,
+                                         dialogue_only=args.dialogue_only)
+        print(f"\n--- DRY RUN: showing first of {len(entries)} prompt(s) ---\n")
+        print(entries[0]["request"]["contents"][0]["parts"][0]["text"])
+        return
+
     output = run_detect(version=version, model=model, mode=mode,
                         prompt_version=prompt_version, targets=args.target,
                         phase_cfg=phase_cfg, test=args.test,
-                        dialogue_only=args.dialogue_only)
+                        dialogue_only=args.dialogue_only,
+                        profile=profile, annotator_style=style)
     print(f"\nNext: python -m annotator.core.annotate --version {version}")
 
 

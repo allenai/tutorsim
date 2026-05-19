@@ -160,8 +160,12 @@ def get_excerpt(transcripts, conv_id, turn_start, turn_end, context=5,
             prefix = "**" if turn_start <= n <= turn_end else "  "
             lines.append(f"{prefix}Turn {n}. {turn['role']}: {text}{marker}")
         else:
+            if n == turn_start:
+                lines.append(f">>> DETECTED MOMENT START (Turn {turn_start}) <<<")
             marker = " <<<" if turn_start <= n <= turn_end else ""
             lines.append(f"  Turn {n}. {turn['role']}: {text}{marker}")
+            if n == turn_end:
+                lines.append(f">>> DETECTED MOMENT END (Turn {turn_end}) <<<")
     return "\n".join(lines)
 
 

@@ -5,6 +5,8 @@ Two entry points:
   # Gemini advisor -- sends error examples + current prompt for analysis
   python -m annotator.iteration.advisor --pass detection --version v2 --type scaffolding
   python -m annotator.iteration.advisor --pass annotation --version v2 --type rapport
+  python -m annotator.iteration.advisor --pass annotation_draft --version v2 --type rapport
+  python -m annotator.iteration.advisor --pass detection_draft --version v2 --type scaffolding
 
   # Detection disagreement analysis -- detailed error breakdown
   python -m annotator.iteration.advisor analyze --version v1
@@ -180,7 +182,8 @@ ANNOTATOR_PROMPTS_DIR = REPO_ROOT / "prompts" / "annotator"
 
 def collect_teacher_examples(ann_type: str, transcripts: dict,
                               batch_size: int = 100, batch_idx: int = 0,
-                              ground_truth=None, annotator_style=None) -> tuple[str, str]:
+                              ground_truth=None, annotator_style=None,
+                              max_annotators: int = 5) -> tuple[str, str]:
     """Collect human SAR examples for annotation_draft mode.
 
     Groups ground truth moments by unique (conv_id, turn_start, turn_end),
@@ -224,7 +227,7 @@ def collect_teacher_examples(ann_type: str, transcripts: dict,
     for i, unit in enumerate(batch):
         excerpt = get_excerpt(transcripts, unit["compound_key"],
                               unit["turn_start"], unit["turn_end"])
-        sampled = random.sample(unit["moments"], min(5, len(unit["moments"])))
+        sampled = random.sample(unit["moments"], min(max_annotators, len(unit["moments"])))
         lines.append(
             f"Example {i + 1}: turns {unit['turn_start']}-{unit['turn_end']} "
             f"({len(unit['moments'])} annotator(s), showing {len(sampled)})\n"
@@ -522,7 +525,7 @@ def main():
         description="Single-shot Gemini advisor for prompt iteration"
     )
     parser.add_argument("--pass", dest="pass_type", required=True,
-                        choices=["detection", "annotation", "annotation_draft"],
+                        choices=["detection", "annotation", "annotation_draft", "detection_draft"],
                         help="Which pass to iterate on")
     parser.add_argument("--version", required=True,
                         help="Results version to analyze (e.g. v2)")
@@ -555,10 +558,10 @@ def main():
     prompt_version = args.prompt_version or args.version
 
     # Determine which pass's prompt to load
-    if args.pass_type == "detection":
+    if args.pass_type in ("detection", "detection_draft"):
         pass_dir = "p1"
     else:
-        pass_dir = "p2"  # both annotation and annotation_draft use the p2 prompt
+        pass_dir = "p2"  # annotation and annotation_draft use the p2 prompt
 
     prompt_path = None
     for ext in ("md", "txt"):
@@ -605,8 +608,17 @@ def main():
             false_positives=stats["false_positives"],
             error_examples=error_examples,
         )
-    elif args.pass_type == "annotation_draft":
-        meta_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_drafting_annotation.md"
+    elif args.pass_type in ("annotation_draft", "detection_draft"):
+        if args.pass_type == "annotation_draft":
+            meta_prompt_filename = "advisor_drafting_annotation.md"
+            output_prefix = "advisor_annotation_draft"
+            mode_label = "annotation_draft"
+        else:
+            meta_prompt_filename = "advisor_drafting_detection.md"
+            output_prefix = "advisor_detection_draft"
+            mode_label = "detection_draft"
+
+        meta_prompt_path = ANNOTATOR_PROMPTS_DIR / meta_prompt_filename
         if not meta_prompt_path.exists():
             print(f"ERROR: Meta-prompt not found at {meta_prompt_path}")
             return
@@ -624,19 +636,23 @@ def main():
         style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
         client = ModelClient(model)
 
+        max_annotators = 1 if args.pass_type == "detection_draft" else 5
+
         # Determine total batch count from batch 0
         _, _, n_batches = collect_teacher_examples(
             ann_type=args.type, transcripts=transcripts,
             batch_size=args.batch_size, batch_idx=0,
             ground_truth=filtered_gt, annotator_style=args.annotator_style,
+            max_annotators=max_annotators,
         )
-        print(f"annotation_draft: {n_batches} batch(es) of {args.batch_size} moments each")
+        print(f"{mode_label}: {n_batches} batch(es) of {args.batch_size} moments each")
 
         for batch_idx in range(n_batches):
             teacher_examples, batch_info, _ = collect_teacher_examples(
                 ann_type=args.type, transcripts=transcripts,
                 batch_size=args.batch_size, batch_idx=batch_idx,
                 ground_truth=filtered_gt, annotator_style=args.annotator_style,
+                max_annotators=max_annotators,
             )
             meta_prompt = meta_template.format(
                 ann_type=args.type,
@@ -667,7 +683,7 @@ def main():
                 print("  WARNING: Response is not valid JSON. Saving raw text.")
                 advice = {"raw_text": response.text}
 
-            filename = (f"advisor_annotation_draft_{args.type}"
+            filename = (f"{output_prefix}_{args.type}"
                         f"{profile_suffix}{style_suffix}_batch{batch_idx}.json")
             save_annotator_result(args.version, filename, advice)
             print(f"  Saved: {filename}")
