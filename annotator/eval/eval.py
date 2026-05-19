@@ -719,15 +719,37 @@ def filter_ground_truth_by_archetype(ground_truth: dict, archetype_ids: set[str]
     return filtered
 
 
-def load_detections_as_moments(version: str) -> dict[str, list[dict]] | None:
-    """Load detections.json and return as {conv_id: [moment dicts]}."""
-    data = load_annotator_result(version, "detections.json")
+def load_detections_as_moments(version: str,
+                               profile: str | None = None,
+                               annotator_style: str | None = None) -> dict[str, list[dict]] | None:
+    """Load detections file and return as {conv_id: [moment dicts]}.
+
+    Tries suffixed filenames (matching detect.py output naming) before
+    falling back to detections.json.
+    """
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    candidates = [
+        f"detections{profile_suffix}{style_suffix}.json",
+        "detections.json",
+    ]
+    # Deduplicate while preserving order
+    seen = set()
+    candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+
+    data = None
+    for filename in candidates:
+        data = load_annotator_result(version, filename)
+        if data is not None:
+            print(f"Loaded detections: {filename}")
+            break
     if data is None:
         return None
 
     moments_by_conv = {}
     for conv_id, conv_data in data["results"].items():
-        moments_by_conv[conv_id] = conv_data.get("detections", [])
+        transcript_id = conv_id.rsplit("_", 1)[-1]
+        moments_by_conv[transcript_id] = conv_data.get("detections", [])
     return moments_by_conv
 
 
@@ -1209,11 +1231,12 @@ def main():
     is_gold = False
 
     if args.mode == "detections":
-        llm_moments_by_conv = load_detections_as_moments(version)
+        llm_moments_by_conv = load_detections_as_moments(version,
+                                                         profile=args.profile,
+                                                         annotator_style=style)
         if llm_moments_by_conv is None:
-            print(f"ERROR: detections.json not found for version {version}")
+            print(f"ERROR: detections file not found for version {version}")
             return
-        print(f"Loaded detections for version {version}")
     else:
         ann_filename = resolve_annotations_filename(version, args.mode, style, profile=args.profile)
         annotations_by_conv, is_gold = load_annotations(version, ann_filename)
