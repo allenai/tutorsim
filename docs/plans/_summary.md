@@ -4,6 +4,12 @@ Index of planned work and change log for the project. Plans live in this directo
 
 ## Plans
 
+### 2026-05-20 — [Labeller validation](2026-05-20-labeller-validation.md)
+
+**Goal**: The EC2 validation app has been collecting human ratings on SAR annotations (~490 done ratings from 4 reviewers). This is ground truth for the labeller itself — the same job `classify_v2` does. Use it to measure the current labeller honestly, then iterate the prompt on a held-out test/train split.
+**Status**: Baseline established. Next move is prompt iteration on the train set.
+**Result**: v2 split (343 train / 147 test) stratified by annotation_type × human_rating, seed=42. Claude Opus 4.6 baseline on test_v2: **3-way accuracy 82.3%, kappa 0.725; binary kappa 0.796**. Scaffolding kappa 0.783 > Rapport kappa 0.664. Polar agreement near-perfect (1 swap in 110 items); the labeller loses kappa on the "partial" cell — recall 51% (19/37), symmetric polarization to eff/ineff (10 + 8). Zero cross-reviewer overlap in the source data means **no human ceiling is computable** without a separate dual-rater exercise.
+
 ### 2026-03-26 — [Factor IV storage refactor](2026-03-26-factor-iv-storage-refactor.md)
 
 **Goal**: The same pipeline needs to run on a laptop against local files and in production against S3. Before this, `if backend == "s3"` branching was smeared through the storage layer and paths were hardcoded — swapping environments required code edits.

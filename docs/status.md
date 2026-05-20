@@ -1,6 +1,24 @@
 # Project Status
 
-*Last updated: 2026-04-16*
+*Last updated: 2026-05-20*
+
+## Active Workstream: Labeller Validation
+
+The EC2 validation app (`http://54.184.80.37/labeller-validation/`) collected 490 human ratings on SAR annotations across 4 reviewers (dani 88, nathan 294, query 19, rebecca 89). All data pulled to `data/labeller_validation/`. v2 train/test split (343/147) built with seed=42, stratified by annotation_type × human_rating.
+
+**Baseline (claude-opus-4-6 on test_v2, n=147):** 3-way kappa **0.725**, accuracy 82.3%. Binary kappa 0.796. Scaffolding (0.783) > Rapport (0.664). Polar agreement near-perfect — the labeller loses kappa almost entirely on the partial cell (recall 51%, symmetric polarization).
+
+**Constraints discovered:**
+- Zero cross-reviewer overlap → no human inter-rater ceiling available without a side exercise.
+- Nathan contributed 60% of the data — pooled treatment is an assumption worth validating.
+
+**Next:** Prompt iteration on train_v2 (343 items) using the advisor loop pattern from v5 detection. Test_v2 stays held out.
+
+See [plans/2026-05-20-labeller-validation.md](plans/2026-05-20-labeller-validation.md).
+
+---
+
+*Earlier update: 2026-04-16*
 
 For the change log and planned work, see [plans/_summary.md](plans/_summary.md).
 
