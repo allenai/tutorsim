@@ -13,6 +13,9 @@ Usage:
 
     # Custom context window
     python -m annotator.core.annotate --version v1 --context 30
+
+    # Run on test split
+    python -m annotator.core.annotate --version v1 --split test
 """
 
 import argparse
@@ -40,13 +43,13 @@ VALID_ANNOTATION_TYPES = set(get_annotation_types())
 VALID_ANNOTATOR_STYLES = get_valid_styles()
 
 
-def load_conversations_map() -> dict[str, dict]:
-    """Load train-split transcripts as {conv_id: conversation} via storage layer."""
-    train_ids = load_split_ids("train")
+def load_conversations_map(split: str = "train") -> dict[str, dict]:
+    """Load split transcripts as {conv_id: conversation} via storage layer."""
+    split_ids = load_split_ids(split)
     return {
         conv_id: conv
         for conv_id, conv in load_all_transcripts().items()
-        if conv.get("transcript_id", "") in train_ids
+        if conv.get("transcript_id", "") in split_ids
     }
 
 
@@ -59,14 +62,15 @@ def load_detections_from_version(version: str) -> dict[str, dict] | None:
 
 
 def load_gold_moments(targets: list[str],
-                      annotator_style: str | None = None) -> dict[str, dict]:
-    """Load train-split ground truth moments as detection-like dicts.
+                      annotator_style: str | None = None,
+                      split: str = "train") -> dict[str, dict]:
+    """Load split ground truth moments as detection-like dicts.
 
     Converts gold annotations into the same format as detect.py output
     so the rest of the pipeline works identically.
     """
     ground_truth = load_ground_truth(annotator_style=annotator_style)
-    train_ids = load_split_ids("train")
+    split_ids = load_split_ids(split)
 
     # Ground truth keys by UUID (transcript_id), but conversations_map keys by
     # the full conversation_id (e.g. {tutor_id}_{student_id}_{UUID}). Build a
@@ -79,7 +83,7 @@ def load_gold_moments(targets: list[str],
 
     detections_by_conv = {}
     for gt_id, conv_data in ground_truth.get("conversations", {}).items():
-        if gt_id not in train_ids:
+        if gt_id not in split_ids:
             continue
         conv_id = transcript_id_to_conv_id.get(gt_id, gt_id)
 
@@ -262,7 +266,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  gold: bool = False, annotator_style: str | None = None,
                  detections_by_conv: dict | None = None,
                  dry_run: bool = False,
-                 profile: str | None = None) -> dict:
+                 profile: str | None = None,
+                 split: str = "train") -> dict:
     """Run annotation pass. Returns the full output dict (with 'results' key).
 
     If detections_by_conv is provided, uses it directly instead of reading
@@ -273,13 +278,13 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     """
     output_dir = get_annotator_result_path(version)
 
-    conversations_map = load_conversations_map()
+    conversations_map = load_conversations_map(split=split)
     logger.info("Loaded %d transcripts", len(conversations_map))
 
     if detections_by_conv is None:
         if gold:
             logger.info("Using gold truth moments")
-            detections_by_conv = load_gold_moments(targets, annotator_style=annotator_style)
+            detections_by_conv = load_gold_moments(targets, annotator_style=annotator_style, split=split)
         else:
             detections_by_conv = load_detections_from_version(version)
             if detections_by_conv is None:
@@ -349,12 +354,13 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     }
 
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
     all_types = set(get_annotation_types())
     target_suffix = "" if set(targets) == all_types else "_" + "_".join(sorted(targets))
     if gold:
-        filename = f"annotations_gold{profile_suffix}{style_suffix}{target_suffix}.json"
+        filename = f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
     else:
-        filename = f"annotations{profile_suffix}{style_suffix}{target_suffix}.json"
+        filename = f"annotations{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
     save_annotator_result(version, filename, output)
 
     logger.info("Saved: %s (version: %s)", filename, version)
@@ -391,6 +397,8 @@ def main():
                         help="Annotator archetype to simulate (generous/balanced/demanding)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Build and write all entries but stop before any API call")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to run on (default: train)")
     args = parser.parse_args()
 
     from common.logging_setup import setup_logging
@@ -422,7 +430,7 @@ def main():
                           phase_cfg=phase_cfg, dialogue_only=args.dialogue_only,
                           context_window=context_window, gold=args.gold,
                           annotator_style=style, dry_run=args.dry_run,
-                          profile=profile)
+                          profile=profile, split=args.split)
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""

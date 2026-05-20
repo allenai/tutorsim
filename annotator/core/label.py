@@ -11,6 +11,7 @@ text as effective / partial / ineffective.
 Usage:
     python -m annotator.core.label --version v1
     python -m annotator.core.label --version v1 --gold
+    python -m annotator.core.label --version v1 --split test
 """
 
 import argparse
@@ -46,7 +47,8 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
               annotator_style: str | None = None,
               annotations_data: dict | None = None,
               profile: str | None = None,
-              targets: list[str] | None = None) -> dict:
+              targets: list[str] | None = None,
+              split: str = "train") -> dict:
     """Run labeling pass. Returns the labeled annotations data dict.
 
     If annotations_data is provided, uses it directly instead of reading
@@ -55,13 +57,14 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     in_memory = annotations_data is not None
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
     all_types = set(get_annotation_types())
     effective_targets = set(targets) if targets else all_types
     target_suffix = "" if effective_targets == all_types else "_" + "_".join(sorted(effective_targets))
     if gold:
-        filename = f"annotations_gold{profile_suffix}{style_suffix}{target_suffix}.json"
+        filename = f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
     else:
-        filename = f"annotations{profile_suffix}{style_suffix}{target_suffix}.json"
+        filename = f"annotations{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
 
     if in_memory:
         data = annotations_data
@@ -70,8 +73,8 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
         if data is None and effective_targets == all_types:
             # Combined file missing — try merging individual target files
             individual_files = {
-                t: (f"annotations_gold{profile_suffix}{style_suffix}_{t}.json" if gold
-                    else f"annotations{profile_suffix}{style_suffix}_{t}.json")
+                t: (f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{t}.json" if gold
+                    else f"annotations{profile_suffix}{style_suffix}{split_suffix}_{t}.json")
                 for t in sorted(all_types)
             }
             parts = {t: load_annotator_result(version, f) for t, f in individual_files.items()}
@@ -99,12 +102,12 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             return None
 
     # The transcript UUID is the last _-delimited segment of the compound conv_id.
-    # Filter to train split as a safety net (detect/annotate already filter upstream).
-    train_ids = load_split_ids("train")
+    # Filter to the requested split as a safety net (detect/annotate already filter upstream).
+    split_ids = load_split_ids(split)
     results = {
         conv_id: conv_data
         for conv_id, conv_data in data["results"].items()
-        if conv_id.rsplit("_", 1)[-1] in train_ids
+        if conv_id.rsplit("_", 1)[-1] in split_ids
     }
 
     # Load template once
@@ -220,6 +223,8 @@ def main():
     parser.add_argument("--target", nargs="+", choices=get_annotation_types(),
                         default=None,
                         help="Annotation targets (must match what was passed to annotate)")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to run on (default: train)")
     args = parser.parse_args()
 
     from common.logging_setup import setup_logging
@@ -243,7 +248,8 @@ def main():
     output = run_label(version=version, model=model, mode=mode,
                        phase_cfg=phase_cfg, gold=args.gold,
                        binary=args.binary, annotator_style=style,
-                       profile=profile, targets=args.target)
+                       profile=profile, targets=args.target,
+                       split=args.split)
     if output:
         mode_hint = " --mode annotations" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""

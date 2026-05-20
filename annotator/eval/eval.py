@@ -721,7 +721,8 @@ def filter_ground_truth_by_archetype(ground_truth: dict, archetype_ids: set[str]
 
 def load_detections_as_moments(version: str,
                                profile: str | None = None,
-                               annotator_style: str | None = None) -> dict[str, list[dict]] | None:
+                               annotator_style: str | None = None,
+                               split: str = "train") -> dict[str, list[dict]] | None:
     """Load detections file and return as {conv_id: [moment dicts]}.
 
     Tries suffixed filenames (matching detect.py output naming) before
@@ -729,7 +730,9 @@ def load_detections_as_moments(version: str,
     """
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
     candidates = [
+        f"detections{profile_suffix}{style_suffix}{split_suffix}.json",
         f"detections{profile_suffix}{style_suffix}.json",
         "detections.json",
     ]
@@ -755,36 +758,47 @@ def load_detections_as_moments(version: str,
 
 def resolve_annotations_filename(version: str, mode: str,
                                   annotator_style: str | None = None,
-                                  profile: str | None = None) -> str | None:
-    """Resolve the correct annotations filename given mode, optional style, and profile.
+                                  profile: str | None = None,
+                                  split: str = "train") -> str | None:
+    """Resolve the correct annotations filename given mode, optional style, profile, and split.
 
-    Preference order (annotations mode):
-      1. annotations_gold_{profile}_{style}.json  (profile + style-specific gold run)
-      2. annotations_gold_{profile}.json          (profile-specific gold run)
-      3. annotations_gold_{style}.json            (style-specific gold run, no profile)
-      4. annotations_gold.json                    (baseline gold run)
-      5. annotations_{profile}_{style}.json       (profile + style-specific)
-      6. annotations_{profile}.json               (profile-specific)
-      7. annotations_{style}.json                 (style-specific, no profile)
-      8. annotations.json                         (baseline)
+    Preference order (annotations mode), split-suffixed candidates tried first:
+      1. annotations_gold_{profile}_{style}_{split}.json
+      2. annotations_gold_{profile}_{style}.json
+      3. annotations_gold_{profile}_{split}.json
+      4. annotations_gold_{profile}.json
+      5. annotations_gold_{style}_{split}.json
+      6. annotations_gold_{style}.json
+      7. annotations_gold_{split}.json
+      8. annotations_gold.json
+      (then same pattern without _gold prefix)
     """
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
 
     if mode in ("annotations_old", "annotations"):
         for f in [
+            f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}.json",
             f"annotations_gold{profile_suffix}{style_suffix}.json",
+            f"annotations_gold{profile_suffix}{split_suffix}.json",
             f"annotations_gold{profile_suffix}.json",
+            f"annotations_gold{style_suffix}{split_suffix}.json",
             f"annotations_gold{style_suffix}.json",
+            f"annotations_gold{split_suffix}.json",
             "annotations_gold.json",
         ]:
             if annotator_result_exists(version, f):
                 return f
 
     for f in [
+        f"annotations{profile_suffix}{style_suffix}{split_suffix}.json",
         f"annotations{profile_suffix}{style_suffix}.json",
+        f"annotations{profile_suffix}{split_suffix}.json",
         f"annotations{profile_suffix}.json",
+        f"annotations{style_suffix}{split_suffix}.json",
         f"annotations{style_suffix}.json",
+        f"annotations{split_suffix}.json",
         "annotations.json",
     ]:
         if annotator_result_exists(version, f):
@@ -1169,6 +1183,8 @@ def main():
                         help="Evaluate against only this annotator archetype's ground truth")
     parser.add_argument("--profile", default=None,
                         help="Config profile used when generating annotations (e.g. anthropic, gemini)")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to evaluate against (default: train)")
     args = parser.parse_args()
 
     # --- Compare mode ---
@@ -1202,15 +1218,15 @@ def main():
         if cfg_style is not None:
             style = cfg_style
 
-    # Load ground truth (with optional archetype filtering), restricted to train split
+    # Load ground truth (with optional archetype filtering), restricted to the requested split
     ground_truth = load_ground_truth(annotator_style=style)
-    train_ids = load_split_ids("train")
+    split_ids = load_split_ids(args.split)
     ground_truth["conversations"] = {
         conv_id: conv_data
         for conv_id, conv_data in ground_truth["conversations"].items()
-        if conv_id in train_ids
+        if conv_id in split_ids
     }
-    print(f"Restricted ground truth to train split: {len(ground_truth['conversations'])} conversations")
+    print(f"Restricted ground truth to {args.split} split: {len(ground_truth['conversations'])} conversations")
 
     if style:
         print(f"Filtered ground truth to '{style}' annotators")
@@ -1233,12 +1249,14 @@ def main():
     if args.mode == "detections":
         llm_moments_by_conv = load_detections_as_moments(version,
                                                          profile=args.profile,
-                                                         annotator_style=style)
+                                                         annotator_style=style,
+                                                         split=args.split)
         if llm_moments_by_conv is None:
             print(f"ERROR: detections file not found for version {version}")
             return
     else:
-        ann_filename = resolve_annotations_filename(version, args.mode, style, profile=args.profile)
+        ann_filename = resolve_annotations_filename(version, args.mode, style, profile=args.profile,
+                                                    split=args.split)
         annotations_by_conv, is_gold = load_annotations(version, ann_filename)
         if annotations_by_conv is None:
             print(f"ERROR: {ann_filename} not found for version {version}")
@@ -1377,8 +1395,9 @@ def main():
                 m_filtered, ground_truth, ann_type)
             type_result["guardrails"] = compute_guardrails(a_filtered)
 
-        type_result["human_ceiling"] = compute_human_ceiling(
-            ground_truth, ann_type_filter=ann_type)
+        if args.mode != "detections":
+            type_result["human_ceiling"] = compute_human_ceiling(
+                ground_truth, ann_type_filter=ann_type)
 
         by_type[ann_type] = type_result
 

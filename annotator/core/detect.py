@@ -8,6 +8,7 @@ Usage:
     python -m annotator.core.detect --version v1
     python -m annotator.core.detect --version v1 --test 3
     python -m annotator.core.detect --version v1 --target scaffolding
+    python -m annotator.core.detect --version v1 --split test
 """
 
 import argparse
@@ -28,17 +29,17 @@ VALID_TARGETS = get_annotation_types()
 VALID_ANNOTATION_TYPES = set(get_annotation_types())
 
 
-def load_conversations(limit: int = 0) -> list[dict]:
-    """Load train-split transcripts via storage layer."""
+def load_conversations(limit: int = 0, split: str = "train") -> list[dict]:
+    """Load split transcripts via storage layer."""
     transcripts = load_all_transcripts()
     if not transcripts:
         raise FileNotFoundError(
             "No transcripts found. Ensure data/transcripts/ contains JSON files, "
             "or configure transcript paths in config.yaml under storage.paths.transcripts."
         )
-    train_ids = load_split_ids("train")
+    split_ids = load_split_ids(split)
     conversations = sorted(
-        (c for c in transcripts.values() if c.get("transcript_id", "") in train_ids),
+        (c for c in transcripts.values() if c.get("transcript_id", "") in split_ids),
         key=lambda c: c.get("conversation_id", ""),
     )
     if limit > 0:
@@ -147,11 +148,12 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                targets: list[str], phase_cfg: dict,
                test: int = 0, dialogue_only: bool = False,
                profile: str | None = None,
-               annotator_style: str | None = None) -> dict:
+               annotator_style: str | None = None,
+               split: str = "train") -> dict:
     """Run detection pass. Returns the full output dict (with 'results' key)."""
     output_dir = get_annotator_result_path(version)
 
-    conversations = load_conversations(limit=test)
+    conversations = load_conversations(limit=test, split=split)
     if test > 0:
         print(f"TEST MODE: {test} conversations")
     print(f"Loaded {len(conversations)} conversations")
@@ -196,9 +198,10 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
 
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
     all_types = set(get_annotation_types())
     target_suffix = "" if set(targets) == all_types else "_" + "_".join(sorted(targets))
-    filename = f"detections{profile_suffix}{style_suffix}{target_suffix}.json"
+    filename = f"detections{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
     save_annotator_result(version, filename, output)
 
     print(f"\nSaved: {filename} (version: {version})")
@@ -231,6 +234,8 @@ def main():
                         help="Use per-style detection prompts from profiles/{style}/p1/")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print an example prompt without calling the API")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to run on (default: train)")
     args = parser.parse_args()
 
     from common.logging_setup import setup_logging
@@ -259,7 +264,7 @@ def main():
             prompt_version = f"profiles/{style}"
 
     if args.dry_run:
-        conversations = load_conversations(limit=args.test or 1)
+        conversations = load_conversations(limit=args.test or 1, split=args.split)
         entries = build_detection_entries(conversations, args.target, prompt_version,
                                          dialogue_only=args.dialogue_only)
         print(f"\n--- DRY RUN: showing first of {len(entries)} prompt(s) ---\n")
@@ -270,7 +275,8 @@ def main():
                         prompt_version=prompt_version, targets=args.target,
                         phase_cfg=phase_cfg, test=args.test,
                         dialogue_only=args.dialogue_only,
-                        profile=profile, annotator_style=style)
+                        profile=profile, annotator_style=style,
+                        split=args.split)
     print(f"\nNext: python -m annotator.core.annotate --version {version}")
 
 
