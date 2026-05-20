@@ -35,7 +35,9 @@ Deidentified tutoring session transcripts from StepUp. Each line is one session.
 | `role` | string | `"Tutor"` or `"Student"` |
 | `text` | string | Transcribed speech |
 
-Average ~349 turns per session.
+**Conversation length:** mean 349 turns, min 5, max 1,789 turns per session.
+
+**Turn length (whitespace tokens):** mean 10.8, min 0, max 3,256 tokens per turn (across 7,492,218 turns total).
 
 ### `session` fields
 
@@ -119,6 +121,14 @@ Structured SAR (Situation–Action–Result) annotations on specific moments in 
 | `situation` | string | What was happening in the session at this moment |
 | `action` | string | What the tutor did (the pedagogical move) |
 | `result` | string | How effective the move was and what the outcome was |
+
+**SAR field lengths (whitespace tokens, across all 6,568 scaffolding + rapport turn_annotations):**
+
+| Field | Mean | Min | Max |
+|---|---|---|---|
+| `situation` | 24.1 | 1 | 256 |
+| `action` | 20.2 | 1 | 342 |
+| `result` | 32.7 | 1 | 308 |
 
 ---
 
