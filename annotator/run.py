@@ -59,6 +59,8 @@ def main():
                         help="Annotator style: use per-style prompts for annotation and labeling")
     parser.add_argument("--context", type=int, default=None,
                         help="Context window for annotation excerpts")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to run on (default: train)")
     args = parser.parse_args()
 
     from .core.config import resolve_run_params
@@ -104,6 +106,7 @@ def main():
             phase_cfg=detect_cfg,
             test=args.test,
             dialogue_only=args.dialogue_only,
+            split=args.split,
         )
         detections_data = detect_output["results"]
 
@@ -129,6 +132,7 @@ def main():
             annotator_style=style,
             detections_by_conv=detections_data,
             profile=profile,
+            split=args.split,
         )
         if annotations_data is None:
             print("Annotation failed. Aborting.")
@@ -149,6 +153,7 @@ def main():
         annotations_data=annotations_data,
         profile=profile,
         targets=args.target,
+        split=args.split,
     )
 
     print("\n" + "=" * 60)

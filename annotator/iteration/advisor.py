@@ -42,28 +42,44 @@ def _load_ground_truth_train(annotator_style=None):
 # Detection error collection
 # ===================================================================
 
-def collect_detection_errors(version, ann_type, transcripts, limit=10):
+def collect_detection_errors(version, ann_type, transcripts, limit=10, iou_threshold=0.5, profile=None):
     """Collect detection errors and correct matches for comprehensive analysis."""
     gt = _load_ground_truth_train()
 
-    det_data = load_annotator_result(version, "detections.json")
+    profile_suffix = f"_{profile}" if profile else ""
+    candidates = [f"detections{profile_suffix}.json", "detections.json"]
+    det_data = None
+    for candidate in candidates:
+        det_data = load_annotator_result(version, candidate)
+        if det_data is not None:
+            print(f"Loaded detections: {candidate} (version: {version})")
+            break
     if det_data is None:
-        raise FileNotFoundError(f"No detections found for version {version}")
+        raise FileNotFoundError(f"No detections found for version {version}. Tried: {', '.join(candidates)}")
 
     complete_misses = []
     near_misses = []
     false_positives = []
     good_matches = []
 
+    # Detections use compound keys (tutor_student_uuid); ground truth uses bare UUIDs.
+    uuid_to_det_conv = {}
+    uuid_to_compound_key = {}
+    for compound, conv_data in det_data.get("results", {}).items():
+        uuid = compound.rsplit("_", 1)[-1]
+        uuid_to_det_conv[uuid] = conv_data
+        uuid_to_compound_key[uuid] = compound
+
     eval_ids = sorted(
-        (set(gt["conversations"].keys()) & set(det_data.get("results", {}).keys()))
+        (set(gt["conversations"].keys()) & set(uuid_to_det_conv.keys()))
         - EXAMPLE_CONV_IDS
     )
     for conv_id in eval_ids:
+        compound_key = uuid_to_compound_key[conv_id]
         human_moments = gt["conversations"][conv_id]["key_moments"]
         human_moments = [m for m in human_moments if m.get("annotation_type") == ann_type]
         llm_moments = [
-            m for m in det_data["results"].get(conv_id, {}).get("detections", [])
+            m for m in uuid_to_det_conv[conv_id].get("detections", [])
             if m.get("annotation_type") == ann_type
         ]
 
@@ -80,8 +96,8 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
                     best_iou = iou
                     best_det = det
 
-            entry = {"conv_id": conv_id, "cluster": cluster, "nearest_det": best_det, "iou": best_iou}
-            if best_iou >= IOU_THRESHOLD:
+            entry = {"conv_id": compound_key, "cluster": cluster, "nearest_det": best_det, "iou": best_iou}
+            if best_iou >= iou_threshold:
                 good_matches.append(entry)
             elif best_iou > 0:
                 near_misses.append(entry)
@@ -96,8 +112,8 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
                 iou = compute_iou(d_range, (cluster["turn_start"], cluster["turn_end"]))
                 if iou > best_iou:
                     best_iou = iou
-            if best_iou < IOU_THRESHOLD:
-                false_positives.append({"conv_id": conv_id, "detection": det, "best_iou": best_iou})
+            if best_iou < iou_threshold:
+                false_positives.append({"conv_id": compound_key, "detection": det, "best_iou": best_iou})
 
     # Format examples as text blocks
     examples = []
@@ -536,10 +552,12 @@ def main():
                         help="Model name (overrides config)")
     parser.add_argument("--profile", default=None,
                         help="Config profile to use (overrides config.yaml default)")
-    parser.add_argument("--limit", type=int, default=10,
-                        help="Max examples per error category (default: 10)")
+    parser.add_argument("--limit", type=int, default=20,
+                        help="Max examples per error category (default: 20)")
     parser.add_argument("--prompt-version", default=None,
                         help="Prompt version to load (default: same as --version)")
+    parser.add_argument("--iou-threshold", type=float, default=0.5,
+                        help="IoU threshold for advisor correct-match vs near-miss (default: 0.5)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the meta-prompt without calling the API")
     parser.add_argument("--annotator-style", choices=get_valid_styles(),
@@ -587,7 +605,8 @@ def main():
 
     if args.pass_type == "detection":
         error_examples, stats = collect_detection_errors(
-            args.version, args.type, transcripts, limit=args.limit
+            args.version, args.type, transcripts, limit=args.limit,
+            iou_threshold=args.iou_threshold, profile=profile_name,
         )
         # Load evaluation metrics (eval.py must have been run first)
         eval_metrics = load_eval_metrics(args.version, "detections", ann_type=args.type)
@@ -597,7 +616,9 @@ def main():
                   f"precision={eval_metrics.get('moment_precision', 0):.1%}, "
                   f"IoU={eval_metrics.get('mean_iou', 0):.3f}")
 
-        meta_template = load_iteration_prompt("detection", profile_name)
+        advisor_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_detection.md"
+        with open(advisor_prompt_path, "r", encoding="utf-8") as f:
+            meta_template = f.read()
         meta_prompt = meta_template.format(
             ann_type=args.type,
             current_prompt=current_prompt,
@@ -726,7 +747,9 @@ def main():
         # Always use the regular annotation meta-prompt.
         # When --annotator-style is set, the only difference is that
         # error examples come from the archetype-filtered ground truth.
-        meta_template = load_iteration_prompt("annotation", profile_name)
+        advisor_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_annotation.md"
+        with open(advisor_prompt_path, "r", encoding="utf-8") as f:
+            meta_template = f.read()
         meta_prompt = meta_template.format(
             ann_type=args.type,
             current_prompt=current_prompt,
@@ -789,7 +812,9 @@ def main():
         print(f"\n  PROPOSED CHANGES ({len(advice['proposed_changes'])}):")
         for c in advice["proposed_changes"]:
             risk = c.get("regression_risk", c.get("directional_effect", "?"))
-            print(f"    - [{c['change_type']}] {c['target_pattern']} (risk: {risk})".encode('ascii', 'replace').decode())
+            change_type = c.get("change_type", "")
+            prefix = f"[{change_type}] " if change_type else ""
+            print(f"    - {prefix}{c['target_pattern']} (risk: {risk})".encode('ascii', 'replace').decode())
             if c.get("current_text"):
                 print(f"      FROM: {c['current_text'][:100]}".encode('ascii', 'replace').decode())
             print(f"      TO:   {c['proposed_text'][:100]}".encode('ascii', 'replace').decode())
