@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 ROOT = Path("data/labeller_validation")
 EVAL = ROOT / "eval"
-PROMPT_PATH = Path("prompts/annotator/labeller/classify_v2.txt")
+PROMPTS_DIR = Path("prompts/annotator/labeller")
 SAR_TYPES = ("scaffolding", "rapport")
 
 VALID_LLM_LABELS = {"effective", "partial", "ineffective"}
@@ -185,15 +185,19 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-profile", choices=["anthropic", "openai", "gemini"],
                         required=True)
+    parser.add_argument("--prompt-version", default="v2",
+                        help="Labeller prompt version (loads classify_{version}.txt)")
     parser.add_argument("--split", default="test_v2",
                         help="Which split to run (test_v2|train_v2|test_v1|train_v1)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Limit to first N rows (smoke test only)")
     args = parser.parse_args()
 
-    setup_logging(version=f"labeller_eval_{args.split}_{args.model_profile}")
+    setup_logging(version=f"labeller_eval_{args.split}_{args.model_profile}_{args.prompt_version}")
 
-    template = PROMPT_PATH.read_text(encoding="utf-8")
+    prompt_path = PROMPTS_DIR / f"classify_{args.prompt_version}.txt"
+    template = prompt_path.read_text(encoding="utf-8")
+    logger.info("Loaded prompt from %s", prompt_path)
     test_rows = list(load_jsonl(EVAL / f"labeller_{args.split}.jsonl"))
     if args.limit:
         test_rows = test_rows[: args.limit]
@@ -241,7 +245,7 @@ def main():
         })
 
     EVAL.mkdir(parents=True, exist_ok=True)
-    slug = args.model_profile
+    slug = f"{args.model_profile}_{args.prompt_version}"
     preds_path = EVAL / f"labeller_predictions_{args.split}_{slug}.jsonl"
     with preds_path.open("w", encoding="utf-8") as f:
         for r in pred_rows:
@@ -250,6 +254,7 @@ def main():
 
     metrics = compute_metrics(pred_rows)
     metrics["model"] = model
+    metrics["prompt_version"] = args.prompt_version
     metrics["split"] = args.split
     metrics["n_test_rows"] = len(test_rows)
     metrics["n_missing_sar"] = len(missing)

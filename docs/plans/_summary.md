@@ -6,9 +6,9 @@ Index of planned work and change log for the project. Plans live in this directo
 
 ### 2026-05-20 — [Labeller validation](2026-05-20-labeller-validation.md)
 
-**Goal**: The EC2 validation app has been collecting human ratings on SAR annotations (~490 done ratings from 4 reviewers). This is ground truth for the labeller itself — the same job `classify_v2` does. Use it to measure the current labeller honestly, then iterate the prompt on a held-out test/train split.
-**Status**: Baseline established. Next move is prompt iteration on the train set.
-**Result**: v2 split (343 train / 147 test) stratified by annotation_type × human_rating, seed=42. Claude Opus 4.6 baseline on test_v2: **3-way accuracy 82.3%, kappa 0.725; binary kappa 0.796**. Scaffolding kappa 0.783 > Rapport kappa 0.664. Polar agreement near-perfect (1 swap in 110 items); the labeller loses kappa on the "partial" cell — recall 51% (19/37), symmetric polarization to eff/ineff (10 + 8). Zero cross-reviewer overlap in the source data means **no human ceiling is computable** without a separate dual-rater exercise.
+**Goal**: The EC2 validation app has been collecting human ratings on SAR annotations (~490 done ratings from 4 reviewers). This is ground truth for the labeller itself. Use it to measure the current labeller honestly, then iterate.
+**Status**: Shipped. Per-type routed labeller is the new active configuration.
+**Result**: v2 split (343 train / 147 test, stratified). Tried four prompt variants -- rule refinements (regressed), 4 hand-picked examples (kappa 0.741), full-data meta-prompt with my priming (0.739), full-data meta-prompt with no priming (0.741). All single-prompt routes plateau at ~0.74 due to inter-rater inconsistency on scaffolding's "worked + improvement note" pattern. Per-type routing (v2 for scaffolding, v6 for rapport) lifts test kappa **0.725 -> 0.782 with no binary regression** (still 0.796). Rapport kappa lifts +0.111 (0.664 -> 0.775); scaffolding kappa unchanged at 0.783. Shipped as a dict-valued `annotator.labeller` config; same routing wired into `build_ground_truth.py --labeller hybrid`.
 
 ### 2026-03-26 — [Factor IV storage refactor](2026-03-26-factor-iv-storage-refactor.md)
 

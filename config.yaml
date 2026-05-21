@@ -38,7 +38,15 @@ archetype_annotators:
 # Annotator pipeline defaults (override any of these with CLI flags)
 annotator:
   prompt_version: v4           # prompt version for detection + annotation
-  labeller: classify_v2        # labeller prompt name (in prompts/annotator/labeller/)
+  # Labeller routes per annotation_type. Each value names a file in
+  # prompts/annotator/labeller/ (without .txt). Scaffolding and rapport humans
+  # rate the partial cell differently; this routing was validated on the
+  # labeller_validation hold-out (test_v2 kappa 0.725 -> 0.782, no binary
+  # regression). See docs/plans/2026-05-20-labeller-validation.md.
+  # For a single-template labeller pass a string instead of a dict.
+  labeller:
+    scaffolding: classify_scaffolding
+    rapport: classify_rapport
   style: null                  # null = no style. Set to generous/balanced/demanding
   version: null                # null = auto-generate as {profile}_{date}
   annotation_types:

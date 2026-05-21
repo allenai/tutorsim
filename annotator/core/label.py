@@ -1,9 +1,10 @@
 """
 Pass 3 -- Label annotations for effectiveness.
 
-Uses classify_v2.txt -- the same prompt used by data/build_ground_truth.py
-for ground truth labelling. This ensures labels are on a consistent scale
-regardless of which model produced the annotations.
+The labeller routes by annotation_type when `annotator.labeller` is a dict
+(e.g. {scaffolding: classify_scaffolding, rapport: classify_rapport}), and
+loads a single template when it's a string. Same shared prompts are used by
+data/build_ground_truth.py so labels stay on a consistent scale.
 
 Reads annotations (from annotate.py output) and classifies each result
 text as effective / partial / ineffective.
@@ -45,6 +46,32 @@ VALID_LABELS_BINARY = {"effective", "ineffective"}
 JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 
 
+def load_labeller_templates(labeller_cfg: str | dict) -> dict[str | None, str]:
+    """Resolve the `annotator.labeller` config value to {annotation_type: template}.
+
+    If `labeller_cfg` is a string (e.g. "classify_v2"), returns
+    {None: <template>} -- the None key is the fallback used for every type.
+
+    If it's a dict (e.g. {"scaffolding": "classify_scaffolding", ...}), returns
+    one entry per type.
+    """
+    if isinstance(labeller_cfg, dict):
+        return {ann_type: _load_prompt(name) for ann_type, name in labeller_cfg.items()}
+    return {None: _load_prompt(labeller_cfg)}
+
+
+def pick_template(templates: dict[str | None, str], annotation_type: str) -> str:
+    """Pick the per-type template; fall back to None key if type is unmapped."""
+    if annotation_type in templates:
+        return templates[annotation_type]
+    if None in templates:
+        return templates[None]
+    raise KeyError(
+        f"No labeller template for annotation_type={annotation_type!r}. "
+        f"Available keys: {list(templates.keys())}"
+    )
+
+
 def run_label(version: str, model: str, mode: str, phase_cfg: dict,
               gold: bool = False, binary: bool = False,
               annotator_style: str | None = None,
@@ -71,13 +98,12 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
 
     results = data["results"]
 
-    # Load template once
-    from .config import get_annotator_defaults
+    # Load templates once. Binary mode is a single shared template; the
+    # 3-way labeller may route per annotation_type.
     if binary:
-        template = _load_prompt("classify_binary")
+        templates = {None: _load_prompt("classify_binary")}
     else:
-        labeller = get_annotator_defaults()["labeller"]
-        template = _load_prompt(labeller)
+        templates = load_labeller_templates(get_annotator_defaults()["labeller"])
 
     entries = []
     skipped = []
@@ -93,9 +119,10 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             situation = ann.get("situation", "")
             action = ann.get("action", "")
             if binary:
-                prompt = template.replace("{result_text}", result_text)
+                prompt = templates[None].replace("{result_text}", result_text)
             else:
                 annotation_type = ann.get("annotation_type", "unknown")
+                template = pick_template(templates, annotation_type)
                 prompt = (template
                           .replace("{annotation_type}", annotation_type)
                           .replace("{situation}", situation)
