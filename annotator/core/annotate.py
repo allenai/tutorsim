@@ -225,9 +225,9 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
             if key in analyses:
                 a = analyses[key]
                 annotations.append({
-                    "annotation_type": a.get("annotation_type", ann_type),
-                    "turn_start": a.get("turn_start", det.get("turn_start")),
-                    "turn_end": a.get("turn_end", det.get("turn_end")),
+                    "annotation_type": ann_type,
+                    "turn_start": det.get("turn_start"),
+                    "turn_end": det.get("turn_end"),
                     "situation": a.get("situation", "") or det.get("situation", "") or det.get("brief_description", ""),
                     "action": a.get("action", ""),
                     "result": a.get("result", ""),

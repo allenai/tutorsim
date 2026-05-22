@@ -116,10 +116,7 @@ def parse_detection_results(raw_entries: dict) -> dict[str, dict]:
         try:
             parsed = json.loads(text)
             for det in parsed.get("detections", []):
-                if "annotation_type" not in det:
-                    det["annotation_type"] = ann_type
-                if det["annotation_type"] not in VALID_ANNOTATION_TYPES:
-                    det["annotation_type"] = ann_type
+                det["annotation_type"] = ann_type
                 # Validate and enforce suggested_cut_turn
                 sct = det.get("suggested_cut_turn")
                 ts = det.get("turn_start", 0)
@@ -199,13 +196,30 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     split_suffix = f"_{split}" if split != "train" else ""
-    all_types = set(get_annotation_types())
-    target_suffix = "" if set(targets) == all_types else "_" + "_".join(sorted(targets))
-    filename = f"detections{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
-    save_annotator_result(version, filename, output)
 
-    print(f"\nSaved: {filename} (version: {version})")
-    print(f"  {total_dets} detections across {len(detections_by_conv)} conversations (avg {avg:.1f}/conv)")
+    if len(targets) > 1:
+        print()
+        for target in sorted(targets):
+            target_results = {
+                conv_id: {
+                    "detections": [d for d in data["detections"] if d.get("annotation_type") == target],
+                    "usage": data["usage"],
+                }
+                for conv_id, data in detections_by_conv.items()
+            }
+            n = sum(len(d["detections"]) for d in target_results.values())
+            avg_t = n / len(target_results) if target_results else 0
+            target_output = {**output, "targets": [target], "total_detections": n,
+                             "avg_detections_per_conversation": round(avg_t, 1),
+                             "results": target_results}
+            filename = f"detections{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+            save_annotator_result(version, filename, target_output)
+            print(f"Saved: {filename} | {n} detections across {len(target_results)} conversations (avg {avg_t:.1f}/conv)")
+    else:
+        filename = f"detections{profile_suffix}{style_suffix}{split_suffix}_{targets[0]}.json"
+        save_annotator_result(version, filename, output)
+        print(f"\nSaved: {filename} (version: {version})")
+        print(f"  {total_dets} detections across {len(detections_by_conv)} conversations (avg {avg:.1f}/conv)")
 
     return output
 
