@@ -1,30 +1,33 @@
-"""Minimal meta-prompt: only task + I/O + data. No diagnostic priming.
+"""Minimal meta-prompt generator. Calls a designer model to produce a labeller
+classifier prompt from the 343 train examples, with no diagnostic priming.
 
-Same data as 6_generate_labeller_prompt.py, but the meta-prompt itself is
-stripped down so the model has to infer all patterns from the examples
-themselves -- not from our priors about what's hard.
-
-Output: prompts/annotator/labeller/classify_v6.txt
+Usage:
+  python -m validation.7_generate_labeller_prompt_minimal \
+    --meta-model claude-opus-4-7 \
+    --output-version v6        # (original behavior)
+  python -m validation.7_generate_labeller_prompt_minimal \
+    --meta-model gemini-3.1-pro-preview --output-version v7
+  python -m validation.7_generate_labeller_prompt_minimal \
+    --meta-model gpt-5.4 --output-version v8
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
-import os
 from pathlib import Path
 
-from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from annotator.core.client import ModelClient
 from common.logging_setup import setup_logging
 
 logger = logging.getLogger(__name__)
 
 ROOT = Path("data/labeller_validation")
 EVAL = ROOT / "eval"
-OUTPUT_PROMPT = Path("prompts/annotator/labeller/classify_v6.txt")
-META_MODEL = "claude-opus-4-7"
+PROMPTS_DIR = Path("prompts/annotator/labeller")
 SAR_TYPES = ("scaffolding", "rapport")
 
 
@@ -97,7 +100,16 @@ __EXAMPLES__
 
 
 def main():
-    setup_logging(version="labeller_v6_meta")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--meta-model", required=True,
+                        help="Model to design the prompt (any provider: anthropic|gemini|openai prefix-recognized)")
+    parser.add_argument("--output-version", required=True,
+                        help="Output prompt version, e.g. 'v6', 'v7', 'v8'. Writes to prompts/annotator/labeller/classify_{version}.txt")
+    parser.add_argument("--max-tokens", type=int, default=8000,
+                        help="Max tokens for the designer response")
+    args = parser.parse_args()
+
+    setup_logging(version=f"labeller_meta_{args.output_version}")
     load_dotenv()
 
     train_rows = list(load_jsonl(EVAL / "labeller_train_v2.jsonl"))
@@ -112,25 +124,26 @@ def main():
     )
     logger.info("Meta-prompt size: %d chars", len(meta_prompt))
 
-    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    logger.info("Calling %s ...", META_MODEL)
-    response = client.messages.create(
-        model=META_MODEL,
-        max_tokens=8000,
-        messages=[{"role": "user", "content": meta_prompt}],
+    logger.info("Calling %s ...", args.meta_model)
+    client = ModelClient(args.meta_model)
+    response = client.generate(
+        meta_prompt,
+        json_mode=False,
+        max_tokens=args.max_tokens,
+        timeout=300,
     )
-    prompt_text = "".join(
-        block.text for block in response.content if getattr(block, "type", "") == "text"
-    ).strip()
+    prompt_text = response.text.strip()
 
     logger.info("Generated prompt: %d chars, %d lines",
                 len(prompt_text), len(prompt_text.splitlines()))
     logger.info("Usage: input=%d output=%d tokens",
-                response.usage.input_tokens, response.usage.output_tokens)
+                response.usage.get("input_tokens", 0),
+                response.usage.get("output_tokens", 0))
 
-    OUTPUT_PROMPT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PROMPT.write_text(prompt_text + "\n", encoding="utf-8")
-    logger.info("Wrote %s", OUTPUT_PROMPT)
+    output_path = PROMPTS_DIR / f"classify_{args.output_version}.txt"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(prompt_text + "\n", encoding="utf-8")
+    logger.info("Wrote %s", output_path)
 
 
 if __name__ == "__main__":
