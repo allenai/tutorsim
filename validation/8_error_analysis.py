@@ -62,6 +62,11 @@ def main():
     v6 = {r["annotation_key"]: r for r in load_jsonl(V6_PREDS)}
     sar = build_sar_lookup()
 
+    v2_only = set(v2) - set(v6)
+    v6_only = set(v6) - set(v2)
+    if v2_only or v6_only:
+        print(f"Warning: {len(v2_only)} v2-only keys, {len(v6_only)} v6-only keys -- excluded from analysis")
+
     rows = []
     for key, r2 in v2.items():
         r6 = v6.get(key)
