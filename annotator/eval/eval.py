@@ -54,7 +54,7 @@ from pathlib import Path
 import numpy as np
 import krippendorff
 
-from ..core.config import get_valid_styles
+from ..core.config import get_valid_styles, get_annotation_types
 from ..core.utils import (
     compute_iou, merge_overlapping_ranges, load_ground_truth, load_split_ids,
     EXAMPLE_CONV_IDS,
@@ -731,13 +731,12 @@ def load_detections_as_moments(version: str,
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     split_suffix = f"_{split}" if split != "train" else ""
-    candidates = [
-        f"detections{profile_suffix}{style_suffix}{split_suffix}.json",
-        f"detections{profile_suffix}{style_suffix}.json",
-        "detections.json",
-    ]
+    # Only fall back to unsuffixed files for the default train split
+    candidates = [f"detections{profile_suffix}{style_suffix}{split_suffix}.json"]
+    if split == "train":
+        candidates += [f"detections{profile_suffix}{style_suffix}.json", "detections.json"]
     # Deduplicate while preserving order
-    seen = set()
+    seen: set = set()
     candidates = [c for c in candidates if not (c in seen or seen.add(c))]
 
     data = None
@@ -746,6 +745,26 @@ def load_detections_as_moments(version: str,
         if data is not None:
             print(f"Loaded detections: {filename}")
             break
+
+    # If no combined file found, try merging per-target files
+    if data is None:
+        merged_results: dict = {}
+        for t in get_annotation_types():
+            per_target_candidates = [f"detections{profile_suffix}{style_suffix}{split_suffix}_{t}.json"]
+            if split == "train":
+                per_target_candidates.append(f"detections{profile_suffix}{style_suffix}_{t}.json")
+            for fname in per_target_candidates:
+                tdata = load_annotator_result(version, fname)
+                if tdata is not None:
+                    print(f"Loaded detections: {fname}")
+                    for conv_id, conv_data in tdata["results"].items():
+                        if conv_id not in merged_results:
+                            merged_results[conv_id] = {"detections": []}
+                        merged_results[conv_id]["detections"].extend(conv_data.get("detections", []))
+                    break
+        if merged_results:
+            data = {"results": merged_results}
+
     if data is None:
         return None
 
@@ -777,33 +796,105 @@ def resolve_annotations_filename(version: str, mode: str,
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     split_suffix = f"_{split}" if split != "train" else ""
 
-    if mode in ("annotations_old", "annotations"):
-        for f in [
-            f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}.json",
-            f"annotations_gold{profile_suffix}{style_suffix}.json",
-            f"annotations_gold{profile_suffix}{split_suffix}.json",
-            f"annotations_gold{profile_suffix}.json",
-            f"annotations_gold{style_suffix}{split_suffix}.json",
-            f"annotations_gold{style_suffix}.json",
-            f"annotations_gold{split_suffix}.json",
-            "annotations_gold.json",
-        ]:
+    def _find_first(prefixes: list[str]) -> str | None:
+        base_candidates = [
+            f"{p}{profile_suffix}{style_suffix}{split_suffix}.json" for p in prefixes
+        ] + [
+            f"{p}{profile_suffix}{split_suffix}.json" for p in prefixes
+        ] + [
+            f"{p}{style_suffix}{split_suffix}.json" for p in prefixes
+        ] + [
+            f"{p}{split_suffix}.json" for p in prefixes
+        ]
+        # Only fall back to unsuffixed files for the default train split
+        if split == "train":
+            base_candidates += [
+                f"{p}{profile_suffix}{style_suffix}.json" for p in prefixes
+            ] + [
+                f"{p}{profile_suffix}.json" for p in prefixes
+            ] + [
+                f"{p}{style_suffix}.json" for p in prefixes
+            ] + [
+                f"{p}.json" for p in prefixes
+            ]
+        # When no style specified, also try per-target suffixed files as fallback
+        if not annotator_style:
+            for t in get_annotation_types():
+                t_suffix = f"_{t}"
+                base_candidates += [f"{p}{profile_suffix}{split_suffix}{t_suffix}.json" for p in prefixes]
+                if split == "train":
+                    base_candidates += [f"{p}{profile_suffix}{t_suffix}.json" for p in prefixes]
+        seen: set = set()
+        for f in base_candidates:
+            if f in seen:
+                continue
+            seen.add(f)
             if annotator_result_exists(version, f):
                 return f
+        return None
 
-    for f in [
-        f"annotations{profile_suffix}{style_suffix}{split_suffix}.json",
-        f"annotations{profile_suffix}{style_suffix}.json",
-        f"annotations{profile_suffix}{split_suffix}.json",
-        f"annotations{profile_suffix}.json",
-        f"annotations{style_suffix}{split_suffix}.json",
-        f"annotations{style_suffix}.json",
-        f"annotations{split_suffix}.json",
-        "annotations.json",
-    ]:
-        if annotator_result_exists(version, f):
-            return f
-    return "annotations.json"
+    if mode in ("annotations_old", "annotations"):
+        result = _find_first(["annotations_gold"])
+        if result:
+            return result
+
+    result = _find_first(["annotations"])
+    return result or "annotations.json"
+
+
+def load_annotations_for_eval(version: str, mode: str,
+                               annotator_style: str | None = None,
+                               profile: str | None = None,
+                               split: str = "train") -> tuple[dict, bool, str] | tuple[None, None, None]:
+    """Load and merge per-target annotation files, falling back to a single combined file.
+
+    Returns (annotations_by_conv, is_gold, description) or (None, None, None).
+    """
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    want_gold = mode in ("annotations_old", "annotations")
+
+    merged: dict = {}
+    loaded_files: list = []
+    is_gold = False
+
+    for target in get_annotation_types():
+        candidates = []
+        if want_gold:
+            candidates.append(f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json")
+            if split == "train":
+                candidates += [
+                    f"annotations_gold{profile_suffix}{style_suffix}_{target}.json",
+                    f"annotations_gold{profile_suffix}_{target}.json",
+                ]
+        candidates.append(f"annotations{profile_suffix}{style_suffix}{split_suffix}_{target}.json")
+        if split == "train":
+            candidates += [
+                f"annotations{profile_suffix}{style_suffix}_{target}.json",
+                f"annotations{profile_suffix}_{target}.json",
+            ]
+        for fname in candidates:
+            data = load_annotator_result(version, fname)
+            if data is not None:
+                loaded_files.append(fname)
+                is_gold = data.get("source") == "gold_truth"
+                for conv_id, conv_data in data["results"].items():
+                    transcript_id = conv_id.rsplit("_", 1)[-1]
+                    if transcript_id not in merged:
+                        merged[transcript_id] = []
+                    merged[transcript_id].extend(conv_data.get("annotations", []))
+                break
+
+    if merged:
+        return merged, is_gold, ", ".join(loaded_files)
+
+    # Fall back to single combined file
+    filename = resolve_annotations_filename(version, mode, annotator_style, profile=profile, split=split)
+    annotations_by_conv, is_gold = load_annotations(version, filename)
+    if annotations_by_conv is None:
+        return None, None, None
+    return annotations_by_conv, is_gold, filename
 
 
 def load_annotations(version: str, filename: str) -> tuple[dict[str, list[dict]], bool] | tuple[None, None]:
@@ -1255,16 +1346,15 @@ def main():
             print(f"ERROR: detections file not found for version {version}")
             return
     else:
-        ann_filename = resolve_annotations_filename(version, args.mode, style, profile=args.profile,
-                                                    split=args.split)
-        annotations_by_conv, is_gold = load_annotations(version, ann_filename)
+        annotations_by_conv, is_gold, ann_desc = load_annotations_for_eval(
+            version, args.mode, style, profile=args.profile, split=args.split)
         if annotations_by_conv is None:
-            print(f"ERROR: {ann_filename} not found for version {version}")
+            print(f"ERROR: No annotation files found for version {version}")
             return
         # Also use annotations as moments for detection metrics
         llm_moments_by_conv = annotations_by_conv
         source_str = "gold truth moments" if is_gold else "detected moments"
-        print(f"Loaded annotations: {ann_filename} (source: {source_str})")
+        print(f"Loaded annotations: {ann_desc} (source: {source_str})")
 
     # --- Build human moments ---
     if llm_moments_by_conv:

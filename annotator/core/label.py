@@ -69,36 +69,34 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     if in_memory:
         data = annotations_data
     else:
-        data = load_annotator_result(version, filename)
-        if data is None and effective_targets == all_types:
-            # Combined file missing — try merging individual target files
-            individual_files = {
-                t: (f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{t}.json" if gold
-                    else f"annotations{profile_suffix}{style_suffix}{split_suffix}_{t}.json")
-                for t in sorted(all_types)
-            }
-            parts = {t: load_annotator_result(version, f) for t, f in individual_files.items()}
-            if all(v is not None for v in parts.values()):
-                print(f"Combined file not found; merging individual target files: "
-                      f"{', '.join(individual_files.values())}")
-                # Merge: combine annotations per conv_id across all parts
-                merged_results = {}
-                for part in parts.values():
-                    for conv_id, conv_data in part.get("results", {}).items():
-                        if conv_id not in merged_results:
-                            merged_results[conv_id] = dict(conv_data)
-                            merged_results[conv_id]["annotations"] = list(conv_data.get("annotations", []))
-                        else:
-                            merged_results[conv_id]["annotations"].extend(conv_data.get("annotations", []))
-                base = next(iter(parts.values()))
-                data = {**base, "results": merged_results}
-            else:
-                missing = [f for t, f in individual_files.items() if parts[t] is None]
-                print(f"ERROR: {filename} not found for version {version}, and individual "
-                      f"target files also missing: {', '.join(missing)}")
-                return None
-        elif data is None:
-            print(f"ERROR: {filename} not found for version {version}. Run annotate first.")
+        # Prefer per-target files; merge what's found
+        merged_results: dict = {}
+        loaded_files: list = []
+        for target in sorted(effective_targets):
+            t_fname = (
+                f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+                if gold else
+                f"annotations{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+            )
+            tdata = load_annotator_result(version, t_fname)
+            if tdata is not None:
+                loaded_files.append(t_fname)
+                for conv_id, conv_data in tdata.get("results", {}).items():
+                    if conv_id not in merged_results:
+                        merged_results[conv_id] = {**conv_data, "annotations": list(conv_data.get("annotations", []))}
+                    else:
+                        merged_results[conv_id]["annotations"].extend(conv_data.get("annotations", []))
+
+        if merged_results:
+            base = load_annotator_result(version, loaded_files[0])
+            data = {**base, "results": merged_results}
+            print(f"Loaded: {', '.join(loaded_files)}")
+        else:
+            # Fall back to combined file
+            data = load_annotator_result(version, filename)
+
+        if data is None:
+            print(f"ERROR: No annotation files found for version {version}. Run annotate first.")
             return None
 
     # The transcript UUID is the last _-delimited segment of the compound conv_id.
@@ -190,9 +188,26 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     data["labeled"] = True
     data["label_stats"] = by_label
 
-    save_annotator_result(version, filename, data)
-    print(f"\nSaved: {filename} (version: {version})")
-    print(f"  Effective:   {by_label['effective']}")
+    for target in sorted(effective_targets):
+        t_fname = (
+            f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+            if gold else
+            f"annotations{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+        )
+        target_results = {
+            conv_id: {
+                **conv_data,
+                "annotations": [a for a in conv_data.get("annotations", []) if a.get("annotation_type") == target],
+            }
+            for conv_id, conv_data in data["results"].items()
+        }
+        if not any(r["annotations"] for r in target_results.values()):
+            continue
+        save_annotator_result(version, t_fname, {**data, "results": target_results})
+        n = sum(len(r["annotations"]) for r in target_results.values())
+        print(f"\nSaved: {t_fname} | {n} annotations")
+
+    print(f"\n  Effective:   {by_label['effective']}")
     if not binary:
         print(f"  Partial:     {by_label['partial']}")
     print(f"  Ineffective: {by_label['ineffective']}")
@@ -253,7 +268,9 @@ def main():
     if output:
         mode_hint = " --mode annotations" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
-        print(f"\nNext: python -m annotator.eval.eval --version {version}{mode_hint}{style_flag}")
+        profile_flag = f" --profile {profile}" if profile else ""
+        split_flag = f" --split {args.split}" if args.split != "train" else ""
+        print(f"\nNext: python -m annotator.eval.eval --version {version}{profile_flag}{mode_hint}{style_flag}{split_flag}")
 
 
 if __name__ == "__main__":

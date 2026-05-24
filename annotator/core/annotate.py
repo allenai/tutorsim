@@ -53,12 +53,39 @@ def load_conversations_map(split: str = "train") -> dict[str, dict]:
     }
 
 
-def load_detections_from_version(version: str) -> dict[str, dict] | None:
-    """Load detections from detect.py output via storage layer."""
-    data = load_annotator_result(version, "detections.json")
-    if data is None:
-        return None
-    return data["results"]
+def load_detections_from_version(version: str,
+                                  targets: list[str] | None = None,
+                                  profile: str | None = None,
+                                  annotator_style: str | None = None,
+                                  split: str = "train") -> dict[str, dict] | None:
+    """Load detections from detect.py output, merging per-target files."""
+    effective_targets = targets if targets else get_annotation_types()
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+
+    merged: dict = {}
+    for target in effective_targets:
+        fname = f"detections{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+        data = load_annotator_result(version, fname)
+        if data is not None:
+            for conv_id, conv_data in data["results"].items():
+                if conv_id not in merged:
+                    merged[conv_id] = {"detections": [], "usage": dict(conv_data.get("usage", {}))}
+                merged[conv_id]["detections"].extend(conv_data.get("detections", []))
+    if merged:
+        return merged
+
+    fallbacks = [f"detections{profile_suffix}{style_suffix}{split_suffix}.json"]
+    if split == "train":
+        fallbacks += [f"detections{profile_suffix}{style_suffix}.json",
+                      f"detections{profile_suffix}.json",
+                      "detections.json"]
+    for fname in fallbacks:
+        data = load_annotator_result(version, fname)
+        if data is not None:
+            return data["results"]
+    return None
 
 
 def load_gold_moments(targets: list[str],
@@ -286,9 +313,11 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
             logger.info("Using gold truth moments")
             detections_by_conv = load_gold_moments(targets, annotator_style=annotator_style, split=split)
         else:
-            detections_by_conv = load_detections_from_version(version)
+            detections_by_conv = load_detections_from_version(
+                version, targets=targets, profile=profile,
+                annotator_style=annotator_style, split=split)
             if detections_by_conv is None:
-                logger.error("detections.json not found for version %s. Run detect first, or use --gold.", version)
+                logger.error("No detections found for version %s. Run detect first, or use --gold.", version)
                 return None
             logger.info("Loaded detections for version %s", version)
 
@@ -355,16 +384,26 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
 
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     split_suffix = f"_{split}" if split != "train" else ""
-    all_types = set(get_annotation_types())
-    target_suffix = "" if set(targets) == all_types else "_" + "_".join(sorted(targets))
-    if gold:
-        filename = f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
-    else:
-        filename = f"annotations{profile_suffix}{style_suffix}{split_suffix}{target_suffix}.json"
-    save_annotator_result(version, filename, output)
 
-    logger.info("Saved: %s (version: %s)", filename, version)
-    logger.info("  %d annotations across %d conversations", total_annotations, len(results))
+    if len(targets) > 1:
+        logger.info("")
+    for target in sorted(targets):
+        target_results = {
+            conv_id: {
+                **conv_data,
+                "annotations": [a for a in conv_data["annotations"] if a.get("annotation_type") == target],
+            }
+            for conv_id, conv_data in results.items()
+        }
+        n = sum(len(r["annotations"]) for r in target_results.values())
+        target_output = {**output, "targets": [target], "total_annotations": n, "results": target_results}
+        if gold:
+            filename = f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+        else:
+            filename = f"annotations{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+        save_annotator_result(version, filename, target_output)
+        logger.info("Saved: %s | %d annotations across %d conversations", filename, n, len(target_results))
+
     logger.info("  Errors: %d", error_count)
     logger.info("  Tokens: %s", f"{total_input + total_output:,}")
 
@@ -434,7 +473,9 @@ def main():
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
-        logger.info("Next: python -m annotator.core.label --version %s%s%s", version, gold_flag, style_flag)
+        profile_flag = f" --profile {profile}" if profile else ""
+        split_flag = f" --split {args.split}" if args.split != "train" else ""
+        logger.info("Next: python -m annotator.core.label --version %s%s%s%s%s", version, profile_flag, gold_flag, style_flag, split_flag)
 
 
 if __name__ == "__main__":

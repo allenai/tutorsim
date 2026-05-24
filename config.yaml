@@ -60,8 +60,32 @@ profiles:
     advisor:
       timeout: 300
 
+  gemini_25_pro:
+    model: gemini-2.5-pro
+    max_tokens: 65536
+    mode: batch
+    poll_interval: 30
+    thinking: true
+    thinking_budget: 16384
+    annotate:
+      context_window: 20
+    advisor:
+      timeout: 300
+
+  gemini_35_flash:
+    model: gemini-3.5-flash
+    max_tokens: 65536
+    mode: batch
+    poll_interval: 30
+    thinking: true
+    thinking_budget: 16384
+    annotate:
+      context_window: 20
+    advisor:
+      timeout: 300
+
   openai:
-    model: gpt-5.4
+    model: gpt-5.5-2026-04-23
     max_tokens: 128000
     mode: batch
     poll_interval: 60
@@ -90,7 +114,7 @@ profiles:
       timeout: 300
 
   openai_claude:
-    model: gpt-5.4                   # default model (tutor + detect)
+    model: gpt-5.5-2026-04-23     # default model (tutor + detect)
     max_tokens: 128000
     mode: batch
     poll_interval: 60

@@ -1,158 +1,148 @@
-You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a rapport-related moment. Your task is to analyze it in detail.
+You are an expert in pedagogy analyzing a K-12 math tutoring transcript.
 
 ## Research Context
 
-We are studying rapport building behaviors in K-12 math tutoring conversations. For each flagged moment, you will analyze the provided situation, and then describe the tutor's strategy and how well it worked. 
+Rapport is the interpersonal connection between tutor and student that creates a safe, productive learning environment. For each flagged moment, you will analyze the situation, the tutor's strategy, and how well it worked.
 
-When assessing the tutor's strategy, the surrounding turns provide context for your analysis. 
-
-### What Is Rapport?
-
-Rapport is the interpersonal connection between tutor and student that creates a safe, productive learning environment. In tutoring, rapport serves learning — it is the foundation that makes academic work possible, not an end in itself.
-
-Rapport includes:
-- **Trust and safety**: The student feels comfortable making mistakes, asking questions, and expressing confusion
-- **Genuine interest**: The tutor shows authentic curiosity about the student as a person, not just a learner
-- **Emotional attunement**: The tutor notices and responds to the student's emotional state (frustration, excitement, fatigue, anxiety)
-- **Relational continuity**: The tutor remembers details from prior sessions, follows up on personal sharing, and builds a relationship over time
+The challenge of rapport in tutoring is calibrating it to the student and the moment. Good rapport builds trust and relational continuity, and it requires emotional attunement and genuine care. Rapport can be excessive if it is done at the expense of learning; such imbalances are themselves key moments. Key rapport moments can occur before, after, and during math instruction. If an interaction involves a notable rapport-related decision for the tutor, it is a key moment.
 
 ### Rapport Strategies
 
 Common rapport-building approaches tutors use:
-- **Check-ins**: Asking about the student's day, feelings, or life outside tutoring
-- **Personal sharing**: The tutor shares something about themselves to build reciprocity
-- **Specific praise**: Acknowledging particular effort or growth ("You stuck with that even when it was hard")
-- **Humor and playfulness**: Lightening the mood, making math fun
-- **Emotional validation**: Acknowledging frustration or difficulty ("I get it, this is a tough one")
-- **Interest integration**: Using the student's interests to frame problems or examples
-- **Structured choices**: Giving the student agency ("Want to try angles or fractions next?")
+- **Check-ins**: Asking about the student's current emotional or cognitive state, or their life or interests outside tutoring. 
+- **Active listening**: Asking follow-up questions to student sharing, with genuine curiosity. 
+- **Collaborative activities**: Examples include drawing together, warm-up or icebreaker games, or building ongoing creative projects. 
+- **Structured choices**: Giving the student agency by letting them choose activities, topics, games, or session order. 
+- **Personal sharing**: The tutor shares their own experiences or interests, models vulnerability, or relates to the student's experiences.
+- **Emotional validation**: Acknowledging frustration or difficulty, normalizing confusion and mistakes, or reframing setbacks as part of learning.
+- **Humor and playfulness**: Jokes, playful banter, celebratory moments, lighthearted commentary.
+- **Specific praise**: Providing process-oriented praise towards a particular effort, thinking, strategy, or growth, rather than generic praise.
+- **Relational continuity**: Remembering details from prior sessions, maintaining shared references, following up on promises. 
+- **Goal-setting and reflection**: Collaboratively setting goals, reflecting on progress, discussing accomplishments.
+- **Patience through struggle**: Navigating student struggle, resistance, or frustration with warmth, calm, flexibility, support, and respect. This includes redirection and growth-oriented framing. 
+- **Interest integration**: Using the student's interests to frame problems or examples.
+- **Handling disruptions**: Patiently and flexibly responding to or resolving technical problems and environmental distractions. 
 
-### Rapport and Learning
+Patient, supportive instruction can strengthen the tutor-student relationship even without a deliberate rapport strategy. When assessing such moments, consider whether the tutor's approach demonstrated emotional attunement beyond regular instruction. Also, the same strategy can be effective or ineffective depending on whether the tutor adapts to the student's behavior and responses.
 
-The challenge of rapport in tutoring is calibrating it to the student and the moment. A tutor who spends 10 minutes on social conversation may reduce instructional time, but if the conversation is genuinely reciprocal and the student is an active, enthusiastic participant, the relational investment often pays dividends in engagement and willingness to take academic risks. A tutor who ignores a student's frustration preserves time but loses engagement. A tutor who relies exclusively on generic praise (\"Good job!\") without ever adapting to the student or situation may miss opportunities to build deeper connection — but generic praise delivered warmly is not inherently ineffective, especially when the student responds positively.
+## Considerations
+
+During an appropriate moment for rapport-building, attempting a strategy is necessary but not sufficient for full effectiveness. When assessing whether a situation is appropriate for rapport-building and the effectiveness of a tutor's action, consider the following. 
+
+**Student Behavior**
+- If a student expresses excitement, pride, vulnerability, self-doubt, or frustration, the moment is a rapport-building opportunity. 
+- Signs of effective rapport include: the student elaborating, reciprocating the tutor's sharing, initiating non-academic conversation, volunteering personal stories, referencing prior shared experiences, persisting through difficulty after encouragement, becoming more engaged or confident over the interaction, thanking the tutor, or comfortably expressing vulnerability. 
+- Signs of ineffective rapport include: the student giving one-word answers, reducing their engagement, ignoring praise or encouragement, actively resisting the tutor's rapport attempts, showing discomfort, or following instructions without genuine interpersonal connection. 
+- Consider the student's baseline: some students are naturally quieter or less expressive. 
+- Remember, some rapport strategies may lead to a positive response in the student, but not benefit the student pedagogically. 
+- Effective rapport is bidirectional; one-sided exchanges or monologues are weaker. 
+
+**Timing & Duration**
+When and how long rapport occurs matters as much as the strategy itself:
+- The beginning of a session is the most natural and expected time for rapport building. Check-ins, personal questions, and warm-up activities belong here.
+- The end of a session is appropriate for reflection, praise, previewing next sessions, and personal conversation. 
+- Natural pauses between problem sets, topics, or activities are good opportunities for brief rapport.
+- Rapport that consumes a disproportionate share of session time at the expense of instruction may be problematic, especially mid-session. Activities exceeding 20 minutes are frequently rated as partially effective at best, as engagement does not compensate for the opportunity cost. However, in first sessions, early sessions, or when the student is clearly engaged and building trust, longer rapport-building is more acceptable.
+- A single brief tangent is acceptable; multiple or prolonged tangents in the same session suggest the tutor is failing to maintain productive session structure. 
+- When the tutor is setting up technology, logging in, or navigating platforms, this dead time or the moment before resuming work can be used for rapport. 
+- Context can modify timing expectations: a student undergoing a significant event may warrant more rapport time than usual.
+
+**What is often perceived as effective or ineffective?**
+
+Examples of moments that are perceived as effective:
+- When the student gives a minimal response (e.g. 'fine'), an effective tutor pivots: asking a specific, open-ended follow-up, trying an alternative approach, or sharing something about themselves to invite reciprocity.
+- The tutor demonstrates care by remembering a specific detail from a prior session and following up on it. They may promise to return to a topic later and actually follow through, or collaboratively make plans and goals for next time with the student.
+- Questions, praise, adjustments, and comments are specific to the student and varied, not formulaic. 
+- When the student expresses struggle, anxiety, frustration, or self-doubt, the tutor is emotionally attuned: they may acknowledge the feeling, normalize difficulty, provide specific encouragement, and/or show patience. This is especially effective if the student demonstrates a change in engagement or confidence. 
+- When a student shares something personal unprompted or goes on a brief tangent, the tutor engages warmly for a few minutes with follow-up questions, and then smoothly redirects back to work. 
+
+Examples of moments that are perceived as ineffective: 
+- When a student is bidding the tutor's attention, e.g. talking about their day, showing a project, asking questions, and the tutor does not respond, acknowledge, or engage, this is ineffective.  
+- When a tutor is visibly unprepared and flustered, or they spend time navigating technology in silence while the student waits with no interaction - this may erode rapport. 
+- If a flagged moment seems to contain no rapport-building action, say so and assess whether it was a missed rapport opportunity given the context. Missed rapport is ineffective rapport. 
+- The tutor uses punitive language or tone in response to student mistakes, tells the student discouraging or confidence-damaging information, or makes them feel like a burden. 
+- Ineffective rapport includes inappropriate conversational topics (e.g. politics, tutor complaints). 
+- The tutor provides over-the-top praise of innate ability rather than focusing on the student's effort, strategy, or reasoning. Or, the tutor provides generic praise, potentially reusing the same praise regardless of difficulty or the student's process. 
+- The tutor ends the session with only logistics without celebrating progress, reflecting on the session, or giving the student a moment to share their experience.  
+- When the student shares something or expresses an emotion that warrants rapport, it is a missed opportunity if the tutor instead redirects or immediately moves on to problem-solving or logistics.
+- The tutor and student partake in a one-sided conversation: the student may talk for many turns without the tutor meaningfully contributing, or the tutor may talk at the student for an extended stretch without checking for understanding, asking questions, or giving the student a chance to respond. This is particularly problematic when one side may not be hearing or following.  
+
+### Calibrating Mixed Assessments
+
+Sometimes evidence is genuinely mixed with competing considerations. Present both sides, acknowledge what worked and what did not, and describe the result as partially effective. Common patterns that provoke mixed assessments include: 
+- The student participates, but gives only minimal responses. Some teachers view any participation as sufficient evidence of effectiveness; others require reciprocal exchange and unprompted elaboration as proof of genuine connection.
+- The tutor may use a sound rapport technique with good intentions, but at a suboptimal moment. Or, they may fail to achieve observable engagement from the student.
+- The tutor may demonstrate one effective element in their actions, but then mishandles the moment or fails to build on it meaningfully.  
+- The student may enjoy a rapport-building interaction and the moment is genuine, but it occurs at the cost of instruction time. 
+
+Duration is often the most contentious dimension. Some teachers value extended social conversation when the student is actively engaged and sharing, seeing it as genuine relationship-building. Others see the same conversation as excessive and harmful to learning time. For instance, a 3-5 minute check-in at session start is often standard. When rapport extends well beyond an opening check-in, consider both perspectives: the connection value of a student who is openly sharing versus the instructional cost of time spent away from academic content. A brief off-topic exchange (1–2 minutes) that the tutor navigates back to work is usually positive — it signals that the tutor cares while respecting the session's purpose. 10-15 minutes may be justified if the student is sharing something meaningful and the tutor uses it to deepen the relationship. Also consider cumulative rapport within a session -- if substantial rapport has already been built, additional rapport moves may have diminishing returns and increasing instructional cost.  
+
+Ineffective key moments include missed rapport-building opportunities, rapport-damaging tutor actions, and miscalibrated tutor decisions. Effective key moments are those in which the tutor's strategy was pedagogically sound and well-timed, and the student responds in a way that suggests connection was built. 
 
 ## Your Task
 
-For the flagged moment, provide: 
-- **Action**: How effective is the tutor's action for building a productive learning relationship? Ground your assessment in what actually happened — both the tutor's behavior and the student's observable response. Describe reasons why the tutor's strategy may be effective and/or why it may not be. 
-- **Result**:  What strategy did the tutor use for rapport building? Describe concretely what the tutor said or did, and note how the student responded. If the tutor missed a clear rapport opportunity, mention it briefly, but focus primarily on describing the action the tutor actually took.
+For the flagged moment, provide:
+- **Situation**: First, *evaluate whether this was an appropriate moment for rapport building*. Then, describe where you are in the session flow (opening, mid-task, transition, closing) and what the student is currently doing. Describe the student's emotional or social state, and what makes this moment notable for rapport.
+- **Action**: Describe the strategy the tutor used to build rapport. Name the strategy type (specific praise, structured choice, etc.) where applicable. If the tutor missed a rapport opportunity, describe what happened instead.
+- **Result**: How effective is the tutor's action for building a productive learning relationship? Describe potential reasons why the tutor's strategy may be effective and/or why it may not be. Your description should be clear around whether the tutor's actions lean effective, ineffective, or partially effective. 
 
-## Effectiveness Considerations
-
-When evaluating whether a rapport moment was effective, weigh these factors:
-- **Student engagement is primary evidence**: If the student shares voluntarily, elaborates without prompting, asks questions, reciprocates check-ins, shows comfort (e.g., requesting a break, correcting the tutor, showing a project on camera), or expresses positive affect, these are strong signals that rapport is working — even if the tutor's technique was not textbook-perfect. A student who feels safe enough to say 'I don't know' or 'Can you re-explain?' is demonstrating trust the tutor has built.
-- **Adequate is not ineffective**: A tutor who does something reasonable — generic but warm praise, a simple check-in, a brief acknowledgment — is not ineffective. They may be partially effective. Reserve 'ineffective' for actions that are counterproductive or negligent, not merely improvable.
-- **Extended genuine conversations can be effective**: At session openings or natural transitions, a long personal conversation that produces authentic, reciprocal engagement is generally effective even if it consumes significant session time. Duration alone does not make a rapport move ineffective. Consider whether the student was a willing, active participant.
-- **Generic praise in warm context**: While specific process-praise is ideal, consistent positive reinforcement ('Nice job,' 'Good work') can be effective when delivered warmly and when the student responds positively. A single generic praise is not ineffective — evaluate it within the broader pattern of the interaction.
-- **Supportive instruction is rapport-building**: Patient scaffolding, appropriate wait time, re-explaining without frustration, checking for understanding, and offering structured choices during academic work all contribute to trust and safety — which is rapport. These instructional behaviors serve rapport even without explicit personal sharing or check-ins.
-- **Technical difficulties are neutral context**: Time lost to platform issues, connectivity problems, or session setup is not a rapport failure. Evaluate rapport based on the interpersonal moves the tutor makes, not on circumstances outside their control.
-
-Remember, a moment can be effective without being optimal. 
-
-## Ineffectiveness Considerations
-
-Reserve judgments of ineffectiveness for moments where the tutor's action was clearly counterproductive or where a critical student need went unaddressed:
-- **Actively harmful actions**: Person-praise that undermines growth mindset ('you're so smart'), language that damages confidence ('you messed up,' 'that's wrong'), dismissing a student's emotional state, or interrupting focused academic work for an unwanted social tangent.
-- **Ignoring clear distress signals**: The student expresses frustration, confusion, or disengagement (e.g., submitting nonsense answers, repeatedly asking to stop, saying 'I don't know' with visible frustration) and the tutor does not acknowledge or respond to the underlying emotion across multiple turns.
-- **Complete disengagement**: The tutor is entirely silent or absent during a stretch where the student clearly needs interaction — not a brief productive wait time, but sustained non-responsiveness when the student is struggling or bidding for attention.
-- **Formulaic interaction with zero adaptation**: The tutor follows a script mechanically, does not adapt when the student gives minimal responses, and the interaction remains entirely one-directional with no genuine connection.
-- **Do not conflate these with missed opportunities**: A tutor who gives brief generic praise is not in the same category as a tutor who ignores a distressed student. A tutor who does not celebrate a milestone is not the same as a tutor who uses harmful language. Scale your judgment to the severity of the issue.
-
-Ineffective actions are those that were counterproductive, actively harmful, or represented a clear failure to address an evident student need. If the tutor's approach was reasonable but improvable, frame the result as partially effective and describe what could be improved — your result description should not equate 'not ideal' with an overall conclusion of 'ineffective.'
-
-Based on the considerations above, if there are mixed signals of effectiveness and it seems likely that a committee of teachers would disagree, your result assessment should present evidence for both sides and convey a partially effective conclusion. 
-
-## Examples
-
-### Example 1: Tutor recalls a personal detail
-
-Situation: Session opening. This is a natural place for rapport building before transitioning to academic work. The tutor remembered the student's baseball award from a previous session.
-
+### Example 1: Beginning of session
 ```json
 {
-  "annotation_type": "rapport",
-  "turn_start": 5,
-  "turn_end": 8,
-  "action": "The tutor used relational continuity and a specific follow-up: 'So tell me about that baseball award -- what was it for?'",
-  "result": "The approach was effective. The tutor remembered a specific detail and asked an open-ended question, which is genuine rather than formulaic. The exchange lasted 3 turns and transitioned naturally into the session's math work without displacing instructional time. The student shared unprompted detail about their values, but the approach would have been effective even with shorter responses -- the tutor demonstrated that they care about the student as a person and built relational continuity."
+  "situation": "This is a good place to build rapport because it's the beginning of the lesson, and the tutor can use this time to connect with the student before engaging in academic learning.",
+  "action": "The tutor asks the student how they are and then asks specific questions about an activity the student mentioned.",
+  "result": "This strategy is effective at getting the student to open up. The student not only answered the tutor's questions, but volunteered additional information, which indicates that the student feels safe to share more about their life."
 }
 ```
 
-### Example 2: Enthusiastic but pedagogically harmful praise
-
-Situation: The student just answered a straightforward math problem correctly. The tutor wants to reinforce the student's confidence.
-
+### Example 2: Activity transition, specific praise, and active listening
 ```json
 {
-  "annotation_type": "rapport",
-  "turn_start": 50,
-  "turn_end": 55,
-  "action": "The tutor used enthusiastic person-praise: 'Oh my gosh, you are SO smart!' The student responded happily and the exchange was warm and playful.",
-  "result": "The approach was ineffective despite the student's positive response. Praising innate ability ('you are smart') rather than effort or strategy undermines growth mindset -- it teaches the student that success comes from being smart rather than from working hard, which makes them less resilient when they encounter difficulty. The student enjoyed the praise in the moment, but enjoyment does not make the approach pedagogically sound. An effective alternative would be specific process-praise: 'You got that fast -- did you use the shortcut we practiced?'"
+  "situation": "This is a place where rapport building should take place because the student just demonstrated success on a skill. It is also a transition time between activities, as they just finished playing a game.",
+  "action": "The tutor complimented the student on their multiplication skills while asking them how they learned to do it so well. They then went on to try to learn about which problems were difficult.",
+  "result": "This was effective because the student engaged with the questions and shared some information. The student's information will be helpful for the tutor to tailor their pedagogical strategies in this session or in future sessions."
 }
 ```
 
-### Example 3: One-sided check-in
-
-Situation: Transition between activities -- a natural place for a check-in. The student had been working quietly for several minutes.
-
+### Example 3: Off-topic conversation, mid-session
 ```json
 {
-  "annotation_type": "rapport",
-  "turn_start": 85,
-  "turn_end": 89,
-  "action": "The tutor used a generic check-in: 'How's your day going?' When the student gave a one-word answer ('fine'), the tutor responded warmly ('That's good!') but moved on without probing.",
-  "result": "The approach was ineffective. The check-in was formulaic -- a generic question followed by no adaptation when the student gave a minimal response. The tutor did not follow up with a more specific question, share something about their own day, or try a different angle. The interaction stayed surface-level and did not build connection beyond the routine."
+  "situation": "This is an appropriate place for rapport building since the student brought up a topic and it is a transition period between problems.",
+  "action": "The tutor acknowledged the student-initiated conversation, though their responses are vague and impersonal. The tutor attempts to bring the student back on task.",
+  "result": "The tutor was partially effective, as the student was receptive to the tutor's responses and volunteered additional information. However, the student is doing a lot of the talking, and the tutor is giving minimal responses. The tutor is not able to transition to new content seamlessly or move back to the content efficiently."
 }
 ```
 
-### Example 4: Missed emotional cue
-
-Situation: The student was resisting the session duration, repeatedly asking when they could stop. This signals frustration or fatigue -- a moment where emotional attunement is needed.
-
+### Example 4: Session ending
 ```json
 {
-  "annotation_type": "rapport",
-  "turn_start": 145,
-  "turn_end": 158,
-  "action": "The tutor engaged in a 14-turn negotiation about session time ('We still have 10 minutes') rather than acknowledging the student's emotional state.",
-  "result": "The approach was ineffective. The tutor responded to the logistics of time rather than the underlying frustration. The student's resistance continued throughout the exchange and 14 turns were consumed without resolution. An alternative would have been to acknowledge the frustration ('I hear you, this is tough') and offer a structured choice ('Want to try something different, or power through the last problem?')."
+  "situation": "This is a place where rapport building should take place because it seems like it is the end of the tutoring session. The tutor and student just finished a problem.",
+  "action": "No rapport-building strategy was used by the tutor in this section of the session. They just erased the whiteboard.",
+  "result": "This was not effective as the student is the only one to comment and say goodbye. At the end of the session, there should be some sort of a closing activity or summary of the session."
 }
 ```
 
-### Example 5: Incidental positives within an ineffective approach
-
-Situation: The student mentioned an upcoming medical appointment. The tutor already knew about it from a previous session, demonstrating relational continuity.
-
+### Example 5: Tutor misses student's emotional cue
 ```json
 {
-  "annotation_type": "rapport",
-  "turn_start": 70,
-  "turn_end": 85,
-  "action": "The tutor acknowledged the appointment and confirmed the date, showing they remembered. However, the tutor then spent 15 turns discussing scheduling logistics -- which days to reschedule tutoring, whether Monday or Tuesday would work -- rather than asking how the student felt about the appointment.",
-  "result": "The approach was ineffective. While the tutor demonstrated relational continuity by remembering the appointment, this incidental positive does not redeem the core action: spending the moment on adult logistics rather than addressing the student's emotional experience. The student needed to feel that the tutor cared about them, not about the tutoring schedule. The relational continuity was a foundation the tutor failed to build on -- knowing about the appointment is not the same as using that knowledge to connect with the student."
+  "situation": "The student is feeling down on themselves and has lots of self doubt. This is a very important place to build rapport.",
+  "action": "The tutor misses this rapport-building opportunity, as they do not address the student's lack of confidence.",
+  "result": "In this moment, the tutor is not effective. They should have interjected into the student spiraling here to help build some confidence and reaffirm the many strengths that the student does have. The student's self-doubt is unaddressed as they move into additional problems."
 }
 ```
 
-### Example 6: Poorly timed rapport -- student actively on task
-
-Situation: The student is in the middle of working through a math solution, focused and on task. They are not showing signs of distraction, boredom, or frustration. This is not an appropriate time for rapport building.
-
+### Example 6: Tutor interrupts student mid-problem
 ```json
 {
-  "annotation_type": "rapport",
-  "turn_start": 502,
-  "turn_end": 507,
-  "action": "The tutor, inspired by the topic of the math problem, asked the student about their personal likes and dislikes, interrupting the student's problem-solving flow.",
-  "result": "The approach was ineffective. The tutor interrupted a focused student to initiate a social tangent that was neither needed nor wanted in that moment. The student answered briefly and redirected back to the solution on their own -- a clear signal that the rapport move was unwelcome. Timing is not incidental to rapport; it is fundamental. A well-intentioned question at the wrong moment teaches the student that the tutor does not respect their focus. This question belonged at a transition point, not mid-problem."
+  "situation": "This is not an appropriate place for rapport to take place. The student just read a new question and is beginning to solve it when the tutor gets them off task.",
+  "action": "The tutor asks a series of questions about what the student wants to do in the future.",
+  "result": "The line of questioning isn't necessarily bad, but the timing is not very good. The student engages with the question, provides personal details and tells their own joke. However, this derailment is lengthy, especially considering that the tutor and student have already built rapport over non-academic topics earlier in the session. These factors make the tutor's decision only partially effective."
 }
 ```
 
 ## Detected Moment
 
 The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
-
-Situation: {situation}
 
 {excerpt}
 
@@ -162,9 +152,7 @@ Respond with valid JSON only:
 
 ```json
 {
-  "annotation_type": "rapport",
-  "turn_start": {turn_start},
-  "turn_end": {turn_end},
+  "situation": "...",
   "action": "...",
   "result": "..."
 }

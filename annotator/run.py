@@ -159,7 +159,9 @@ def main():
     print("\n" + "=" * 60)
     print("  Pipeline complete!")
     style_flag = f" --annotator-style {style}" if style else ""
-    print(f"  Next: python -m annotator.eval.eval --version {version}{style_flag}")
+    profile_flag = f" --profile {profile}" if profile else ""
+    split_flag = f" --split {args.split}" if args.split != "train" else ""
+    print(f"  Next: python -m annotator.eval.eval --version {version}{profile_flag}{style_flag}{split_flag}")
     print("=" * 60)
 
 

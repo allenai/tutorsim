@@ -105,9 +105,6 @@ Respond with valid JSON only:
 
 ```json
 {
-  "annotation_type": "scaffolding & rigor",
-  "turn_start": {turn_start},
-  "turn_end": {turn_end},
   "situation": "...",
   "action": "...",
   "result": "..."

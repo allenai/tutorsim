@@ -291,7 +291,10 @@ def main():
                         dialogue_only=args.dialogue_only,
                         profile=profile, annotator_style=style,
                         split=args.split)
-    print(f"\nNext: python -m annotator.core.annotate --version {version}")
+    style_flag = f" --annotator-style {style}" if style else ""
+    profile_flag = f" --profile {profile}" if profile else ""
+    split_flag = f" --split {args.split}" if args.split != "train" else ""
+    print(f"\nNext: python -m annotator.core.annotate --version {version}{profile_flag}{style_flag}{split_flag}")
 
 
 if __name__ == "__main__":
