@@ -42,12 +42,18 @@ def _load_ground_truth_train(annotator_style=None):
 # Detection error collection
 # ===================================================================
 
-def collect_detection_errors(version, ann_type, transcripts, limit=10, iou_threshold=0.5, profile=None):
+def collect_detection_errors(version, ann_type, transcripts, limit=10, iou_threshold=0.5, profile=None,
+                             show_human_annotations=True):
     """Collect detection errors and correct matches for comprehensive analysis."""
     gt = _load_ground_truth_train()
 
     profile_suffix = f"_{profile}" if profile else ""
-    candidates = [f"detections{profile_suffix}.json", "detections.json"]
+    candidates = [
+        f"detections{profile_suffix}_{ann_type}.json",
+        f"detections{profile_suffix}.json",
+        f"detections_{ann_type}.json",
+        "detections.json",
+    ]
     det_data = None
     for candidate in candidates:
         det_data = load_annotator_result(version, candidate)
@@ -125,31 +131,35 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10, iou_thres
         c = entry["cluster"]
         det = entry["nearest_det"]
         excerpt = get_excerpt(transcripts, entry["conv_id"], c["turn_start"], c["turn_end"])
-        human_anns = "\n".join(
-            f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
-            for m in c["moments"]
-        )
         det_info = f"LLM: turns {det['turn_start']}-{det['turn_end']}, desc: {det.get('brief_description', '')[:200]}" if det else ""
-        examples.append(
+        block = (
             f"Match {i+1}: Human turns {c['turn_start']}-{c['turn_end']} | {det_info} | IoU={entry['iou']:.2f}\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  Human annotations:\n{human_anns}\n"
         )
+        if show_human_annotations:
+            human_anns = "\n".join(
+                f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
+                for m in c["moments"]
+            )
+            block += f"  Human annotations:\n{human_anns}\n"
+        examples.append(block)
 
     examples.append(f"\n=== COMPLETE MISSES ({len(complete_misses)} total, showing {min(limit, len(complete_misses))}) ===")
     examples.append("These are human-annotated moments the LLM completely missed.\n")
     for i, entry in enumerate(complete_misses[:limit]):
         c = entry["cluster"]
         excerpt = get_excerpt(transcripts, entry["conv_id"], c["turn_start"], c["turn_end"])
-        human_anns = "\n".join(
-            f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
-            for m in c["moments"]
-        )
-        examples.append(
+        block = (
             f"Miss {i+1}: {entry['conv_id'][:50]} turns {c['turn_start']}-{c['turn_end']}\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  Human annotations:\n{human_anns}\n"
         )
+        if show_human_annotations:
+            human_anns = "\n".join(
+                f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
+                for m in c["moments"]
+            )
+            block += f"  Human annotations:\n{human_anns}\n"
+        examples.append(block)
 
     examples.append(f"\n=== NEAR-MISSES ({len(near_misses)} total, showing {min(limit, len(near_misses))}) ===")
     examples.append("LLM detected something nearby but IoU < 0.3 (wrong boundaries).\n")
@@ -157,16 +167,18 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10, iou_thres
         c = entry["cluster"]
         det = entry["nearest_det"]
         excerpt = get_excerpt(transcripts, entry["conv_id"], c["turn_start"], c["turn_end"])
-        human_anns = "\n".join(
-            f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
-            for m in c["moments"]
-        )
         det_info = f"LLM: turns {det['turn_start']}-{det['turn_end']}, desc: {det.get('brief_description', '')[:200]}" if det else "LLM: no nearby detection"
-        examples.append(
+        block = (
             f"Near-miss {i+1}: Human turns {c['turn_start']}-{c['turn_end']} | {det_info} | IoU={entry['iou']:.2f}\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  Human annotations:\n{human_anns}\n"
         )
+        if show_human_annotations:
+            human_anns = "\n".join(
+                f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
+                for m in c["moments"]
+            )
+            block += f"  Human annotations:\n{human_anns}\n"
+        examples.append(block)
 
     examples.append(f"\n=== FALSE POSITIVES ({len(false_positives)} total, showing {min(limit, len(false_positives))}) ===")
     examples.append("LLM detected a moment that doesn't match any human annotation.\n")
@@ -292,14 +304,22 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     else:
         gt = ground_truth
 
-    # Try profile+style-specific, then profile-specific, then style-specific, then baseline
+    # Try per-target first, then combined, then fallbacks
     profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     candidates = [
+        f"annotations_gold{profile_suffix}{style_suffix}_{ann_type}.json",
+        f"annotations_gold{profile_suffix}_{ann_type}.json",
+        f"annotations_gold{style_suffix}_{ann_type}.json",
+        f"annotations_gold_{ann_type}.json",
         f"annotations_gold{profile_suffix}{style_suffix}.json",
         f"annotations_gold{profile_suffix}.json",
         f"annotations_gold{style_suffix}.json",
         "annotations_gold.json",
+        f"annotations{profile_suffix}{style_suffix}_{ann_type}.json",
+        f"annotations{profile_suffix}_{ann_type}.json",
+        f"annotations{style_suffix}_{ann_type}.json",
+        f"annotations_{ann_type}.json",
         f"annotations{profile_suffix}{style_suffix}.json",
         f"annotations{profile_suffix}.json",
         f"annotations{style_suffix}.json",
@@ -566,6 +586,8 @@ def main():
                              "## Annotator Calibration section of the prompt")
     parser.add_argument("--batch-size", type=int, default=100,
                         help="Number of moments per batch for annotation_draft (default: 100)")
+    parser.add_argument("--no-human-annotations", action="store_true",
+                        help="Omit human annotation details from detection error examples")
     args = parser.parse_args()
 
     profile_name = args.profile or load_config().get("profile")
@@ -607,6 +629,7 @@ def main():
         error_examples, stats = collect_detection_errors(
             args.version, args.type, transcripts, limit=args.limit,
             iou_threshold=args.iou_threshold, profile=profile_name,
+            show_human_annotations=not args.no_human_annotations,
         )
         # Load evaluation metrics (eval.py must have been run first)
         eval_metrics = load_eval_metrics(args.version, "detections", ann_type=args.type)

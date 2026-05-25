@@ -1510,7 +1510,8 @@ def main():
 
     compact_output = strip_per_conversation(output)
     style_suffix = f"_{style}" if style else ""
-    eval_filename = f"eval_{args.mode}{style_suffix}.json"
+    split_suffix = f"_{args.split}" if args.split != "train" else ""
+    eval_filename = f"eval_{args.mode}{style_suffix}{split_suffix}.json"
     save_annotator_result(version, eval_filename, compact_output)
     print(f"\nSaved to: {eval_filename} (version: {version})")
 

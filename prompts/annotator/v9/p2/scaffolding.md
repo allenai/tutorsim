@@ -41,7 +41,7 @@ For the flagged moment, provide:
 
 ## Examples
 
-### Example 1: Tutor connects to prior knowledge
+### Output example 1: Tutor connects to prior knowledge
 
 ```json
 {
@@ -54,7 +54,7 @@ For the flagged moment, provide:
 }
 ```
 
-### Example 2: Tutor explains without checking understanding
+### Output example 2: Tutor explains without checking understanding
 
 ```json
 {
@@ -67,7 +67,7 @@ For the flagged moment, provide:
 }
 ```
 
-### Example 3: Tutor doesn't push when student is coasting
+### Output example 3: Tutor doesn't push when student is coasting
 
 ```json
 {
@@ -80,7 +80,7 @@ For the flagged moment, provide:
 }
 ```
 
-### Example 4: Tutor tells the student the answer with incidental correct diagnosis
+### Output example 4: Tutor tells the student the answer with incidental correct diagnosis
 
 ```json
 {

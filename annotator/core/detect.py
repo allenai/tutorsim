@@ -115,7 +115,16 @@ def parse_detection_results(raw_entries: dict) -> dict[str, dict]:
 
         try:
             parsed = json.loads(text)
-            for det in parsed.get("detections", []):
+            # Some models return a bare array instead of {"detections": [...]}
+            detections = parsed if isinstance(parsed, list) else parsed.get("detections", [])
+            for det in detections:
+                # Normalize new compact field names to canonical names
+                if "start" in det and "turn_start" not in det:
+                    det["turn_start"] = det.pop("start")
+                if "end" in det and "turn_end" not in det:
+                    det["turn_end"] = det.pop("end")
+                if "description" in det and "brief_description" not in det:
+                    det["brief_description"] = det.pop("description")
                 det["annotation_type"] = ann_type
                 # Validate and enforce suggested_cut_turn
                 sct = det.get("suggested_cut_turn")

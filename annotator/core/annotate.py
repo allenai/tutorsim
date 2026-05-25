@@ -145,6 +145,7 @@ def load_prompt(version: str, target: str) -> str:
     for ext in ("md", "txt"):
         path = PROMPTS_DIR / version / "p2" / f"{target}.{ext}"
         if path.exists():
+            logger.info("Loaded prompt: %s (%d chars)", path, path.stat().st_size)
             with open(path, "r", encoding="utf-8") as f:
                 return f.read()
     raise FileNotFoundError(

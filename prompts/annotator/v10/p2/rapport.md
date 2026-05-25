@@ -38,7 +38,7 @@ During an appropriate moment for rapport-building, attempting a strategy is nece
 - Effective rapport is bidirectional; one-sided exchanges or monologues are weaker. 
 
 **Timing & Duration**
-When and how long rapport occurs matters as much as the strategy itself:
+How long rapport occurs matters as much as the strategy itself:
 - The beginning of a session is the most natural and expected time for rapport building. Check-ins, personal questions, and warm-up activities belong here.
 - The end of a session is appropriate for reflection, praise, previewing next sessions, and personal conversation. 
 - Natural pauses between problem sets, topics, or activities are good opportunities for brief rapport.
@@ -70,14 +70,13 @@ Examples of moments that are perceived as ineffective:
 ### Calibrating Mixed Assessments
 
 Sometimes evidence is genuinely mixed with competing considerations. Present both sides, acknowledge what worked and what did not, and describe the result as partially effective. Common patterns that provoke mixed assessments include: 
-- The student participates, but gives only minimal responses. Some teachers view any participation as sufficient evidence of effectiveness; others require reciprocal exchange and unprompted elaboration as proof of genuine connection.
-- The tutor may use a sound rapport technique with good intentions, but at a suboptimal moment. Or, they may fail to achieve observable engagement from the student.
-- The tutor may demonstrate one effective element in their actions, but then mishandles the moment or fails to build on it meaningfully.  
-- The student may enjoy a rapport-building interaction and the moment is genuine, but it occurs at the cost of instruction time. 
+- The tutor asks appropriate check-in questions at the right time, but the student responds minimally and the tutor does not adapt or probe further — the intent is right but the execution falls short. A student giving brief or one-word responses does not automatically make a rapport strategy ineffective. Some students are naturally quiet - weigh response patterns in context. A tutor's effort to connect still has value. 
+- The rapport building is warm and genuine, but extends so long that significant instructional time is lost.
+- The tutor demonstrates one effective element (e.g., remembering a prior detail) but then fails to build on it (e.g., spending the moment on logistics instead of connection).
 
-Duration is often the most contentious dimension. Some teachers value extended social conversation when the student is actively engaged and sharing, seeing it as genuine relationship-building. Others see the same conversation as excessive and harmful to learning time. For instance, a 3-5 minute check-in at session start is often standard. When rapport extends well beyond an opening check-in, consider both perspectives: the connection value of a student who is openly sharing versus the instructional cost of time spent away from academic content. A brief off-topic exchange (1–2 minutes) that the tutor navigates back to work is usually positive — it signals that the tutor cares while respecting the session's purpose. 10-15 minutes may be justified if the student is sharing something meaningful and the tutor uses it to deepen the relationship. Also consider cumulative rapport within a session -- if substantial rapport has already been built, additional rapport moves may have diminishing returns and increasing instructional cost.  
+Duration is often the most contentious dimension. Some teachers value extended social conversation when the student is actively engaged and sharing, seeing it as genuine relationship-building. Others see the same conversation as excessive and harmful to learning time. For instance, a 3-5 minute check-in at session start is often standard. When rapport extends well beyond an opening check-in, consider both perspectives: the connection value of a student who is openly sharing versus the instructional cost of time spent away from academic content. A brief off-topic exchange (1–2 minutes) that the tutor navigates back to work is usually positive — it signals that the tutor cares while respecting the session's purpose. 10-15 minutes may be justified if the student is sharing something meaningful and the tutor uses it to deepen the relationship. Also consider cumulative rapport within a session -- if substantial rapport has already been built, additional rapport moves may have diminishing returns and increasing instructional cost. 
 
-Ineffective key moments include missed rapport-building opportunities, rapport-damaging tutor actions, and miscalibrated tutor decisions. Effective key moments are those in which the tutor's strategy was pedagogically sound and well-timed, and the student responds in a way that suggests connection was built. 
+Moments are likely ineffective if they involve a missed opportunity for rapport, or the tutor's approach is counterproductive, or the tutor actively harms the relationship. Moments are likely effective where both the tutor's strategy and the student's response show evidence of genuine connection.
 
 ## Your Task
 
