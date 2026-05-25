@@ -37,7 +37,7 @@ archetype_annotators:
 
 # Annotator pipeline defaults (override any of these with CLI flags)
 annotator:
-  prompt_version: v9           # prompt version for detection + annotation
+  prompt_version: v11          # prompt version for detection + annotation
   labeller: classify_v2        # labeller prompt name (in prompts/annotator/labeller/)
   style: null                  # null = no style. Set to generous/balanced/demanding
   version: null                # null = auto-generate as {profile}_{date}
