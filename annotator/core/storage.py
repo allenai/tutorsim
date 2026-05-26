@@ -17,10 +17,14 @@ Env vars (override config.yaml):
 """
 
 import json
+import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from fnmatch import fnmatch
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -29,6 +33,73 @@ from .config import load_config
 load_dotenv()
 
 REPO_ROOT = Path(__file__).parent.parent.parent
+
+
+def _parse_timestamp_seconds(ts: str) -> float:
+    """Best-effort: turn a timestamp string into seconds.
+
+    Accepts 'MM:SS-MM:SS', 'M:SS', '{seconds}s', or a bare number.
+    Returns 0.0 on any failure so callers don't have to handle malformed data.
+    """
+    if not ts:
+        return 0.0
+    s = ts.strip()
+    # range form: keep only the first half
+    if "-" in s:
+        s = s.split("-", 1)[0].strip()
+    # '123.4s' form
+    if s.endswith("s") and s[:-1].replace(".", "", 1).isdigit():
+        try:
+            return float(s[:-1])
+        except ValueError:
+            return 0.0
+    # 'MM:SS' or 'HH:MM:SS' form
+    if ":" in s:
+        parts = s.split(":")
+        try:
+            nums = [float(p) for p in parts]
+        except ValueError:
+            return 0.0
+        # MM:SS -> 60*M + S; HH:MM:SS -> 3600*H + 60*M + S
+        if len(nums) == 2:
+            return nums[0] * 60 + nums[1]
+        if len(nums) == 3:
+            return nums[0] * 3600 + nums[1] * 60 + nums[2]
+        return 0.0
+    # bare number
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+_UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
+_CONV_ID_PREFIX_RE = re.compile(r"^\d{4}-t\d+_\d{4}-s\d+_")
+
+
+def _conv_id_to_uuid(conv_id: str) -> str:
+    """Extract the UUID component from a full conv_id.
+
+    Accepts bare UUIDs (returned as-is) and full conv_ids like
+    '2024-tN_2024-sN_099bf759-...' (UUID extracted).
+    """
+    m = _UUID_RE.search(conv_id)
+    if m:
+        return m.group(0)
+    # Strip '{year-tN}_{year-sN}_' prefix if present (handles shortened test UUIDs)
+    stripped = _CONV_ID_PREFIX_RE.sub("", conv_id)
+    if stripped != conv_id:
+        return stripped
+    return conv_id
+
+
+def _annotate_turns_with_start_seconds(conv: dict) -> dict:
+    """Add a start_seconds float to each turn if missing. Mutates and returns conv."""
+    for turn in conv.get("turns", []):
+        if "start_seconds" not in turn:
+            turn["start_seconds"] = _parse_timestamp_seconds(turn.get("timestamp", ""))
+    return conv
+
 
 _cache: dict[str, object] = {}
 _jsonl_indexes: dict[str, dict[str, dict]] = {}  # path -> {conv_id: transformed_record}
@@ -119,6 +190,15 @@ class StorageBackend(ABC):
     @abstractmethod
     def get_local_path(self, rel_path: str) -> Path: ...
 
+    @abstractmethod
+    def read_bytes(self, rel_path: str) -> bytes: ...
+
+    @abstractmethod
+    def write_bytes(self, rel_path: str, data: bytes) -> None: ...
+
+    @abstractmethod
+    def get_presigned_url(self, rel_path: str, expires_seconds: int = 172800) -> str: ...
+
 
 class LocalBackend(StorageBackend):
     def __init__(self, root: Path):
@@ -159,6 +239,25 @@ class LocalBackend(StorageBackend):
         else:
             path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def read_bytes(self, rel_path: str) -> bytes:
+        path = self.root / rel_path
+        if not path.exists():
+            raise FileNotFoundError(f"Not found: {path}")
+        with open(path, "rb") as f:
+            return f.read()
+
+    def write_bytes(self, rel_path: str, data: bytes) -> None:
+        path = self.root / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "wb") as f:
+            f.write(data)
+        os.replace(tmp_path, path)
+
+    def get_presigned_url(self, rel_path: str, expires_seconds: int = 172800) -> str:
+        path = (self.root / rel_path).resolve()
+        return path.as_uri()
 
 
 class S3Backend(StorageBackend):
@@ -225,6 +324,25 @@ class S3Backend(StorageBackend):
             "Use read_json/write_json for data access."
         )
 
+    def read_bytes(self, rel_path: str) -> bytes:
+        key = self._key(rel_path)
+        try:
+            resp = self.client.get_object(Bucket=self.bucket, Key=key)
+            return resp["Body"].read()
+        except self.client.exceptions.NoSuchKey:
+            raise FileNotFoundError(f"s3://{self.bucket}/{key}")
+
+    def write_bytes(self, rel_path: str, data: bytes) -> None:
+        key = self._key(rel_path)
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=data)
+
+    def get_presigned_url(self, rel_path: str, expires_seconds: int = 172800) -> str:
+        return self.client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": self.bucket, "Key": self._key(rel_path)},
+            ExpiresIn=expires_seconds,
+        )
+
 
 # ===================================================================
 # Singleton backend instance
@@ -286,11 +404,13 @@ def _transform_normalized_record(rec: dict) -> dict:
             text = f"[{etype}: {label}]"
         if content:
             text = f"{text} {content}"
+        ss = float(e.get("start_seconds", 0) or 0)
         entry = {
             "role": "TUTOR",
             "text": text,
             "type": etype,
-            "timestamp": f"{e.get('start_seconds', 0)}s",
+            "timestamp": f"{ss}s",
+            "start_seconds": ss,
             "is_enrichment": True,
         }
         before = e.get("before_turn") or 1  # None/0 → before turn 1
@@ -305,12 +425,14 @@ def _transform_normalized_record(rec: dict) -> dict:
         turn_num = t["turn_number"]
         for e_entry in enrichments_by_turn.get(turn_num, []):
             final_turns.append({**e_entry, "turn_number": turn_num})
+        ss = float(t.get("start_seconds", 0) or 0)
         final_turns.append({
             "turn_number": turn_num,
             "role": t["role"].upper(),
             "text": t["text"],
             "type": "DIALOGUE",
-            "timestamp": f"{t.get('start_seconds', 0)}s",
+            "timestamp": f"{ss}s",
+            "start_seconds": ss,
             "is_enrichment": False,
         })
     for e_entry in trailing_enrichments:
@@ -347,7 +469,7 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
         return _jsonl_indexes[path]
 
     be = _get_backend()
-    print(f"Loading JSONL transcript index from {path}...")
+    logger.info("Loading JSONL transcript index from %s...", path)
 
     import io
 
@@ -371,10 +493,10 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
                 resp = s3_client.get_object(Bucket=bucket, Key=key)
                 stream = io.TextIOWrapper(resp["Body"], encoding="utf-8")
             except Exception as e:
-                print(f"  Failed to load JSONL from S3: {e}")
+                logger.warning("Failed to load JSONL from S3: %s", e)
 
     if stream is None:
-        print(f"  JSONL file not found: {path}")
+        logger.warning("JSONL file not found: %s", path)
         _jsonl_indexes[path] = {}
         return {}
 
@@ -395,7 +517,7 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
     finally:
         stream.close()
 
-    print(f"  Indexed {len(index)} transcripts ({errors} parse errors)")
+    logger.info("Indexed %d transcripts (%d parse errors)", len(index), errors)
     _jsonl_indexes[path] = index
     return index
 
@@ -406,35 +528,38 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
 
 def load_transcript(conv_id: str) -> dict | None:
     """Load a single transcript JSON by conversation ID.
-    Searches all configured transcript paths. Supports JSONL sources."""
+    Searches all configured transcript paths. Supports JSONL sources.
+    Adds start_seconds to each turn if missing."""
     be = _get_backend()
     for rel_path in _get_path_list("transcripts"):
         if rel_path.endswith(".jsonl"):
             index = _load_jsonl_index(rel_path)
             if conv_id in index:
-                return index[conv_id]
+                return _annotate_turns_with_start_seconds(index[conv_id])
         else:
             data = be.read_json(f"{rel_path}/{conv_id}.json")
             if data is not None:
-                return data
+                return _annotate_turns_with_start_seconds(data)
     return None
 
 
 def load_all_transcripts() -> dict[str, dict]:
     """Load all transcripts from all configured transcript paths, merged into one pool.
-    Returns {conv_id: conversation_dict}. Supports JSONL sources."""
+    Returns {conv_id: conversation_dict}. Supports JSONL sources.
+    Adds start_seconds to each turn if missing."""
     be = _get_backend()
     transcripts = {}
     for rel_path in _get_path_list("transcripts"):
         if rel_path.endswith(".jsonl"):
-            transcripts.update(_load_jsonl_index(rel_path))
+            for conv_id, conv in _load_jsonl_index(rel_path).items():
+                transcripts[conv_id] = _annotate_turns_with_start_seconds(conv)
         else:
             for fname in be.list_files(rel_path):
                 data = be.read_json(f"{rel_path}/{fname}")
                 if data and "conversation_id" in data:
-                    transcripts[data["conversation_id"]] = data
+                    transcripts[data["conversation_id"]] = _annotate_turns_with_start_seconds(data)
                 elif data:
-                    transcripts[fname.replace(".json", "")] = data
+                    transcripts[fname.replace(".json", "")] = _annotate_turns_with_start_seconds(data)
     return transcripts
 
 
@@ -519,6 +644,135 @@ def get_annotator_result_path(version: str, filename: str = "") -> Path:
 
 
 # ===================================================================
+# Public API -- Annotator shards (incremental per-conv writes)
+# ===================================================================
+#
+# Shards live under results/annotator/{version}/shards/{basename}/{conv_id}.json
+# where `basename` is the output filename without extension (e.g. "detections",
+# "annotations", "annotations_generous"). Each shard stores the per-conv slice
+# of what would otherwise be inside the monolithic output's `results` dict.
+#
+# This enables Ctrl-C resume: a re-run skips conv_ids that already have shards
+# and only sends the remaining work to the model.
+
+def _ann_shard_dir(version: str, basename: str) -> str:
+    base = _get_result_path("annotator_results")
+    return f"{base}/{version}/shards/{basename}"
+
+
+def save_annotator_shard(version: str, basename: str, conv_id: str, data: dict) -> None:
+    """Write one conv's slice to its own file. Called incrementally as results parse."""
+    rel = f"{_ann_shard_dir(version, basename)}/{conv_id}.json"
+    _get_backend().write_json(rel, data)
+
+
+def list_annotator_shard_ids(version: str, basename: str) -> list[str]:
+    """Return conv_ids that already have a shard for (version, basename)."""
+    files = _get_backend().list_files(_ann_shard_dir(version, basename))
+    return sorted(f[:-5] for f in files if f.endswith(".json"))
+
+
+def load_annotator_shards(version: str, basename: str) -> dict[str, dict]:
+    """Load every shard for (version, basename) as {conv_id: data}."""
+    be = _get_backend()
+    shard_dir = _ann_shard_dir(version, basename)
+    out = {}
+    for fname in be.list_files(shard_dir):
+        if not fname.endswith(".json"):
+            continue
+        conv_id = fname[:-5]
+        data = be.read_json(f"{shard_dir}/{fname}")
+        if data is not None:
+            out[conv_id] = data
+    return out
+
+
+# ===================================================================
+# Public API -- In-flight batch sidecars (ctrl-C resume during poll)
+# ===================================================================
+#
+# When a batch is submitted to a provider, the batch keeps running server-side
+# even if our process exits. We persist the provider's batch ID to a sidecar
+# at results/annotator/{version}/in_flight_{basename}.json BEFORE entering the
+# poll loop, so a re-run after ctrl-C can resume polling on the same batch
+# instead of re-submitting and double-charging compute.
+#
+# The sidecar is deleted only after the batch's results are successfully
+# parsed and sharded.
+
+def _inflight_rel(version: str, basename: str) -> str:
+    # Subdirectory keeps the sidecar out of list_annotator_result_files results.
+    base = _get_result_path("annotator_results")
+    return f"{base}/{version}/in_flight/{basename}.json"
+
+
+def save_inflight_batch(version: str, basename: str, data: dict) -> None:
+    """Record an in-flight batch's metadata. Expected keys:
+    provider, model, batch_id, n_entries, display_name, submitted_at."""
+    _get_backend().write_json(_inflight_rel(version, basename), data)
+
+
+def load_inflight_batch(version: str, basename: str) -> dict | None:
+    """Return the recorded in-flight batch metadata, or None if no batch is in flight."""
+    return _get_backend().read_json(_inflight_rel(version, basename))
+
+
+def clear_inflight_batch(version: str, basename: str) -> None:
+    """Delete the in-flight sidecar after a batch completes successfully."""
+    be = _get_backend()
+    rel = _inflight_rel(version, basename)
+    if isinstance(be, LocalBackend):
+        path = be.root / rel
+        if path.exists():
+            path.unlink()
+    else:
+        try:
+            be.client.delete_object(Bucket=be.bucket, Key=be._key(rel))
+        except Exception:
+            pass
+
+
+# ===================================================================
+# Public API -- Benchmark in-flight batch sidecars (per profile + style)
+# ===================================================================
+#
+# Mirrors the annotator sidecar helpers above, but namespaced under
+# results/benchmark/{version}/in_flight/{profile}_{style}.json so each
+# (tutor profile, annotator style) batch tracks independently.
+
+def _bench_inflight_rel(version: str, profile: str, style: str) -> str:
+    base = _get_result_path("benchmark_results")
+    return f"{base}/{version}/in_flight/{profile}_{style}.json"
+
+
+def save_benchmark_inflight_batch(version: str, profile: str, style: str,
+                                   data: dict) -> None:
+    """Record an in-flight benchmark annotation batch's metadata."""
+    _get_backend().write_json(_bench_inflight_rel(version, profile, style), data)
+
+
+def load_benchmark_inflight_batch(version: str, profile: str,
+                                   style: str) -> dict | None:
+    """Return the recorded in-flight benchmark batch metadata, or None."""
+    return _get_backend().read_json(_bench_inflight_rel(version, profile, style))
+
+
+def clear_benchmark_inflight_batch(version: str, profile: str, style: str) -> None:
+    """Delete the benchmark in-flight sidecar after a batch completes."""
+    be = _get_backend()
+    rel = _bench_inflight_rel(version, profile, style)
+    if isinstance(be, LocalBackend):
+        path = be.root / rel
+        if path.exists():
+            path.unlink()
+    else:
+        try:
+            be.client.delete_object(Bucket=be.bucket, Key=be._key(rel))
+        except Exception:
+            pass
+
+
+# ===================================================================
 # Public API -- Results (benchmark)
 # ===================================================================
 
@@ -548,3 +802,66 @@ def list_benchmark_result_files(version: str, *prefix_parts: str) -> list[str]:
 def get_benchmark_result_path(version: str, *path_parts: str) -> Path:
     """Get the local Path for a benchmark result (for local backend only)."""
     return _get_backend().get_local_path(_bench_rel(version, *path_parts))
+
+
+# ===================================================================
+# Public API -- Screenshots
+# ===================================================================
+
+def _screenshot_root() -> str:
+    """Return the configured screenshots prefix (e.g. 'deidentified/screenshots')."""
+    paths = _get_path_list("screenshots")
+    if not paths:
+        return "deidentified/screenshots"
+    return paths[0]
+
+
+def _screenshot_rel_path(conv_id: str, filename: str) -> str:
+    return f"{_screenshot_root()}/{_conv_id_to_uuid(conv_id)}/{filename}"
+
+
+def list_screenshots(conv_id: str) -> list[str]:
+    """Return screenshot filenames for a conversation, sorted.
+
+    Returns [] if the conversation has no screenshots. Skips the _metadata.json
+    sidecar and any non-image entries.
+    """
+    be = _get_backend()
+    uuid = _conv_id_to_uuid(conv_id)
+    prefix = f"{_screenshot_root()}/{uuid}"
+
+    if isinstance(be, LocalBackend):
+        directory = be.root / prefix
+        if not directory.exists():
+            return []
+        names = [p.name for p in directory.iterdir() if p.is_file()]
+    else:
+        # S3: use a dedicated listing since list_files is json-only
+        prefix_key = be._key(prefix.rstrip("/") + "/")
+        names = []
+        paginator = be.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=be.bucket, Prefix=prefix_key):
+            for obj in page.get("Contents", []):
+                names.append(obj["Key"].rsplit("/", 1)[-1])
+
+    return sorted(
+        n for n in names
+        if not n.startswith("_") and n.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+    )
+
+
+def load_screenshot_bytes(conv_id: str, filename: str) -> bytes:
+    return _get_backend().read_bytes(_screenshot_rel_path(conv_id, filename))
+
+
+def get_screenshot_uri(conv_id: str, filename: str) -> str:
+    return _get_backend().get_presigned_url(_screenshot_rel_path(conv_id, filename))
+
+
+def load_screenshot_verification(conv_id: str) -> dict:
+    """Read _metadata.json for a conv. Returns {} if absent."""
+    be = _get_backend()
+    uuid = _conv_id_to_uuid(conv_id)
+    rel = f"{_screenshot_root()}/{uuid}/_metadata.json"
+    data = be.read_json(rel)
+    return data or {}

@@ -4,10 +4,16 @@ Index of planned work and change log for the project. Plans live in this directo
 
 ## Plans
 
+### 2026-05-20 — [Labeller validation](2026-05-20-labeller-validation.md)
+
+**Goal**: The EC2 validation app has been collecting human ratings on SAR annotations (~490 done ratings from 4 reviewers). This is ground truth for the labeller itself. Use it to measure the current labeller honestly, then iterate.
+**Status**: Shipped. Per-type routed labeller is the new active configuration.
+**Result**: v2 split (343 train / 147 test, stratified). Tried four prompt variants -- rule refinements (regressed), 4 hand-picked examples (kappa 0.741), full-data meta-prompt with my priming (0.739), full-data meta-prompt with no priming (0.741). All single-prompt routes plateau at ~0.74 due to inter-rater inconsistency on scaffolding's "worked + improvement note" pattern. Per-type routing (v2 for scaffolding, v6 for rapport) lifts test kappa **0.725 -> 0.782 with no binary regression** (still 0.796). Rapport kappa lifts +0.111 (0.664 -> 0.775); scaffolding kappa unchanged at 0.783. Shipped as a dict-valued `annotator.labeller` config; same routing wired into `build_ground_truth.py --labeller hybrid`.
+
 ### 2026-03-26 — [Factor IV storage refactor](2026-03-26-factor-iv-storage-refactor.md)
 
 **Goal**: The same pipeline needs to run on a laptop against local files and in production against S3. Before this, `if backend == "s3"` branching was smeared through the storage layer and paths were hardcoded — swapping environments required code edits.
-**Status**: Implemented; S3 end-to-end still blocked on AWS credentials from IT + cross-account bucket policy from Ai2.
+**Status**: Implemented. S3 access is unblocked as of 2026-04-28 — `aws sts get-caller-identity` works locally via the boto3 default credential chain, and `s3://kylel-alexisr-edu/` is reachable. Earlier "blocked on IT credentials" status no longer applies.
 **Result**: `StorageBackend` ABC with `LocalBackend` and `S3Backend` implementations, singleton delegate, zero branching. Every path (transcripts, ground truth, results) is overridable via env var. `STORAGE_BACKEND=local|s3` flips environments without touching code or config files. 13 tests (11 local, 2 with moto) passing.
 
 ### 2026-04-17 — [Codebase cleanup & CLI simplification](2026-04-17-codebase-cleanup.md)
@@ -36,9 +42,75 @@ Index of planned work and change log for the project. Plans live in this directo
 
 **Follow-ups**: migrate remaining prints incrementally; add `--log-level` CLI flag if useful; upload `run.log` to S3 results dir at end-of-run when `STORAGE_BACKEND=s3`.
 
+### 2026-04-28 — [Benchmark screenshot ingestion](2026-04-28-benchmark-screenshots.md)
+
+**Goal**: The annotator side supported `--with-screenshots` (delivered 2026-04-24) but the benchmark didn't thread it through any phase. AI tutors were being graded text-only while the same human-tutor moments could be graded with full visual context — apples-to-oranges. Wire screenshots into Step 0 (detection), Phase 1 (tutor + synthetic student exchange), and Phase 2 (annotation) so the benchmark measures what the annotator was upgraded to measure.
+**Status**: Implemented (code + tests + smoke), validation blocked on data.
+**Result**: `build_analysis_entries` and `build_detection_entries` accept optional `screenshots_by_conv` so callers can inject pre-loaded screenshots keyed by any id (decouples lookup from use, fixing the conv_id -> scenario_id remap blocker). Bridge loads per-scenario screenshots using `scenario.conv_id` and passes them keyed by `scenario_id`. Phase 1 exchange attaches images filtered to `anchor_turn <= cut_turn` to both tutor and student in sync + batch modes. Vision validation runs once at run start. 6 new tests covering all three integration points. **End-to-end validation blocked**: S3's `deidentified/screenshots/` has 3 conv UUIDs that have no matching transcripts anywhere accessible — every smoke run currently degrades to text-only because the loader honestly returns `[]` for every conv. Code is correct and unit-tested; real-data verification awaits the deidentification pipeline producing transcripts paired with screenshot UUIDs.
+
+### 2026-04-28 — [Benchmark production readiness](2026-04-28-benchmark-production-readiness.md)
+
+**Goal**: The benchmark pipeline lags behind the annotator on operational basics — Phase 2 has no resume, no in-flight batch sidecar, prints instead of logger, dead `annotate_exchange` code, vestigial `"annotator_profiles"` config branch, and auto-generated versions that flip across midnight. A long batch run can lose hours of work to a single ctrl-C. Bring benchmark up to the same floor as the annotator pipeline before attempting the first full run.
+**Status**: Implemented and smoke-verified.
+**Result**: Phase 2 resumable via shard pre-filter + per-(profile, style) in-flight sidecar (mirrors `annotator/core/annotate.py:313-402`). Stable version pointer at `_active_runs/{profile}.json` survives midnight resumes. ~35 `print()` calls migrated to structured logger; ~67 LOC of dead `annotate_exchange` and vestigial config branches removed. Smoke test verified resume in three modes: full cache hit (7s, no API), partial recovery (delete one shard, only that one re-runs), first run (18 min for 2 scenarios sync). Plus a latent config-mutation bug fixed in `get_benchmark_config` (added `deepcopy`). 5 new tests covering sidecar + bridge wiring.
+
+### 2026-04-24 — [Screenshot enrichment](2026-04-24-screenshot-enrichment.md) · [spec](specs/2026-04-24-screenshot-enrichment-design.md)
+
+**Goal**: Detection and annotation judge pedagogy from text alone, but transcripts often contain bare `[SCREEN UPDATE]` placeholders or narration-only enrichment turns. When a tutor says "look at this" or a student reacts to something visual, the pipeline is missing real context. Screenshots already exist on S3; wire them into the prompt path for the annotator pipeline only (benchmark stages stay text-only this iteration).
+**Status**: Implemented (PR #7, opt-in via `--with-screenshots`); not yet evaluated at scale.
+**Result**: New `annotator/core/screenshots.py` anchors each image to the latest transcript turn whose `start_seconds <= image timestamp`. `ModelClient.generate` and `build_batch_entry` accept `images=[storage_path, ...]` and resolve per-provider (base64 inline for local/Gemini, presigned URL for S3 + Anthropic/OpenAI). `[SCREEN @ turn N: image K]` markers in the rendered transcript drive content interleaving so each image lands next to its anchor turn instead of at the end. Default off everywhere -- existing runs are byte-for-byte unchanged. Anthropic prompt caching is enabled by default for annotation runs to amortize images that repeat across overlapping excerpt windows.
+
 ## Change log
 
 Reverse chronological. Stuff that shipped but didn't have a dedicated plan file, or non-obvious deltas worth recording.
+
+### 2026-04-27: Per-conv resume + finish-the-print-migration
+
+**Problem**: Long batch runs had no recovery point — a Ctrl-C or crash threw away every result that had already streamed back from the provider, and ~50 `print()` calls across `annotator/{core,run.py}` were still bypassing the shared logging infra, so structured `logs/{version}/run.log` artifacts only captured a fraction of what actually happened during a run.
+
+**Changes (resume)**:
+- New `save_annotator_shard` / `list_annotator_shard_ids` / `load_annotator_shards` in `annotator/core/storage.py`. Shards live at `results/annotator/{version}/shards/{basename}/{conv_id}.json`. `basename` is the resolved output filename without `.json` (e.g. `detections`, `annotations_generous`, `annotations_gold`), so each profile/source variant gets its own namespace.
+- `run_detect` and `run_annotate` now pre-filter conv_ids that already have a shard for the same `(version, basename)` and only send the remainder to the model. Per-conv shards are written as soon as `parse_*_results` produces them; the monolithic `detections.json` / `annotations*.json` is then assembled from the union of all shards on disk.
+- `parse_detection_results` records `images_attached` (sum across targets, == API attachments) alongside `images_seen` (per-conv max, == unique images). The aggregate `total_images_sent` is computed from `images_attached` so the metric holds across multi-run aggregation.
+- Caveat: in batch mode, Ctrl-C *during polling* abandons the in-flight provider batch — that compute is lost, but no on-disk state is corrupted. A re-run starts a fresh, smaller batch with only the un-sharded conv_ids.
+
+**Changes (logging)**:
+- `client.py`, `storage.py`, `label.py`, `config.py`, `detect.py`, `run.py` now declare a module-level `logger = logging.getLogger(__name__)`. All non-docstring `print()` calls are migrated.
+- Per-entry chatter (sync `[N/total]` progress, batch poll status) drops to `logger.debug` — gone from default INFO terminals, opt-in via `LOG_LEVEL=DEBUG`. Lifecycle events (uploaded, batch created, finished, downloading) stay at `logger.info`. Retries are `warning`; terminal failures are `error`.
+- `run.py` banner separators (`'=' * 60` between passes) collapse to single `logger.info("=== PASS N: ... ===")` lines — the file handler's timestamp + module already provide structure.
+- The two `print()` calls in `client.py`'s module docstring stay; they're code examples, not runtime output.
+
+**Coverage**: 4 new shard-helper tests in `test_storage.py`, 1 new test in `test_detect_parse.py` for the `images_seen` / `images_attached` distinction. All 149 tests pass.
+
+### 2026-04-27: Logger format string -- em-dash to pipe
+
+**Problem**: `common/logging_setup.py` `_FORMAT` used a U+2014 em-dash separator (`name — message`). Project memory explicitly flags this: Windows cp1252 stderr can mojibake or raise `UnicodeEncodeError`, and the file handler/stream handler don't necessarily share encoding. Pre-existing in the shared-logging plan; flagged after a code review of the screenshot-enrichment PR routed more traffic through the format.
+
+**Change**: One-character format-string update -- `—` to `|`. File-handler output (utf-8) is unaffected; stderr handler output now stays inside the cp1252 subset on Windows. Per the project's "log format = public contract" rule, this is recorded here so anyone parsing log lines knows the separator changed.
+
+### 2026-04-27: Real ctrl-C resume -- per-conv sync checkpoint + batch-ID persistence
+
+**Problem**: The first cut of "ctrl-C resume" only worked across *completed* runs -- shards were only written after `run_sync_entries` / `run_batch` returned, so a ctrl-C in the middle of either lost everything for that run. The original ask was "if I ctrl-C and start again, it'll start where it left off," which the previous implementation did not actually deliver in practice.
+
+**Changes (sync mode)**:
+- `run_detect` and `run_annotate` now group entries by `conv_id` and call `run_sync_entries` per conv, sharding after each conv's entries return. A ctrl-C between convs leaves a clean per-conv checkpoint on disk; the next run skips already-sharded convs and picks up at the next un-sharded one.
+
+**Changes (batch mode)**:
+- New `save_inflight_batch` / `load_inflight_batch` / `clear_inflight_batch` helpers in `storage.py`. Sidecar lives at `results/annotator/{version}/in_flight/{basename}.json` (subdir keeps it out of `list_annotator_result_files`).
+- `run_batch` and the three provider runners (Gemini, OpenAI, Anthropic) accept `existing_batch_id` (skip submission, retrieve and continue polling) and `on_batch_created` (called with the new batch id immediately after submission so the orchestrator can persist it before the poll loop starts).
+- `run_detect` / `run_annotate` check the sidecar before submitting. They hash the current entries' keys against `entry_keys_hash` recorded at submission. Match -> resume polling on the saved batch id, no double-submit. Mismatch (user changed conv set between runs) -> error loudly with instructions to delete the sidecar.
+- After successful parse + shard write, the sidecar is cleared.
+- Anthropic-specific: `id_to_key` short-id mapping is rebuilt deterministically from `entries` order on resume; the entry-keys hash check guarantees the input is the same, so we don't need to persist the mapping itself.
+
+**Coverage**: 3 sidecar lifecycle tests in `test_storage.py`. End-to-end ctrl-C smoke run in sync mode against `claude-opus-4-6` (test=2 convs, ctrl-C between convs, re-run completes from conv 2). All 152 tests pass.
+
+**Caveat**: changing the conv set between runs (adding/removing transcripts, switching `--with-screenshots`) shifts entry indices and produces an `entry_keys_hash` mismatch -- the resume aborts loudly rather than silently mis-mapping results. The fix is documented at the error site.
+
+### 2026-04-27: Annotator per-pass CLIs now call `setup_logging()`
+
+**Problem**: After migrating prints in `detect.py` / `annotate.py` / `label.py` to `logger.info(...)`, INFO records emitted by these modules vanished when invoked directly via `python -m annotator.core.detect` (and the equivalents). Python doesn't run `annotator/__main__.py` for dotted module targets, so the only `setup_logging()` call upstream of those CLIs (`__main__.py`) never executed -- the root logger had no handlers and INFO propagated to the stdlib `lastResort` handler at WARNING-level.
+
+**Change**: `setup_logging(version=version)` is now called in each per-pass `main()` immediately after `resolve_run_params`. Append-mode file handler means a per-pass invocation appends to the same `logs/{version}/run.log` the unified runner uses, so a workflow of `python -m annotator.core.detect` followed by `python -m annotator.core.annotate` produces a single coherent log file. The review-patterns skill checklist was updated to reflect this expanded entry-point list.
 
 ### 2026-04-17: Labeller V2 — Unified Prompt + Outcome-Anchored Criteria
 
@@ -127,7 +199,7 @@ Key changes:
 - **dotenv**: storage.py loads `.env` so env vars work without explicit export
 - `.env.example` created documenting all env vars
 
-Blocked on S3 testing: need AWS access keys from IT admin + cross-account bucket policy from Ai2.
+S3 access verified working 2026-04-28 (boto3 default credential chain + bucket `kylel-alexisr-edu`). The earlier "blocked on IT credentials" line was stale.
 
 ### 2026-03-26: Benchmark Decoupled from Ground Truth
 

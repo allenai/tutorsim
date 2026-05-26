@@ -1,9 +1,12 @@
 """Scenario extraction: cut real transcripts at detected key moments."""
 
 import json
+import logging
 import random
 from dataclasses import dataclass, asdict
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from annotator.core.utils import (
     load_transcripts, format_transcript, EXAMPLE_CONV_IDS,
@@ -190,7 +193,7 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
             'detected', raises an error.
     """
     transcripts = load_transcripts()
-    print(f"Loaded {len(transcripts)} transcripts")
+    logger.info("Loaded %d transcripts", len(transcripts))
     if not transcripts:
         raise FileNotFoundError(
             "No transcripts found. Ensure data/transcripts/ contains JSON files, "
@@ -210,7 +213,7 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
                 "Run detection first or set mode='random'."
             )
         det_scenarios = extract_detected_scenarios(transcripts, detections_by_conv)
-        print(f"Detected scenarios: {len(det_scenarios)}")
+        logger.info("Detected scenarios: %d", len(det_scenarios))
         scenarios.extend(det_scenarios)
 
     if mode in ("random", "both"):
@@ -218,7 +221,7 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
         seed = config.get("random_seed", 42)
         min_turn = config.get("min_turn", 10)
         rnd_scenarios = extract_random_scenarios(transcripts, count, seed, min_turn)
-        print(f"Random scenarios: {len(rnd_scenarios)}")
+        logger.info("Random scenarios: %d", len(rnd_scenarios))
         scenarios.extend(rnd_scenarios)
 
     if max_per_conv > 0:
@@ -226,10 +229,10 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
         scenarios = _sample_per_conversation(
             scenarios, max_per_conv, seed=config.get("random_seed", 42),
         )
-        print(f"Sampled {max_per_conv}/conv: {before} -> {len(scenarios)} scenarios")
+        logger.info("Sampled %d/conv: %d -> %d scenarios", max_per_conv, before, len(scenarios))
 
     if max_scenarios > 0:
         scenarios = scenarios[:max_scenarios]
 
-    print(f"Total scenarios: {len(scenarios)}")
+    logger.info("Total scenarios: %d", len(scenarios))
     return scenarios

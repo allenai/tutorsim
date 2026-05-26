@@ -1,25 +1,18 @@
 """Bridge to the synthetic annotator pipeline.
 
 Constructs in-memory transcripts and detections from benchmark exchanges,
-then calls the existing annotation and labeling functions directly.
-
-Supports two modes:
-- Per-scenario (sync): annotate_exchange() for one scenario at a time
-- Bulk (batch): prepare_bulk_entries() + execute_bulk() + finalize_bulk()
-  for efficient batch API usage across many scenarios
+then calls the existing annotation and labeling functions in bulk mode.
 """
-
-import json
-from pathlib import Path
 
 from annotator.core.annotate import (
     build_analysis_entries, parse_and_merge,
 )
 from annotator.core.client import (
-    ModelClient, build_batch_entry, run_sync_entries, run_batch,
+    ModelClient, run_sync_entries, run_batch,
 )
 from annotator.core.label import run_label
 from annotator.core.config import get_phase_config
+from annotator.core.screenshots import load_anchored_screenshots
 
 from .scenarios import Scenario
 from .exchange import Exchange
@@ -116,65 +109,6 @@ def build_synthetic_detections(scenario: Scenario, exchange: Exchange) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Per-scenario mode (sync)
-# ---------------------------------------------------------------------------
-
-def annotate_exchange(
-    exchange: Exchange,
-    scenario: Scenario,
-    annotator_style: str,
-    prompt_version: str,
-    annotator_profile: str,
-    context_window: int = 20,
-    mode: str = "sync",
-) -> dict | None:
-    """Run the synthetic annotator on a single exchange. Returns labeled annotations."""
-    synth_conv = build_synthetic_conversation(scenario, exchange)
-    detections = build_synthetic_detections(scenario, exchange)
-
-    if not detections:
-        return None
-
-    # Remap conv_id -> scenario_id for consistency with bulk mode
-    remapped_conv = dict(synth_conv)
-    remapped_conv["conversation_id"] = scenario.scenario_id
-    conversations_map = {scenario.scenario_id: remapped_conv}
-    remapped_detections = {
-        scenario.scenario_id: detections[scenario.conv_id]
-    }
-
-    entries = build_analysis_entries(
-        remapped_detections, conversations_map, context_window, prompt_version,
-        annotator_style=annotator_style,
-    )
-    if not entries:
-        return None
-
-    annotate_cfg = get_phase_config("annotate", annotator_profile)
-    client = ModelClient(annotate_cfg["model"])
-
-    if mode == "batch":
-        raw = run_batch(client, entries, display_name="benchmark_annotate",
-                        poll_interval=annotate_cfg["poll_interval"])
-    else:
-        raw = run_sync_entries(client, entries)
-
-    results = parse_and_merge(raw, remapped_detections)
-
-    annotations_data = {
-        "version": "benchmark", "model": annotate_cfg["model"],
-        "source": "benchmark_exchange", "annotator_style": annotator_style,
-        "results": results,
-    }
-
-    label_cfg = get_phase_config("label", annotator_profile)
-    return run_label(
-        version="benchmark", model=label_cfg["model"],
-        mode=mode, phase_cfg=label_cfg, annotations_data=annotations_data,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Bulk mode (batch API across many scenarios)
 # ---------------------------------------------------------------------------
 
@@ -184,11 +118,17 @@ def prepare_bulk_entries(
     annotator_style: str,
     prompt_version: str,
     context_window: int = 20,
+    with_screenshots: bool = False,
 ) -> tuple[list[dict], dict, dict]:
     """Prepare annotation entries for many scenarios at once.
 
     Since different scenarios may share the same conv_id, we use
     scenario_id as a namespace prefix in batch keys to keep them unique.
+
+    When with_screenshots=True, loads anchored screenshots for each scenario
+    using the *original* scenario.conv_id (not the remapped scenario_id) and
+    passes them to build_analysis_entries via screenshots_by_conv keyed on
+    scenario_id so the function's iteration matches.
 
     Returns:
         entries: List of batch entries ready for run_batch/run_sync_entries
@@ -198,6 +138,9 @@ def prepare_bulk_entries(
     all_entries = []
     all_detections = {}
     all_conversations = {}
+    screenshots_by_conv: dict[str, list[dict]] | None = (
+        {} if with_screenshots else None
+    )
 
     for scenario in scenarios:
         exchange = exchanges.get(scenario.scenario_id)
@@ -219,10 +162,18 @@ def prepare_bulk_entries(
             scenario.scenario_id: detections[scenario.conv_id]
         }
 
+        if with_screenshots:
+            scenario_screenshots = load_anchored_screenshots(
+                scenario.conv_id, synth_conv["turns"],
+            )
+            screenshots_by_conv[scenario.scenario_id] = scenario_screenshots
+
         entries = build_analysis_entries(
             remapped_detections, remapped_conversations,
             context_window, prompt_version,
             annotator_style=annotator_style,
+            with_screenshots=with_screenshots,
+            screenshots_by_conv=screenshots_by_conv,
         )
 
         all_entries.extend(entries)
@@ -237,8 +188,15 @@ def execute_and_parse_bulk(
     all_detections: dict,
     annotator_profile: str,
     mode: str = "batch",
+    existing_batch_id: str | None = None,
+    on_batch_created: callable = None,
 ) -> dict[str, dict]:
     """Execute bulk entries and parse results back to per-scenario annotations.
+
+    When mode == "batch", existing_batch_id resumes polling on a previously
+    submitted provider batch (skip submission). on_batch_created fires once
+    immediately after submission with the new batch id, so the orchestrator
+    can persist a sidecar before the poll loop starts.
 
     Returns: {scenario_id: parsed_results_dict}
     """
@@ -249,8 +207,12 @@ def execute_and_parse_bulk(
     client = ModelClient(annotate_cfg["model"])
 
     if mode == "batch":
-        raw = run_batch(client, entries, display_name="benchmark_annotate",
-                        poll_interval=annotate_cfg["poll_interval"])
+        raw = run_batch(
+            client, entries, display_name="benchmark_annotate",
+            poll_interval=annotate_cfg["poll_interval"],
+            existing_batch_id=existing_batch_id,
+            on_batch_created=on_batch_created,
+        )
     else:
         raw = run_sync_entries(client, entries)
 

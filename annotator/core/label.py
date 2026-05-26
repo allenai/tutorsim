@@ -1,9 +1,10 @@
 """
 Pass 3 -- Label annotations for effectiveness.
 
-Uses classify_v2.txt -- the same prompt used by data/build_ground_truth.py
-for ground truth labelling. This ensures labels are on a consistent scale
-regardless of which model produced the annotations.
+The labeller routes by annotation_type when `annotator.labeller` is a dict
+(e.g. {scaffolding: classify_scaffolding, rapport: classify_rapport}), and
+loads a single template when it's a string. Same shared prompts are used by
+data/build_ground_truth.py so labels stay on a consistent scale.
 
 Reads annotations (from annotate.py output) and classifies each result
 text as effective / partial / ineffective.
@@ -16,8 +17,10 @@ Usage:
 import argparse
 import datetime
 import json
+import logging
 from pathlib import Path
 
+from common.logging_setup import setup_logging
 from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
@@ -27,6 +30,9 @@ from .storage import (
     get_annotator_result_path,
 )
 from .utils import load_split_ids
+
+logger = logging.getLogger(__name__)
+
 PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "annotator" / "labeller"
 
 
@@ -39,6 +45,32 @@ def _load_prompt(name: str) -> str:
 VALID_LABELS = {"effective", "partial", "ineffective"}
 VALID_LABELS_BINARY = {"effective", "ineffective"}
 JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
+
+
+def load_labeller_templates(labeller_cfg: str | dict) -> dict[str | None, str]:
+    """Resolve the `annotator.labeller` config value to {annotation_type: template}.
+
+    If `labeller_cfg` is a string (e.g. "classify_v2"), returns
+    {None: <template>} -- the None key is the fallback used for every type.
+
+    If it's a dict (e.g. {"scaffolding": "classify_scaffolding", ...}), returns
+    one entry per type.
+    """
+    if isinstance(labeller_cfg, dict):
+        return {ann_type: _load_prompt(name) for ann_type, name in labeller_cfg.items()}
+    return {None: _load_prompt(labeller_cfg)}
+
+
+def pick_template(templates: dict[str | None, str], annotation_type: str) -> str:
+    """Pick the per-type template; fall back to None key if type is unmapped."""
+    if annotation_type in templates:
+        return templates[annotation_type]
+    if None in templates:
+        return templates[None]
+    raise KeyError(
+        f"No labeller template for annotation_type={annotation_type!r}. "
+        f"Available keys: {list(templates.keys())}"
+    )
 
 
 def run_label(version: str, model: str, mode: str, phase_cfg: dict,
@@ -62,7 +94,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     else:
         data = load_annotator_result(version, filename)
         if data is None:
-            print(f"ERROR: {filename} not found for version {version}. Run annotate first.")
+            logger.error("%s not found for version %s. Run annotate first.", filename, version)
             return None
 
     # The transcript UUID is the last _-delimited segment of the compound conv_id.
@@ -74,13 +106,12 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
         if conv_id.rsplit("_", 1)[-1] in train_ids
     }
 
-    # Load template once
-    from .config import get_annotator_defaults
+    # Load templates once. Binary mode is a single shared template; the
+    # 3-way labeller may route per annotation_type.
     if binary:
-        template = _load_prompt("classify_binary")
+        templates = {None: _load_prompt("classify_binary")}
     else:
-        labeller = get_annotator_defaults()["labeller"]
-        template = _load_prompt(labeller)
+        templates = load_labeller_templates(get_annotator_defaults()["labeller"])
 
     entries = []
     skipped = []
@@ -96,9 +127,10 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             situation = ann.get("situation", "")
             action = ann.get("action", "")
             if binary:
-                prompt = template.replace("{result_text}", result_text)
+                prompt = templates[None].replace("{result_text}", result_text)
             else:
                 annotation_type = ann.get("annotation_type", "unknown")
+                template = pick_template(templates, annotation_type)
                 prompt = (template
                           .replace("{annotation_type}", annotation_type)
                           .replace("{situation}", situation)
@@ -108,8 +140,8 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             entries.append(build_batch_entry(key, prompt, json_mode=False))
             locations.append((conv_id, idx))
 
-    print(f"Annotations to label: {len(entries)} ({len(skipped)} skipped as junk)")
-    print(f"Model: {model} | Mode: {mode}")
+    logger.info("Annotations to label: %d (%d skipped as junk)", len(entries), len(skipped))
+    logger.info("Model: %s | Mode: %s", model, mode)
 
     for conv_id, idx in skipped:
         results[conv_id]["annotations"][idx]["effectiveness"] = "unclear"
@@ -127,7 +159,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
                        thinking_budget=phase_cfg.get("thinking_budget", 0),
                        reasoning_effort=phase_cfg.get("reasoning_effort", ""))
     else:
-        print(f"Running {len(entries)} entries in sync mode...")
+        logger.info("Running %d entries in sync mode...", len(entries))
         raw = run_sync_entries(client, entries, json_mode=False)
 
     valid = VALID_LABELS_BINARY if binary else VALID_LABELS
@@ -155,14 +187,14 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     data["label_stats"] = by_label
 
     save_annotator_result(version, filename, data)
-    print(f"\nSaved: {filename} (version: {version})")
-    print(f"  Effective:   {by_label['effective']}")
+    logger.info("Saved: %s (version: %s)", filename, version)
+    logger.info("  Effective:   %d", by_label['effective'])
     if not binary:
-        print(f"  Partial:     {by_label['partial']}")
-    print(f"  Ineffective: {by_label['ineffective']}")
-    print(f"  Unclear:     {by_label['unclear']}")
+        logger.info("  Partial:     %d", by_label['partial'])
+    logger.info("  Ineffective: %d", by_label['ineffective'])
+    logger.info("  Unclear:     %d", by_label['unclear'])
     if errors:
-        print(f"  Batch errors: {errors}")
+        logger.warning("Batch errors: %d", errors)
 
     return data
 
@@ -197,6 +229,8 @@ def main():
     version = params["version"]
     style = params["style"]
 
+    setup_logging(version=version)
+
     phase_cfg = get_phase_config("label", profile)
     model = args.model or phase_cfg["model"]
     mode = args.mode or phase_cfg.get("mode", "batch")
@@ -207,7 +241,7 @@ def main():
     if output:
         mode_hint = " --mode annotations" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
-        print(f"\nNext: python -m annotator.eval.eval --version {version}{mode_hint}{style_flag}")
+        logger.info("Next: python -m annotator.eval.eval --version %s%s%s", version, mode_hint, style_flag)
 
 
 if __name__ == "__main__":
