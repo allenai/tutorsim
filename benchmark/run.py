@@ -14,7 +14,10 @@ Usage:
 """
 
 import argparse
+import datetime
+import hashlib
 import json
+import logging
 from pathlib import Path
 
 from common.logging_setup import setup_logging
@@ -23,12 +26,13 @@ from annotator.core.config import get_phase_config, get_annotation_types, get_be
 from annotator.core.detect import run_detect
 from annotator.core.storage import (
     save_benchmark_result, load_benchmark_result, list_benchmark_result_files,
+    save_benchmark_inflight_batch, load_benchmark_inflight_batch,
+    clear_benchmark_inflight_batch,
 )
 
 from .core.scenarios import load_scenarios, Scenario
 from .core.exchange import run_exchange, run_exchanges_batch, Exchange
 from .core.annotator_bridge import (
-    annotate_exchange,
     prepare_bulk_entries, execute_and_parse_bulk, label_bulk,
 )
 from .core.aggregate import (
@@ -38,6 +42,16 @@ from .core.aggregate import (
 
 BASE_DIR = Path(__file__).parent
 REPO_ROOT = BASE_DIR.parent
+
+logger = logging.getLogger(__name__)
+
+
+def _entries_keys_hash(entries: list[dict]) -> str:
+    """Stable short hash of an entries list, keyed on entry order + keys.
+    Mirrors annotator/core/annotate.py:_entries_keys_hash so the resume
+    guard catches a changed scenario set between runs."""
+    joined = "\n".join(e["key"] for e in entries)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 
 def save_json(data, path: Path):
@@ -67,6 +81,19 @@ def run_benchmark(version: str, config: dict):
     resolved_models["detector"] = get_phase_config("detect", detect_profile)["model"]
     config["resolved_models"] = resolved_models
 
+    with_screenshots = config.get("with_screenshots", False)
+    if with_screenshots:
+        from annotator.core.client import validate_vision_support
+        for role, model in resolved_models.items():
+            validate_vision_support(model)
+        logger.info("Screenshots: enabled -- validated vision support on all models (%s)",
+                    ", ".join(sorted(set(resolved_models.values()))))
+
+    transcripts_for_screenshots = None
+    if with_screenshots:
+        from annotator.core.storage import load_all_transcripts
+        transcripts_for_screenshots = load_all_transcripts()
+
     save_benchmark_result(version, "config.json", data=config)
 
     # --- Step 0: Run detection on all transcripts ---
@@ -74,7 +101,7 @@ def run_benchmark(version: str, config: dict):
     detections_by_conv = None
 
     if scenario_mode in ("detected", "both"):
-        print("\n=== Step 0: Key Moment Detection ===")
+        logger.info("=== Step 0: Key Moment Detection ===")
         detect_phase_cfg = get_phase_config("detect", detect_profile)
         detect_model = detect_phase_cfg["model"]
         detect_mode = detect_phase_cfg.get("mode", "batch")
@@ -87,12 +114,13 @@ def run_benchmark(version: str, config: dict):
             targets=["scaffolding", "rapport"],
             phase_cfg=detect_phase_cfg,
             test=config.get("scenarios", {}).get("test_transcripts", 0),
+            with_screenshots=with_screenshots,
         )
         detections_by_conv = detect_output["results"]
         save_benchmark_result(version, "detections.json", data=detect_output)
 
     # --- Step 1: Extract scenarios from detections ---
-    print("\n=== Step 1: Extract Scenarios ===")
+    logger.info("=== Step 1: Extract Scenarios ===")
     scenarios = load_scenarios(config["scenarios"], detections_by_conv=detections_by_conv)
     save_benchmark_result(version, "scenarios.json", data=[s.to_dict() for s in scenarios])
 
@@ -113,16 +141,30 @@ def run_benchmark(version: str, config: dict):
     for profile in tutor_profiles:
         tutor_cfg = get_phase_config("tutor", profile)
         tutor_model = tutor_cfg["model"]
-        print(f"\n{'=' * 60}")
-        print(f"  Evaluating: {profile} ({tutor_model})")
-        print(f"{'=' * 60}")
+        logger.info("=== Evaluating: %s (%s) ===", profile, tutor_model)
 
         tutor_client = ModelClient(tutor_model)
 
         # ---------------------------------------------------------------
         # Phase 1: Generate all exchanges (skip if already on disk)
         # ---------------------------------------------------------------
-        print(f"\n--- Phase 1: Generate Exchanges ({len(scenarios)} scenarios) ---")
+        logger.info("--- Phase 1: Generate Exchanges (%d scenarios) ---", len(scenarios))
+
+        images_by_scenario = None
+        if with_screenshots:
+            from annotator.core.screenshots import load_anchored_screenshots
+            images_by_scenario = {}
+            for scenario in scenarios:
+                conv = transcripts_for_screenshots.get(scenario.conv_id)
+                if not conv:
+                    images_by_scenario[scenario.scenario_id] = []
+                    continue
+                anchored = load_anchored_screenshots(scenario.conv_id, conv["turns"])
+                visible = [s for s in anchored if s["anchor_turn"] <= scenario.cut_turn]
+                images_by_scenario[scenario.scenario_id] = [s["storage_path"] for s in visible]
+            total_images = sum(len(v) for v in images_by_scenario.values())
+            logger.info("Screenshots: loaded for %d scenarios (%d images total, filtered by cut_turn)",
+                        len(images_by_scenario), total_images)
 
         existing_files = list_benchmark_result_files(version, "exchanges", profile)
         existing = set()
@@ -149,14 +191,14 @@ def run_benchmark(version: str, config: dict):
             )
 
         if not missing:
-            print(f"  All {len(scenarios)} exchanges already cached -- loading...")
+            logger.info("All %d exchanges already cached -- loading", len(scenarios))
             exchanges = {}
             for scenario in scenarios:
                 ex = _load_exchange(scenario.scenario_id)
                 if ex:
                     exchanges[scenario.scenario_id] = ex
         else:
-            print(f"  {len(existing)} cached, {len(missing)} to generate...")
+            logger.info("%d cached, %d to generate", len(existing), len(missing))
             def _save_exchange(sid, exchange):
                 save_benchmark_result(version, "exchanges", profile, f"{sid}.json",
                                       data=exchange.to_dict())
@@ -174,12 +216,11 @@ def run_benchmark(version: str, config: dict):
                     poll_interval=exchange_cfg["poll_interval"],
                     save_callback=_save_exchange,
                     prompt_version=exchange_prompt_version,
+                    images_by_scenario=images_by_scenario,
                 )
             else:
                 new_exchanges = {}
                 for i, scenario in enumerate(missing):
-                    print(f"  [{i+1}/{len(missing)}] {scenario.scenario_id}...",
-                          end=" ", flush=True)
                     try:
                         exchange = run_exchange(
                             scenario=scenario,
@@ -189,11 +230,14 @@ def run_benchmark(version: str, config: dict):
                             tutor_max_tokens=tutor_cfg["max_tokens"],
                             student_max_tokens=student_cfg["max_tokens"],
                             prompt_version=exchange_prompt_version,
+                            images=(images_by_scenario or {}).get(scenario.scenario_id),
                         )
                         new_exchanges[scenario.scenario_id] = exchange
-                        print(f"{len(exchange.generated_turns)} turns")
+                        logger.debug("[%d/%d] %s -> %d turns",
+                                     i + 1, len(missing), scenario.scenario_id,
+                                     len(exchange.generated_turns))
                     except Exception as e:
-                        print(f"ERROR: {e}")
+                        logger.warning("scenario %s failed: %s", scenario.scenario_id, e)
 
             # Save completed exchanges (skip partial failures)
             for sid, exchange in new_exchanges.items():
@@ -208,49 +252,97 @@ def run_benchmark(version: str, config: dict):
                 if ex:
                     exchanges[scenario.scenario_id] = ex
 
-        print(f"\n  Exchanges ready: {len(exchanges)}/{len(scenarios)}")
+        logger.info("Exchanges ready: %d/%d", len(exchanges), len(scenarios))
 
         # ---------------------------------------------------------------
         # Phase 2: Annotate all exchanges (batch per style)
         # ---------------------------------------------------------------
-        print(f"\n--- Phase 2: Annotate ({ann_mode} mode, {len(styles)} styles) ---")
+        logger.info("=== Phase 2: Annotate (%s mode, %d styles) ===", ann_mode, len(styles))
 
         all_style_results = {}
 
+        def _load_cached_annotations(style):
+            """Return {scenario_id: labeled_data} for shards already on disk."""
+            cached = {}
+            for fname in list_benchmark_result_files(version, "annotations", profile, style):
+                if not fname.endswith(".json"):
+                    continue
+                sid = fname[:-5]
+                data = load_benchmark_result(version, "annotations", profile, style, fname)
+                if data is not None:
+                    cached[sid] = data
+            return cached
+
         for style in styles:
-            # Resolve per-style prompt version (e.g. annotator_profiles/generous)
-            if prompt_version_base in ("annotator_profiles", "profiles"):
+            if prompt_version_base == "profiles":
                 prompt_version = f"profiles/{style}"
             else:
                 prompt_version = prompt_version_base
 
-            print(f"\n  [{style.upper()}] Preparing entries (prompts: {prompt_version})...")
-            entries, all_detections, all_conversations = prepare_bulk_entries(
-                scenarios=scenarios,
+            cached = _load_cached_annotations(style)
+            missing = [s for s in scenarios if s.scenario_id not in cached]
+            logger.info("[%s] %d cached, %d to annotate (prompts: %s)",
+                        style, len(cached), len(missing), prompt_version)
+
+            if not missing:
+                all_style_results[style] = cached
+                continue
+
+            entries, all_detections, _ = prepare_bulk_entries(
+                scenarios=missing,
                 exchanges=exchanges,
                 annotator_style=style,
                 prompt_version=prompt_version,
                 context_window=context_window,
+                with_screenshots=with_screenshots,
             )
-            print(f"    {len(entries)} annotation entries across {len(all_detections)} scenarios")
+            logger.info("[%s] %d annotation entries across %d scenarios",
+                        style, len(entries), len(all_detections))
 
             if not entries:
-                all_style_results[style] = {}
+                all_style_results[style] = cached
                 continue
 
-            # Execute annotation
-            print(f"    Running annotation ({ann_mode})...")
+            sidecar = load_benchmark_inflight_batch(version, profile, style)
+            existing_batch_id = None
+            if sidecar:
+                expected = sidecar.get("entry_keys_hash")
+                actual = _entries_keys_hash(entries)
+                if expected == actual:
+                    existing_batch_id = sidecar["batch_id"]
+                    logger.info("[%s] resuming in-flight batch %s (submitted %s)",
+                                style, existing_batch_id, sidecar.get("submitted_at", "?"))
+                else:
+                    logger.error(
+                        "[%s] in-flight sidecar exists but entry-keys hash differs "
+                        "(sidecar=%s, current=%s). Scenario set changed between runs. "
+                        "Delete results/benchmark/%s/in_flight/%s_%s.json to start fresh.",
+                        style, expected, actual, version, profile, style,
+                    )
+                    raise RuntimeError("entry-keys mismatch on benchmark in-flight resume")
+
+            def _record(batch_id, _profile=profile, _style=style):
+                save_benchmark_inflight_batch(version, _profile, _style, {
+                    "provider": "unknown",
+                    "model": annotator_cfg.get("model", ""),
+                    "batch_id": batch_id,
+                    "n_entries": len(entries),
+                    "entry_keys_hash": _entries_keys_hash(entries),
+                    "display_name": "benchmark_annotate",
+                    "submitted_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                })
+
             per_scenario_results = execute_and_parse_bulk(
                 entries=entries,
                 all_detections=all_detections,
                 annotator_profile=annotator_profile,
                 mode=ann_mode,
+                existing_batch_id=existing_batch_id,
+                on_batch_created=_record,
             )
-            print(f"    Parsed {len(per_scenario_results)} scenario results")
+            logger.info("[%s] parsed %d scenario results", style, len(per_scenario_results))
 
-            # Label
             annotate_cfg_full = get_phase_config("annotate", annotator_profile)
-            print(f"    Running labeling ({ann_mode})...")
             per_scenario_labeled = label_bulk(
                 per_scenario_results=per_scenario_results,
                 annotator_style=style,
@@ -258,19 +350,22 @@ def run_benchmark(version: str, config: dict):
                 annotator_model=annotate_cfg_full["model"],
                 mode=ann_mode,
             )
-            print(f"    Labeled {len(per_scenario_labeled)} scenarios")
+            logger.info("[%s] labeled %d scenarios", style, len(per_scenario_labeled))
 
-            all_style_results[style] = per_scenario_labeled
-
-            # Save per-scenario annotations
             for scenario_id, labeled_data in per_scenario_labeled.items():
                 save_benchmark_result(version, "annotations", profile, style,
                                       f"{scenario_id}.json", data=labeled_data)
 
+            clear_benchmark_inflight_batch(version, profile, style)
+
+            merged = dict(cached)
+            merged.update(per_scenario_labeled)
+            all_style_results[style] = merged
+
         # ---------------------------------------------------------------
         # Phase 3: Per-style scores (no composite aggregation)
         # ---------------------------------------------------------------
-        print(f"\n--- Phase 3: Per-Style Scores ---")
+        logger.info("--- Phase 3: Per-Style Scores ---")
         label_weights = agg_cfg.get("label_weights", DEFAULT_LABEL_WEIGHTS)
 
         for style in styles:
@@ -321,11 +416,41 @@ def run_benchmark(version: str, config: dict):
 
             save_benchmark_result(version, "scores", f"{profile}_{style}.json",
                                   data=style_summary)
-            print(f"  {style}: {overall_mean:.3f} (n={n}) | "
-                  f"scaffolding={type_means.get('scaffolding', 0):.3f}, "
-                  f"rapport={type_means.get('rapport', 0):.3f}")
+            logger.info("[%s] mean=%.3f n=%d scaffolding=%.3f rapport=%.3f",
+                        style, overall_mean, n,
+                        type_means.get('scaffolding', 0), type_means.get('rapport', 0))
 
-    print(f"\nResults saved (version: {version})")
+    logger.info("Results saved (version: %s)", version)
+    save_benchmark_result(version, "_complete.json", data={
+        "completed_at": datetime.datetime.now().isoformat(timespec="seconds"),
+    })
+
+
+def _resolve_or_create_version(config: dict) -> str:
+    """Return the version for this run, reusing an in-progress run if one exists.
+
+    Reads results/benchmark/_active_runs/{tutor_profile}.json. If that pointer
+    names a version whose _complete.json marker doesn't exist, reuse it; this
+    is what makes a ctrl-C'd run resumable across midnight. Otherwise generate
+    f'{profile}_{date}' and write a fresh pointer.
+    """
+    tutor_profile = config.get("tutor_profiles", ["anthropic"])[0]
+    pointer = load_benchmark_result("_active_runs", f"{tutor_profile}.json")
+    if pointer:
+        candidate = pointer.get("version")
+        if candidate:
+            complete = load_benchmark_result(candidate, "_complete.json")
+            if complete is None:
+                logger.info("Resuming in-progress version: %s", candidate)
+                return candidate
+
+    new_version = f"{tutor_profile}_{datetime.date.today().strftime('%Y-%m-%d')}"
+    save_benchmark_result("_active_runs", f"{tutor_profile}.json", data={
+        "version": new_version,
+        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+    })
+    logger.info("Auto-generated version: %s", new_version)
+    return new_version
 
 
 def main():
@@ -343,6 +468,8 @@ def main():
                         help="Limit detection to N transcripts (0 = all)")
     parser.add_argument("--mode", choices=["batch", "sync"],
                         help="Override execution mode (batch or sync)")
+    parser.add_argument("--with-screenshots", action="store_true",
+                        help="Attach anchored screenshots to detection, exchange, and annotation prompts. Requires vision-capable models.")
     args = parser.parse_args()
 
     overrides = {
@@ -352,6 +479,7 @@ def main():
         "tutor_profile": args.tutor_profile,
         "mode": args.mode,
         "test_transcripts": args.test,
+        "with_screenshots": args.with_screenshots if args.with_screenshots else None,
     }
     overrides = {k: v for k, v in overrides.items() if v is not None}
 
@@ -360,15 +488,7 @@ def main():
     if args.version:
         version = args.version
     else:
-        bm_version = config.get("version")
-        if bm_version:
-            version = bm_version
-        else:
-            import datetime
-            tutor_profile = config.get("tutor_profiles", ["anthropic"])[0]
-            date_str = datetime.date.today().strftime("%Y-%m-%d")
-            version = f"{tutor_profile}_{date_str}"
-            print(f"  Auto-generated version: {version}")
+        version = config.get("version") or _resolve_or_create_version(config)
 
     setup_logging(version=version)
 

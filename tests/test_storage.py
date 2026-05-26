@@ -88,6 +88,200 @@ class TestLocalBackend:
         st._backend = None
         st._cache.clear()
 
+    def test_read_write_bytes_roundtrip(self, local_storage):
+        from annotator.core.storage import _get_backend
+        be = _get_backend()
+        payload = b"\x89PNG\r\n\x1a\nfake image bytes"
+        be.write_bytes("screenshots/test/hello.jpg", payload)
+        assert be.read_bytes("screenshots/test/hello.jpg") == payload
+
+    def test_read_bytes_missing_raises(self, local_storage):
+        from annotator.core.storage import _get_backend
+        be = _get_backend()
+        with pytest.raises(FileNotFoundError):
+            be.read_bytes("nope/nope.jpg")
+
+    def test_local_presigned_url_is_file_uri(self, local_storage):
+        from annotator.core.storage import _get_backend
+        be = _get_backend()
+        be.write_bytes("screenshots/x/y.jpg", b"abc")
+        url = be.get_presigned_url("screenshots/x/y.jpg")
+        assert url.startswith("file://")
+        assert url.endswith("y.jpg")
+
+    def test_consolidated_transcript_has_start_seconds(self, local_storage, temp_data):
+        # Overwrite conv_001 with a timestamp string and reload
+        import json
+        t_path = temp_data / "data" / "transcripts" / "conv_001.json"
+        conv = {
+            "conversation_id": "conv_001",
+            "turns": [
+                {"turn_number": 1, "timestamp": "02:26-02:27", "role": "TUTOR", "text": "Hi", "type": "DIALOGUE"},
+                {"turn_number": 2, "timestamp": "02:30-02:31", "role": "STUDENT", "text": "Hi back", "type": "DIALOGUE"},
+            ],
+        }
+        t_path.write_text(json.dumps(conv), encoding="utf-8")
+
+        import annotator.core.storage as st
+        st._cache.clear()
+
+        loaded = st.load_transcript("conv_001")
+        assert loaded["turns"][0]["start_seconds"] == pytest.approx(146.0)  # 2*60+26
+        assert loaded["turns"][1]["start_seconds"] == pytest.approx(150.0)  # 2*60+30
+        # Existing timestamp string is preserved
+        assert loaded["turns"][0]["timestamp"] == "02:26-02:27"
+
+    def test_malformed_timestamp_yields_zero(self, local_storage, temp_data):
+        import json
+        t_path = temp_data / "data" / "transcripts" / "conv_001.json"
+        conv = {
+            "conversation_id": "conv_001",
+            "turns": [
+                {"turn_number": 1, "timestamp": "", "role": "TUTOR", "text": "Hi", "type": "DIALOGUE"},
+                {"turn_number": 2, "timestamp": "junk", "role": "STUDENT", "text": "Hi", "type": "DIALOGUE"},
+            ],
+        }
+        t_path.write_text(json.dumps(conv), encoding="utf-8")
+
+        import annotator.core.storage as st
+        st._cache.clear()
+
+        loaded = st.load_transcript("conv_001")
+        assert loaded["turns"][0]["start_seconds"] == 0.0
+        assert loaded["turns"][1]["start_seconds"] == 0.0
+
+    def test_list_screenshots(self, local_storage):
+        from annotator.core.storage import list_screenshots
+        files = list_screenshots("2024-t1_2024-s1_099bf759-abcd")
+        assert sorted(files) == ["11.500.jpg", "4.000.jpg"]
+
+    def test_list_screenshots_missing_conv_returns_empty(self, local_storage):
+        from annotator.core.storage import list_screenshots
+        assert list_screenshots("nonexistent_conv") == []
+
+    def test_load_screenshot_bytes(self, local_storage):
+        from annotator.core.storage import load_screenshot_bytes
+        data = load_screenshot_bytes("2024-t1_2024-s1_099bf759-abcd", "4.000.jpg")
+        assert data == b"fake-jpg-1"
+
+    def test_load_screenshot_verification(self, local_storage):
+        from annotator.core.storage import load_screenshot_verification
+        meta = load_screenshot_verification("2024-t1_2024-s1_099bf759-abcd")
+        assert meta["images"]["11.500.jpg"]["eedi_ip"] is True
+        assert meta["images"]["4.000.jpg"]["flagged"] is False
+
+    def test_load_screenshot_verification_missing_returns_empty(self, local_storage):
+        from annotator.core.storage import load_screenshot_verification
+        assert load_screenshot_verification("no_such_conv") == {}
+
+    def test_get_screenshot_uri_local(self, local_storage):
+        from annotator.core.storage import get_screenshot_uri
+        uri = get_screenshot_uri("2024-t1_2024-s1_099bf759-abcd", "4.000.jpg")
+        assert uri.startswith("file://")
+        assert uri.endswith("4.000.jpg")
+
+    def test_save_and_load_annotator_shard(self, local_storage):
+        from annotator.core.storage import (
+            save_annotator_shard, load_annotator_shards, list_annotator_shard_ids,
+        )
+        save_annotator_shard("v1", "detections", "conv_a", {"detections": [{"x": 1}]})
+        save_annotator_shard("v1", "detections", "conv_b", {"detections": [{"x": 2}]})
+
+        ids = list_annotator_shard_ids("v1", "detections")
+        assert sorted(ids) == ["conv_a", "conv_b"]
+
+        shards = load_annotator_shards("v1", "detections")
+        assert shards["conv_a"]["detections"][0]["x"] == 1
+        assert shards["conv_b"]["detections"][0]["x"] == 2
+
+    def test_shards_isolated_by_basename(self, local_storage):
+        from annotator.core.storage import (
+            save_annotator_shard, list_annotator_shard_ids,
+        )
+        save_annotator_shard("v1", "detections", "conv_a", {"k": "det"})
+        save_annotator_shard("v1", "annotations_generous", "conv_a", {"k": "ann"})
+
+        det_ids = list_annotator_shard_ids("v1", "detections")
+        ann_ids = list_annotator_shard_ids("v1", "annotations_generous")
+        assert det_ids == ["conv_a"]
+        assert ann_ids == ["conv_a"]
+
+    def test_list_shard_ids_empty_when_dir_missing(self, local_storage):
+        from annotator.core.storage import list_annotator_shard_ids
+        assert list_annotator_shard_ids("v_never_run", "detections") == []
+
+    def test_top_level_results_listing_excludes_shards(self, local_storage):
+        """Existing list_annotator_result_files must not pick up shard files."""
+        from annotator.core.storage import (
+            save_annotator_result, save_annotator_shard, list_annotator_result_files,
+        )
+        save_annotator_result("v1", "detections.json", {"ok": True})
+        save_annotator_shard("v1", "detections", "conv_a", {"x": 1})
+
+        files = list_annotator_result_files("v1")
+        assert "detections.json" in files
+        assert "conv_a.json" not in files
+
+    def test_inflight_batch_lifecycle(self, local_storage):
+        from annotator.core.storage import (
+            save_inflight_batch, load_inflight_batch, clear_inflight_batch,
+        )
+        assert load_inflight_batch("v1", "detections") is None
+
+        save_inflight_batch("v1", "detections", {
+            "provider": "anthropic", "batch_id": "msgbatch_abc",
+            "model": "claude-opus-4-6", "n_entries": 6,
+            "display_name": "detect", "submitted_at": "2026-04-27T15:00:00",
+        })
+        rec = load_inflight_batch("v1", "detections")
+        assert rec["batch_id"] == "msgbatch_abc"
+        assert rec["n_entries"] == 6
+
+        clear_inflight_batch("v1", "detections")
+        assert load_inflight_batch("v1", "detections") is None
+
+    def test_clear_inflight_is_safe_when_absent(self, local_storage):
+        from annotator.core.storage import clear_inflight_batch
+        clear_inflight_batch("v_never_run", "detections")  # should not raise
+
+    def test_inflight_isolated_from_results_listing(self, local_storage):
+        from annotator.core.storage import (
+            save_annotator_result, save_inflight_batch, list_annotator_result_files,
+        )
+        save_annotator_result("v1", "detections.json", {})
+        save_inflight_batch("v1", "detections", {"batch_id": "x"})
+        files = list_annotator_result_files("v1")
+        assert files == ["detections.json"]
+
+
+class TestBenchmarkInflightBatch:
+    def test_roundtrip(self, local_storage):
+        from annotator.core.storage import (
+            save_benchmark_inflight_batch, load_benchmark_inflight_batch,
+        )
+        save_benchmark_inflight_batch("v_test", "anthropic", "balanced", {
+            "provider": "anthropic", "model": "claude-opus-4-6",
+            "batch_id": "msgbatch_abc", "n_entries": 12,
+            "entry_keys_hash": "abc123def456", "display_name": "annotate",
+            "submitted_at": "2026-04-28T10:00:00",
+        })
+        loaded = load_benchmark_inflight_batch("v_test", "anthropic", "balanced")
+        assert loaded["batch_id"] == "msgbatch_abc"
+        assert loaded["n_entries"] == 12
+
+    def test_load_missing_returns_none(self, local_storage):
+        from annotator.core.storage import load_benchmark_inflight_batch
+        assert load_benchmark_inflight_batch("v_nope", "anthropic", "generous") is None
+
+    def test_clear_removes_sidecar(self, local_storage):
+        from annotator.core.storage import (
+            save_benchmark_inflight_batch, load_benchmark_inflight_batch,
+            clear_benchmark_inflight_batch,
+        )
+        save_benchmark_inflight_batch("v_test", "anthropic", "balanced", {"batch_id": "x"})
+        clear_benchmark_inflight_batch("v_test", "anthropic", "balanced")
+        assert load_benchmark_inflight_batch("v_test", "anthropic", "balanced") is None
+
 
 class TestS3Backend:
     @pytest.fixture
@@ -134,3 +328,34 @@ class TestS3Backend:
             from annotator.core.storage import get_annotator_result_path
             with pytest.raises(RuntimeError, match="S3 mode"):
                 get_annotator_result_path("v1")
+
+    def test_s3_read_write_bytes(self, s3_env):
+        import boto3
+        from moto import mock_aws
+        with mock_aws():
+            s3 = boto3.client("s3", region_name="us-east-1")
+            s3.create_bucket(Bucket="test-bucket")
+
+            import annotator.core.storage as st
+            st._backend = None
+            be = st._get_backend()
+
+            payload = b"\x89PNG\r\n\x1a\nbytes"
+            be.write_bytes("screenshots/a/b.jpg", payload)
+            assert be.read_bytes("screenshots/a/b.jpg") == payload
+
+    def test_s3_presigned_url_is_https(self, s3_env):
+        import boto3
+        from moto import mock_aws
+        with mock_aws():
+            s3 = boto3.client("s3", region_name="us-east-1")
+            s3.create_bucket(Bucket="test-bucket")
+
+            import annotator.core.storage as st
+            st._backend = None
+            be = st._get_backend()
+            be.write_bytes("screenshots/a/b.jpg", b"x")
+            url = be.get_presigned_url("screenshots/a/b.jpg", expires_seconds=3600)
+            assert url.startswith("https://")
+            assert "test-bucket" in url
+            assert "b.jpg" in url

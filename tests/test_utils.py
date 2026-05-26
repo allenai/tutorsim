@@ -63,3 +63,68 @@ class TestMergeOverlappingRanges:
         ]
         clusters = merge_overlapping_ranges(moments)
         assert len(clusters) == 2
+
+
+class TestFormatTranscriptWithScreenshots:
+    def _conv(self):
+        return {
+            "conversation_id": "c1",
+            "turns": [
+                {"turn_number": 1, "role": "TUTOR", "text": "hi", "type": "DIALOGUE"},
+                {"turn_number": 2, "role": "TUTOR", "text": "look here", "type": "DIALOGUE"},
+                {"turn_number": 3, "role": "STUDENT", "text": "ok", "type": "DIALOGUE"},
+            ],
+        }
+
+    def test_marker_rendered_after_anchor_turn(self):
+        from annotator.core.utils import format_transcript
+        ss = [{"anchor_turn": 2, "filename": "5.0.jpg", "timestamp_seconds": 5.0}]
+        out = format_transcript(self._conv(), screenshots=ss)
+        lines = out.split("\n")
+        assert lines[0] == "Turn 1. TUTOR: hi"
+        assert lines[1] == "Turn 2. TUTOR: look here"
+        assert lines[2] == "  [SCREEN @ turn 2: image 1]"
+        assert lines[3] == "Turn 3. STUDENT: ok"
+
+    def test_multiple_images_numbered_positionally(self):
+        from annotator.core.utils import format_transcript
+        ss = [
+            {"anchor_turn": 1, "filename": "0.5.jpg", "timestamp_seconds": 0.5},
+            {"anchor_turn": 2, "filename": "5.0.jpg", "timestamp_seconds": 5.0},
+        ]
+        out = format_transcript(self._conv(), screenshots=ss)
+        assert "[SCREEN @ turn 1: image 1]" in out
+        assert "[SCREEN @ turn 2: image 2]" in out
+
+    def test_no_screenshots_unchanged_output(self):
+        from annotator.core.utils import format_transcript
+        conv = self._conv()
+        assert format_transcript(conv) == format_transcript(conv, screenshots=None)
+        assert format_transcript(conv) == format_transcript(conv, screenshots=[])
+
+
+class TestFormatExcerptWithScreenshots:
+    def _conv(self):
+        turns = [
+            {"turn_number": n, "role": "TUTOR" if n % 2 else "STUDENT",
+             "text": f"t{n}", "type": "DIALOGUE"}
+            for n in range(1, 11)
+        ]
+        return {"conversation_id": "c1", "turns": turns}
+
+    def test_screenshot_outside_excerpt_omitted(self):
+        from annotator.core.utils import format_excerpt
+        ss_all = [
+            {"anchor_turn": 1, "filename": "a.jpg", "timestamp_seconds": 1.0},
+            {"anchor_turn": 5, "filename": "b.jpg", "timestamp_seconds": 5.0},
+            {"anchor_turn": 9, "filename": "c.jpg", "timestamp_seconds": 9.0},
+        ]
+        # The caller pre-filters to what's in window; format_excerpt renders markers
+        # for the ones passed in.
+        filtered = [s for s in ss_all if 4 <= s["anchor_turn"] <= 6]
+        out = format_excerpt(self._conv(), turn_start=5, turn_end=5,
+                             context_before=1, context_after=1,
+                             screenshots=filtered)
+        assert "[SCREEN @ turn 5: image 1]" in out
+        assert "a.jpg" not in out
+        assert "c.jpg" not in out
