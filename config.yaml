@@ -12,7 +12,7 @@ storage:
       - data/transcripts
       - data/transcripts/step_up.jsonl
     ground_truth:
-      - data/ground_truth_v2
+      - data/ground_truth_hybrid
     annotator_results: results/annotator
     benchmark_results: results/benchmark
     screenshots: deidentified/screenshots

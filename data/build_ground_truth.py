@@ -236,7 +236,7 @@ def main():
                         help="Labeller version. 'hybrid' routes per annotation_type using "
                              "config.yaml's annotator.labeller dict. Any other value loads "
                              "classify_{labeller}.txt as a single template. Determines output "
-                             "dir (ground_truth_{labeller}/). Default: v2.")
+                             "dir (ground_truth_{labeller}/).")
     parser.add_argument("--input", default=str(ANNOTATIONS_JSONL),
                         help="Path to annotations JSONL file (default: teacher_annotations/step_up_annotations.jsonl)")
     args = parser.parse_args()
