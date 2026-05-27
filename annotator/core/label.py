@@ -29,6 +29,7 @@ from .storage import (
     load_annotator_result, save_annotator_result, annotator_result_exists,
     get_annotator_result_path,
 )
+from .utils import load_split_ids
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,14 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             logger.error("%s not found for version %s. Run annotate first.", filename, version)
             return None
 
-    results = data["results"]
+    # The transcript UUID is the last _-delimited segment of the compound conv_id.
+    # Filter to train split as a safety net (detect/annotate already filter upstream).
+    train_ids = load_split_ids("train")
+    results = {
+        conv_id: conv_data
+        for conv_id, conv_data in data["results"].items()
+        if conv_id.rsplit("_", 1)[-1] in train_ids
+    }
 
     # Load templates once. Binary mode is a single shared template; the
     # 3-way labeller may route per annotation_type.

@@ -20,6 +20,7 @@ data/raw/s3/
 # All data and results (private student data + generated outputs)
 data/*
 !data/*.py
+!data/README.md
 results/
 benchmark/results/
 

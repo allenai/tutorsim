@@ -70,6 +70,14 @@ def merge_overlapping_ranges(moments):
     return clusters
 
 
+def load_split_ids(split: str = "train") -> set[str]:
+    """Return the set of transcript UUIDs for the given split from data/split.json."""
+    split_path = REPO_ROOT / "data" / "split.json"
+    with open(split_path) as f:
+        data = json.load(f)
+    return set(data[split])
+
+
 def load_transcripts():
     """Load all transcripts into a dict keyed by conversation ID."""
     from .storage import load_all_transcripts
@@ -98,6 +106,14 @@ def load_ground_truth(annotator_style: str | None = None) -> dict:
 
         if filter_ids:
             moments = [m for m in moments if m.get("annotator_id") in filter_ids]
+
+        # Keep the last entry per (annotator_id, annotation_type, turn_start, turn_end).
+        # Later entries represent revisions by the same annotator on the same span.
+        deduped: dict[tuple, dict] = {}
+        for m in moments:
+            key = (m.get("annotator_id"), m.get("annotation_type"), m.get("turn_start"), m.get("turn_end"))
+            deduped[key] = m
+        moments = list(deduped.values())
 
         if moments:
             conversations[conv_id] = {
@@ -158,19 +174,24 @@ def _filter_turns(turns: list[dict], dialogue_only: bool) -> list[dict]:
     """
     if not dialogue_only:
         return turns
-    return [t for t in turns if t.get("type", "DIALOGUE") == "DIALOGUE"]
+    return [t for t in turns if not t.get("is_enrichment", False)]
 
 
 def format_transcript(conversation: dict, dialogue_only: bool = False,
                       screenshots: list[dict] | None = None) -> str:
     """Format conversation turns as: Turn {n}. {ROLE}: {text}
 
+    Enrichments are shown inline without a turn number (they share the turn_number
+    of the following dialogue turn but are flagged with is_enrichment=True).
+
     Args:
         conversation: Consolidated conversation dict with "turns" key.
-        dialogue_only: If True, exclude non-dialogue turns (enrichments).
+        dialogue_only: If True, exclude enrichment turns.
         screenshots: Optional list of screenshot dicts. When provided, inlines a
             marker '  [SCREEN @ turn N: image K]' after each anchor turn. K is
-            the 1-based index of the screenshot in the list.
+            the 1-based index of the screenshot in the list. Screenshot markers
+            fire only on dialogue turns (anchor_turn references dialogue
+            numbering), never on enrichments at the same turn_number.
     """
     ss_by_turn: dict[int, list[int]] = {}
     if screenshots:
@@ -182,9 +203,12 @@ def format_transcript(conversation: dict, dialogue_only: bool = False,
         n = turn["turn_number"]
         role = turn["role"]
         text = turn["text"]
-        lines.append(f"Turn {n}. {role}: {text}")
-        for idx in ss_by_turn.get(n, []):
-            lines.append(f"  [SCREEN @ turn {n}: image {idx}]")
+        if turn.get("is_enrichment"):
+            lines.append(text)  # no turn number prefix
+        else:
+            lines.append(f"Turn {n}. {role}: {text}")
+            for idx in ss_by_turn.get(n, []):
+                lines.append(f"  [SCREEN @ turn {n}: image {idx}]")
     return "\n".join(lines)
 
 
@@ -236,23 +260,31 @@ def format_excerpt(conversation: dict, turn_start: int, turn_end: int,
         lines.append(f"[... turns 1-{excerpt_start - 1} omitted ...]")
         lines.append("")
 
+    marker_start_emitted = False
     for turn in turns:
         n = turn["turn_number"]
         if n < excerpt_start or n > excerpt_end:
             continue
 
-        # Add markers around the detected moment
-        if n == turn_start:
+        is_enrichment = turn.get("is_enrichment", False)
+
+        # Emit start marker before the first dialogue turn at turn_start
+        if n == turn_start and not is_enrichment and not marker_start_emitted:
             lines.append(f">>> DETECTED MOMENT START (Turn {turn_start}) <<<")
+            marker_start_emitted = True
 
         role = turn["role"]
         text = turn["text"]
-        lines.append(f"Turn {n}. {role}: {text}")
+        if is_enrichment:
+            lines.append(text)  # no turn number prefix
+        else:
+            marker = " <<<" if turn_start <= n <= turn_end else ""
+            lines.append(f"Turn {n}. {role}: {text}{marker}")
+            for idx in ss_by_turn.get(n, []):
+                lines.append(f"  [SCREEN @ turn {n}: image {idx}]")
 
-        for idx in ss_by_turn.get(n, []):
-            lines.append(f"  [SCREEN @ turn {n}: image {idx}]")
-
-        if n == turn_end:
+        # Emit end marker after the last dialogue turn at turn_end
+        if n == turn_end and not is_enrichment:
             lines.append(f">>> DETECTED MOMENT END (Turn {turn_end}) <<<")
 
     # Footer if we're not ending at the last turn

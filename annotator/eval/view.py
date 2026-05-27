@@ -15,7 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ..core.utils import load_ground_truth
+from ..core.utils import load_ground_truth, load_split_ids
 from ..core.storage import (
     load_annotator_result, annotator_result_exists, load_transcript,
     save_annotator_result, get_annotator_result_path,
@@ -47,6 +47,10 @@ def find_llm_file(version: str, gold: bool = False):
 def load_data(version: str, gold: bool = False):
     """Load ground truth, LLM results, and consolidated transcripts."""
     ground_truth = load_ground_truth()
+    train_ids = load_split_ids("train")
+    ground_truth["conversations"] = {
+        k: v for k, v in ground_truth["conversations"].items() if k in train_ids
+    }
 
     llm_filename, llm_type = find_llm_file(version, gold=gold)
     if not llm_filename:
@@ -68,16 +72,6 @@ def load_data(version: str, gold: bool = False):
 
         gt_conv = ground_truth["conversations"][conv_id]
         llm_conv = llm_results[conv_id]
-
-        # Deduplicate human annotations
-        seen_human = set()
-        deduped_moments = []
-        for m in gt_conv["key_moments"]:
-            key = (m.get("annotator_id"), m.get("annotation_type"), m.get("turn_start"), m.get("turn_end"))
-            if key not in seen_human:
-                seen_human.add(key)
-                deduped_moments.append(m)
-        gt_conv["key_moments"] = deduped_moments
 
         # Only keep LLM annotations whose type exists in this conversation's ground truth
         human_types = {m.get("annotation_type") for m in gt_conv["key_moments"]}

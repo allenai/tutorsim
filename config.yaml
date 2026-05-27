@@ -10,6 +10,7 @@ storage:
   paths:
     transcripts:
       - data/transcripts
+      - data/transcripts/step_up.jsonl
     ground_truth:
       - data/ground_truth_v2
     annotator_results: results/annotator

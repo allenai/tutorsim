@@ -27,7 +27,7 @@ from .storage import (
     save_annotator_shard, list_annotator_shard_ids, load_annotator_shards,
     save_inflight_batch, load_inflight_batch, clear_inflight_batch,
 )
-from .utils import format_transcript
+from .utils import format_transcript, load_split_ids
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +46,18 @@ VALID_ANNOTATION_TYPES = set(get_annotation_types())
 
 
 def load_conversations(limit: int = 0) -> list[dict]:
-    """Load all consolidated transcript JSON files via storage layer."""
+    """Load train-split transcripts via storage layer."""
     transcripts = load_all_transcripts()
     if not transcripts:
         raise FileNotFoundError(
             "No transcripts found. Ensure data/transcripts/ contains JSON files, "
             "or configure transcript paths in config.yaml under storage.paths.transcripts."
         )
-    conversations = sorted(transcripts.values(), key=lambda c: c.get("conversation_id", ""))
+    train_ids = load_split_ids("train")
+    conversations = sorted(
+        (c for c in transcripts.values() if c.get("transcript_id", "") in train_ids),
+        key=lambda c: c.get("conversation_id", ""),
+    )
     if limit > 0:
         conversations = conversations[:limit]
     return conversations

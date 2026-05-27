@@ -43,7 +43,7 @@ from pathlib import Path
 
 from ..core.config import get_valid_styles
 from ..core.utils import (
-    compute_iou, merge_overlapping_ranges, load_ground_truth,
+    compute_iou, merge_overlapping_ranges, load_ground_truth, load_split_ids,
     EXAMPLE_CONV_IDS,
 )
 from ..core.storage import (
@@ -906,8 +906,15 @@ def main():
         if cfg_style is not None:
             style = cfg_style
 
-    # Load ground truth (with optional archetype filtering)
+    # Load ground truth (with optional archetype filtering), restricted to train split
     ground_truth = load_ground_truth(annotator_style=style)
+    train_ids = load_split_ids("train")
+    ground_truth["conversations"] = {
+        conv_id: conv_data
+        for conv_id, conv_data in ground_truth["conversations"].items()
+        if conv_id in train_ids
+    }
+    print(f"Restricted ground truth to train split: {len(ground_truth['conversations'])} conversations")
 
     if style:
         print(f"Filtered ground truth to '{style}' annotators")

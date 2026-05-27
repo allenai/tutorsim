@@ -1,19 +1,40 @@
 #!/usr/bin/env python3
-"""Build ground truth files from consolidated annotations.
+"""Build ground truth files from step_up_annotations.jsonl.
 
-For each conversation in data/raw/consolidated/:
+Reads teacher annotations from a JSONL file (default: data/teacher_annotations/step_up_annotations.jsonl).
+For each conversation:
   - Reuse strategy_label for moments unchanged from the existing ground_truth file
     (matched by annotator_id + turn_start + turn_end + annotation_type + result text)
   - Classify new/changed moments via Anthropic batch API
   - Write the merged result to data/ground_truth_<labeller>/<conv_id>.json
 
-Also writes transcript files for any conversations in consolidated that are missing one.
+Only scaffolding and rapport records are processed; caption records are skipped.
+
+Output format — one JSON file per conversation:
+  {
+    "conversation_id": "<uuid>",
+    "num_turns": <int>,           # max turn_end seen across all moments
+    "key_moments": [
+      {
+        "turn_start": <int>,
+        "turn_end": <int>,
+        "annotation_type": "scaffolding" | "rapport",
+        "annotator_id": "<str>",
+        "situation": "<str>",
+        "action": "<str>",
+        "result": "<str>",
+        "strategy_label": "effective" | "partial" | "ineffective"
+      },
+      ...
+    ]
+  }
 
 Usage:
     python data/build_ground_truth.py
     python data/build_ground_truth.py --dry-run
     python data/build_ground_truth.py --labeller v2
     python data/build_ground_truth.py --labeller hybrid   # routes per annotation_type via config
+    python data/build_ground_truth.py --input path/to/annotations.jsonl
 """
 import argparse
 import hashlib
@@ -27,11 +48,58 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from annotator.core.label import JUNK_TEXTS, load_labeller_templates, pick_template
 
-CONSOLIDATED_DIR = DATA_DIR / "raw" / "consolidated"
+ANNOTATIONS_JSONL = DATA_DIR / "teacher_annotations" / "step_up_annotations.jsonl"
 GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"
-TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts" / "annotator" / "labeller"
+
+
+def load_from_jsonl(path):
+    """Load annotations from a step_up_annotations.jsonl file.
+
+    Returns list of (conv_id, conv_data) sorted by conv_id, where conv_data is:
+      {"annotations": [...], "num_turns": <int>}
+
+    Caption records are skipped. turn_number_start/end are mapped to turn_start/end.
+    annotator_id and annotation_type are promoted from the record level to each moment.
+    num_turns is the max turn_end seen across all moments for that conversation.
+    """
+    from collections import defaultdict
+
+    groups = defaultdict(list)
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            if record.get("annotation_type") not in ("scaffolding", "rapport"):
+                continue
+            conv_id = record["transcript_id"]
+            annotator_id = record.get("annotator_id", "")
+            annotation_type = record["annotation_type"]
+            for ta in record.get("turn_annotations", []):
+                if ta.get("turn_number_start") is None or ta.get("turn_number_end") is None:
+                    continue
+                groups[conv_id].append({
+                    "annotator_id": annotator_id,
+                    "turn_start": ta["turn_number_start"],
+                    "turn_end": ta["turn_number_end"],
+                    "annotation_type": annotation_type,
+                    "situation": ta.get("situation", ""),
+                    "action": ta.get("action", ""),
+                    "result": ta.get("result", ""),
+                    "_timestamp": ta.get("annotation_timestamp", ""),
+                })
+
+    result = []
+    for conv_id, annotations in sorted(groups.items()):
+        annotations.sort(key=lambda a: a["_timestamp"])
+        for a in annotations:
+            del a["_timestamp"]
+        num_turns = max((a["turn_end"] for a in annotations if a["turn_end"] is not None), default=0)
+        result.append((conv_id, {"annotations": annotations, "num_turns": num_turns}))
+    return result
 
 
 def _load_prompt(name: str) -> str:
@@ -157,15 +225,22 @@ def main():
                              "config.yaml's annotator.labeller dict. Any other value loads "
                              "classify_{labeller}.txt as a single template. Determines output "
                              "dir (ground_truth_{labeller}/). Default: v2.")
+    parser.add_argument("--input", default=str(ANNOTATIONS_JSONL),
+                        help="Path to annotations JSONL file (default: teacher_annotations/step_up_annotations.jsonl)")
     args = parser.parse_args()
 
     global GROUND_TRUTH_DIR
     if args.labeller != "v1":
         GROUND_TRUTH_DIR = DATA_DIR / f"ground_truth_{args.labeller}"
 
-    if not CONSOLIDATED_DIR.exists():
-        print(f"ERROR: consolidated dir not found: {CONSOLIDATED_DIR}")
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"ERROR: input file not found: {input_path}")
         return
+
+    print(f"Loading annotations from {input_path}...")
+    conversations = load_from_jsonl(input_path)
+    print(f"Loaded {len(conversations)} conversations")
 
     existing_labels = load_existing_labels()
     print(f"Loaded existing labels for {len(existing_labels)} conversations")
@@ -173,10 +248,7 @@ def main():
     # First pass: build per-conv plan (reuse vs classify)
     conv_plans = []
     to_classify = []  # list of {key, result_text}
-    for consolidated_file in sorted(CONSOLIDATED_DIR.glob("*.json")):
-        conv_id = consolidated_file.stem
-        with open(consolidated_file, "r", encoding="utf-8") as fp:
-            conv_data = json.load(fp)
+    for conv_id, conv_data in conversations:
         annotations = conv_data.get("annotations", [])
         known = existing_labels.get(conv_id, {})
 
@@ -216,17 +288,17 @@ def main():
 
     # Third pass: write ground truth files
     GROUND_TRUTH_DIR.mkdir(parents=True, exist_ok=True)
-    TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
     gt_written = 0
-    tx_written = 0
     for conv_id, conv_data, plan in conv_plans:
         moments = []
         for kind, ann, val in plan:
             if kind == "reuse":
-                moments.append(build_moment(ann, val))
+                if val != "unclear":
+                    moments.append(build_moment(ann, val))
             else:
                 label = new_labels.get(val, "unclear")
-                moments.append(build_moment(ann, label))
+                if label != "unclear":
+                    moments.append(build_moment(ann, label))
         out = {
             "conversation_id": conv_id,
             "num_turns": conv_data.get("num_turns", 0),
@@ -237,15 +309,8 @@ def main():
             json.dump(out, fp, indent=2, ensure_ascii=False)
         gt_written += 1
 
-        tx_path = TRANSCRIPTS_DIR / f"{conv_id}.json"
-        if not tx_path.exists():
-            with open(tx_path, "w", encoding="utf-8") as fp:
-                json.dump(conv_data, fp, indent=2, ensure_ascii=False)
-            tx_written += 1
-
     print(f"\nDone!")
     print(f"  Ground truth files written: {gt_written}")
-    print(f"  Transcript files written (new only): {tx_written}")
     print(f"  Total ground truth: {len(list(GROUND_TRUTH_DIR.glob('*.json')))}")
 
 

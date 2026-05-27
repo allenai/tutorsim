@@ -22,9 +22,17 @@ from ..core.config import get_phase_config, load_config, get_valid_styles
 from ..core.storage import load_annotator_result, save_annotator_result
 from ..core.utils import (
     compute_iou, merge_overlapping_ranges, load_transcripts, get_excerpt,
-    load_ground_truth, REPO_ROOT, IOU_THRESHOLD,
+    load_ground_truth, load_split_ids, REPO_ROOT, IOU_THRESHOLD,
     EXAMPLE_CONV_IDS,
 )
+
+
+def _load_ground_truth_train(annotator_style=None):
+    """Load ground truth filtered to the train split (and optionally an annotator archetype)."""
+    gt = load_ground_truth(annotator_style=annotator_style)
+    train_ids = load_split_ids("train")
+    gt["conversations"] = {k: v for k, v in gt["conversations"].items() if k in train_ids}
+    return gt
 
 
 # ===================================================================
@@ -33,7 +41,7 @@ from ..core.utils import (
 
 def collect_detection_errors(version, ann_type, transcripts, limit=10):
     """Collect detection errors and correct matches for comprehensive analysis."""
-    gt = load_ground_truth()
+    gt = _load_ground_truth_train()
 
     det_data = load_annotator_result(version, "detections.json")
     if det_data is None:
@@ -178,7 +186,7 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     )
 
     if ground_truth is None:
-        gt = load_ground_truth(annotator_style=annotator_style)
+        gt = _load_ground_truth_train(annotator_style=annotator_style)
     else:
         gt = ground_truth
 
@@ -491,7 +499,7 @@ def main():
         # The advisor iterates the whole prompt to naturally match the archetype.
         filtered_gt = None
         if args.annotator_style:
-            filtered_gt = load_ground_truth(annotator_style=args.annotator_style)
+            filtered_gt = _load_ground_truth_train(annotator_style=args.annotator_style)
             print(f"Ground truth filtered to '{args.annotator_style}' annotators")
 
         # Strip the {annotator_style} placeholder (no style injection)
@@ -754,7 +762,7 @@ def analyze_main():
     args = parser.parse_args()
 
     # Load data
-    gt = load_ground_truth()
+    gt = _load_ground_truth_train()
 
     det_data = load_annotator_result(args.version, "detections.json")
     if det_data is None:
