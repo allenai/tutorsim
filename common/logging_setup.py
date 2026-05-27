@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _REPO_ROOT_DEFAULT = Path(__file__).resolve().parent.parent
-_FORMAT = "%(asctime)s %(levelname)-7s %(name)s — %(message)s"
+_FORMAT = "%(asctime)s %(levelname)-7s %(name)s | %(message)s"
 _DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 _CONSOLE_SENTINEL = "_logging_setup_console"

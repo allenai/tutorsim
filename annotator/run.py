@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import datetime
+import logging
 from pathlib import Path
 
 from common.logging_setup import setup_logging
@@ -22,6 +23,8 @@ from .core.config import get_phase_config, get_valid_styles, get_annotation_type
 from .core.detect import run_detect
 from .core.annotate import run_annotate
 from .core.label import run_label
+
+logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts" / "annotator"
 
@@ -93,9 +96,7 @@ def main():
     # --- Pass 1: Detect ---
     detections_data = None
     if not args.skip_detect:
-        print("=" * 60)
-        print("  PASS 1: Detection")
-        print("=" * 60)
+        logger.info("=== PASS 1: Detection ===")
         detect_cfg = get_phase_config("detect", profile)
         detect_output = run_detect(
             version=version,
@@ -113,9 +114,7 @@ def main():
     # --- Pass 2: Annotate ---
     annotations_data = None
     if not args.skip_annotate:
-        print("\n" + "=" * 60)
-        print("  PASS 2: Annotation")
-        print("=" * 60)
+        logger.info("=== PASS 2: Annotation ===")
         annotate_cfg = get_phase_config("annotate", profile)
         context_window = (args.context if args.context is not None
                           else annotate_cfg.get("context_window", 20))
@@ -135,13 +134,11 @@ def main():
             split=args.split,
         )
         if annotations_data is None:
-            print("Annotation failed. Aborting.")
+            logger.error("Annotation failed. Aborting.")
             return
 
     # --- Pass 3: Label ---
-    print("\n" + "=" * 60)
-    print("  PASS 3: Labeling")
-    print("=" * 60)
+    logger.info("=== PASS 3: Labeling ===")
     label_cfg = get_phase_config("label", profile)
     run_label(
         version=version,
@@ -156,14 +153,12 @@ def main():
         split=args.split,
     )
 
-    print("\n" + "=" * 60)
-    print("  Pipeline complete!")
+    logger.info("=== Pipeline complete ===")
     style_flag = f" --annotator-style {style}" if style else ""
     profile_flag = f" --profile {profile}" if profile else ""
     split_flag = f" --split {args.split}" if args.split != "train" else ""
-    print(f"  Next: python -m annotator.eval.eval --version {version}{profile_flag}{style_flag}{split_flag}")
-    print("=" * 60)
-
+    logger.info(f"  Next: python -m annotator.eval.eval --version {version}{profile_flag}{style_flag}{split_flag}")
+    logger.info("=" * 60)
 
 if __name__ == "__main__":
     main()

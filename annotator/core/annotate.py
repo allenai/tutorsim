@@ -20,10 +20,12 @@ Usage:
 
 import argparse
 import datetime
+import hashlib
 import json
 import logging
 from pathlib import Path
 
+from common.logging_setup import setup_logging
 from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
@@ -31,12 +33,21 @@ from .config import get_phase_config, get_valid_styles, get_annotation_types
 from .storage import (
     load_all_transcripts, load_annotator_result, save_annotator_result,
     annotator_result_exists, get_annotator_result_path,
+    save_annotator_shard, list_annotator_shard_ids, load_annotator_shards,
+    save_inflight_batch, load_inflight_batch, clear_inflight_batch,
 )
 from .utils import format_excerpt, load_ground_truth, load_split_ids
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "annotator"
+
+
+def _entries_keys_hash(entries: list[dict]) -> str:
+    """Stable short hash of an entries list, keyed on entry order + keys.
+    Mirrors detect._entries_keys_hash for in-flight batch matching."""
+    joined = "\n".join(e["key"] for e in entries)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 VALID_TARGETS = get_annotation_types()
 VALID_ANNOTATION_TYPES = set(get_annotation_types())
@@ -157,12 +168,21 @@ def load_prompt(version: str, target: str) -> str:
 def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
                            context_window: int, version: str,
                            dialogue_only: bool = False,
-                           annotator_style: str | None = None) -> list[dict]:
+                           annotator_style: str | None = None,
+                           with_screenshots: bool = False,
+                           screenshots_by_conv: dict[str, list[dict]] | None = None) -> list[dict]:
     """Build batch entries for analysis.
 
     annotator_style is accepted for API compatibility but NOT injected into
     prompts. Style calibration is achieved by iterating the prompt against
     archetype-filtered ground truth, not by injecting style text.
+
+    When with_screenshots=True, attaches per-moment images whose anchor turn
+    falls inside the excerpt window (excerpt_start <= anchor_turn <= excerpt_end,
+    inclusive). If screenshots_by_conv is provided, it overrides per-conv lookup
+    by conv_id -- the caller has already done the loading, possibly with a
+    different conv_id than the iteration key (e.g. the benchmark bridge passes
+    scenario_id-keyed entries with screenshots loaded from the original conv_id).
     """
     prompt_cache = {}
     entries = []
@@ -173,6 +193,18 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
             logger.warning("No transcript found for %s, skipping", conv_id)
             continue
 
+        if screenshots_by_conv is not None:
+            all_screenshots = screenshots_by_conv.get(conv_id, [])
+        elif with_screenshots:
+            from .screenshots import load_anchored_screenshots
+            all_screenshots = load_anchored_screenshots(conv_id, conversation["turns"])
+        else:
+            all_screenshots = []
+
+        turns = conversation.get("turns", [])
+        min_turn = turns[0]["turn_number"] if turns else 1
+        max_turn = turns[-1]["turn_number"] if turns else 1
+
         for idx, det in enumerate(conv_data.get("detections", [])):
             ann_type = det.get("annotation_type", "scaffolding")
             if ann_type not in VALID_ANNOTATION_TYPES:
@@ -182,13 +214,22 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
             turn_end = det.get("turn_end", turn_start)
             situation = det.get("situation", "") or det.get("brief_description", "")
 
+            excerpt_start = max(min_turn, turn_start - context_window)
+            excerpt_end = min(max_turn, turn_end + context_window)
+            in_scope = [
+                s for s in all_screenshots
+                if excerpt_start <= s["anchor_turn"] <= excerpt_end
+            ]
+            image_paths = [s["storage_path"] for s in in_scope]
+
             if ann_type not in prompt_cache:
                 prompt_cache[ann_type] = load_prompt(version, ann_type)
 
             excerpt = format_excerpt(
                 conversation, turn_start, turn_end,
                 context_before=context_window, context_after=context_window,
-                dialogue_only=dialogue_only
+                dialogue_only=dialogue_only,
+                screenshots=in_scope if in_scope else None,
             )
 
             prompt = prompt_cache[ann_type]
@@ -199,7 +240,9 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
             prompt = prompt.replace("{turn_end}", str(turn_end))
 
             key = f"{conv_id}__{ann_type}__{idx}"
-            entries.append(build_batch_entry(key, prompt))
+            entries.append(build_batch_entry(
+                key, prompt, images=image_paths or None,
+            ))
 
     return entries
 
@@ -295,7 +338,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  detections_by_conv: dict | None = None,
                  dry_run: bool = False,
                  profile: str | None = None,
-                 split: str = "train") -> dict:
+                 split: str = "train",
+                 with_screenshots: bool = False) -> dict:
     """Run annotation pass. Returns the full output dict (with 'results' key).
 
     If detections_by_conv is provided, uses it directly instead of reading
@@ -303,10 +347,20 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
 
     If dry_run is True, loads data and builds all entries but stops before
     any API call. Writes annotate_requests.jsonl and prints the first prompt.
+    Resumable: per-conv results write to shards under
+
+    results/annotator/{version}/shards/{basename}/{conv_id}.json as they parse
+    (basename = output filename without .json, e.g. "annotations_generous").
+    A re-run with the same flags skips conv_ids that already have a shard.
     """
     output_dir = get_annotator_result_path(version)
 
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    filename = f"annotations_gold{style_suffix}.json" if gold else f"annotations{style_suffix}.json"
+    output_basename = filename[:-5]  # strip .json -- this is the shard namespace
+
     conversations_map = load_conversations_map(split=split)
+
     logger.info("Loaded %d transcripts", len(conversations_map))
 
     if detections_by_conv is None:
@@ -327,41 +381,134 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     style_str = f" | Style: {annotator_style}" if annotator_style else ""
     logger.info("Model: %s | Mode: %s | Context: +/-%d turns%s", model, mode, context_window, style_str)
 
-    client = ModelClient(model)
+    existing_ids = set(list_annotator_shard_ids(version, output_basename))
+    detections_to_process = {
+        cid: d for cid, d in detections_by_conv.items() if cid not in existing_ids
+    }
+    if existing_ids:
+        logger.info("Resuming version %s/%s: %d shards already on disk, %d to process",
+                    version, output_basename, len(existing_ids), len(detections_to_process))
 
-    enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
-    logger.info("Transcript mode: %s", enrichment_str)
-    entries = build_analysis_entries(
-        detections_by_conv, conversations_map, context_window, prompt_version,
-        dialogue_only=dialogue_only, annotator_style=annotator_style
-    )
-    profile_suffix = f"_{profile}" if profile else ""
-    jsonl_path = str(output_dir / f"annotate_requests{profile_suffix}.jsonl")
-    write_jsonl(entries, jsonl_path)
-    logger.info("Wrote %d analysis entries", len(entries))
+    if detections_to_process:
+        client = ModelClient(model)
 
-    if dry_run:
-        logger.info("DRY RUN: stopping before API call. Requests written to %s", jsonl_path)
-        return None
+        if with_screenshots:
+            from .client import validate_vision_support
+            validate_vision_support(model)
+            logger.info("Screenshots: enabled -- vision model validated, caching ON")
 
-    if mode == "batch":
-        poll_interval = phase_cfg["poll_interval"]
-        raw = run_batch(client, entries, display_name="annotate", poll_interval=poll_interval,
-                       thinking=phase_cfg.get("thinking", False),
-                       thinking_budget=phase_cfg.get("thinking_budget", 0),
-                       reasoning_effort=phase_cfg.get("reasoning_effort", ""))
+        enrichment_str = "dialogue only" if dialogue_only else "enriched (all turns)"
+        logger.info("Transcript mode: %s", enrichment_str)
+        entries = build_analysis_entries(
+            detections_to_process, conversations_map, context_window, prompt_version,
+            dialogue_only=dialogue_only, annotator_style=annotator_style,
+            with_screenshots=with_screenshots,
+        )
+        profile_suffix = f"_{profile}" if profile else ""
+        jsonl_path = str(output_dir / f"annotate_requests{profile_suffix}.jsonl")
+        write_jsonl(entries, jsonl_path)
+        logger.info("Wrote %d analysis entries", len(entries))
+
+        if dry_run:
+            logger.info("DRY RUN: stopping before API call. Requests written to %s", jsonl_path)
+            return None
+
+        # Per-annotation `images_seen` = images attached to that single prompt.
+        # Per-conv `images_attached` = sum across this conv's prompts -- matches
+        # the same field on detection shards.
+        images_per_key = {
+            e["key"]: len(e["request"].get("images", []))
+            for e in entries
+        }
+
+        def _stamp_and_shard(conv_results: dict) -> None:
+            for cid, cresult in conv_results.items():
+                for i, ann in enumerate(cresult["annotations"]):
+                    ann_type = ann.get("annotation_type", "scaffolding")
+                    k = f"{cid}__{ann_type}__{i}"
+                    ann["images_seen"] = images_per_key.get(k, 0)
+                cresult["images_attached"] = sum(
+                    a.get("images_seen", 0) for a in cresult["annotations"]
+                )
+                save_annotator_shard(version, output_basename, cid, cresult)
+                logger.debug("Shard saved: %s", cid)
+
+        if mode == "batch":
+            poll_interval = phase_cfg["poll_interval"]
+
+            inflight = load_inflight_batch(version, output_basename)
+            existing_batch_id = None
+            if inflight:
+                expected = inflight.get("entry_keys_hash")
+                actual = _entries_keys_hash(entries)
+                if expected == actual:
+                    existing_batch_id = inflight["batch_id"]
+                    logger.info("Found in-flight %s batch %s (submitted %s). Resuming poll.",
+                                output_basename, existing_batch_id,
+                                inflight.get("submitted_at", "?"))
+                else:
+                    logger.error(
+                        "In-flight %s batch sidecar exists but entry-keys hash differs "
+                        "(sidecar=%s, current=%s). Detections may have changed between runs. "
+                        "Delete %s/in_flight/%s.json to start a fresh batch.",
+                        output_basename, expected, actual, version, output_basename,
+                    )
+                    raise RuntimeError("entry-keys mismatch on in-flight batch resume")
+
+            def _record(batch_id: str) -> None:
+                save_inflight_batch(version, output_basename, {
+                    "provider": client.provider,
+                    "model": model,
+                    "batch_id": batch_id,
+                    "n_entries": len(entries),
+                    "entry_keys_hash": _entries_keys_hash(entries),
+                    "display_name": "annotate",
+                    "submitted_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                })
+
+            raw = run_batch(client, entries, display_name="annotate",
+                            poll_interval=poll_interval,
+                            thinking=phase_cfg.get("thinking", False),
+                            thinking_budget=phase_cfg.get("thinking_budget", 0),
+                            reasoning_effort=phase_cfg.get("reasoning_effort", ""),
+                            enable_cache=with_screenshots,
+                            existing_batch_id=existing_batch_id,
+                            on_batch_created=_record)
+            _stamp_and_shard(parse_and_merge(raw, detections_to_process))
+            clear_inflight_batch(version, output_basename)
+        else:
+            # Per-conv sync: shard after each conv's entries return so a
+            # ctrl-C between convs leaves valid partial state on disk.
+            entries_by_conv: dict[str, list[dict]] = {}
+            for e in entries:
+                cid = e["key"].split("__", 1)[0]
+                entries_by_conv.setdefault(cid, []).append(e)
+            logger.info("Running %d convs in sync mode...", len(entries_by_conv))
+            for i, (conv_id, conv_entries) in enumerate(entries_by_conv.items(), start=1):
+                logger.info("Conv %d/%d: %s", i, len(entries_by_conv), conv_id)
+                raw_conv = run_sync_entries(client, conv_entries)
+                conv_dets = {conv_id: detections_to_process[conv_id]}
+                _stamp_and_shard(parse_and_merge(raw_conv, conv_dets))
     else:
-        logger.info("Running %d entries in sync mode...", len(entries))
-        raw = run_sync_entries(client, entries)
-    results = parse_and_merge(raw, detections_by_conv)
+        logger.info("All conversations already have shards -- nothing to send")
 
-    total_annotations = sum(len(r["annotations"]) for r in results.values())
-    total_input = sum(r["usage"]["input_tokens"] for r in results.values())
-    total_output = sum(r["usage"]["output_tokens"] for r in results.values())
+    # Aggregate the monolithic JSON from the union of all shards.
+    results = load_annotator_shards(version, output_basename)
+
+    total_annotations = sum(len(r.get("annotations", [])) for r in results.values())
+    total_input = sum(r.get("usage", {}).get("input_tokens", 0) for r in results.values())
+    total_output = sum(r.get("usage", {}).get("output_tokens", 0) for r in results.values())
+    total_images_sent = sum(r.get("images_attached", 0) for r in results.values())
+    convs_with_images = sum(1 for r in results.values() if r.get("images_attached", 0) > 0)
+    annotations_with_images = sum(
+        1 for r in results.values()
+        for a in r.get("annotations", [])
+        if a.get("images_seen", 0) > 0
+    )
     error_count = sum(
         1 for r in results.values()
         if any(a.get("action", "").startswith("[Analysis unavailable")
-               for a in r["annotations"])
+               for a in r.get("annotations", []))
     )
 
     output = {
@@ -374,6 +521,10 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
         "thinking_budget": phase_cfg.get("thinking_budget", 0),
         "total_conversations": len(results),
         "total_annotations": total_annotations,
+        "with_screenshots": with_screenshots,
+        "convs_with_images": convs_with_images,
+        "annotations_with_images": annotations_with_images,
+        "total_images_sent": total_images_sent,
         "results": results,
         "token_summary": {
             "total_input_tokens": total_input,
@@ -439,6 +590,9 @@ def main():
                         help="Build and write all entries but stop before any API call")
     parser.add_argument("--split", choices=["train", "test"], default="train",
                         help="Which split to run on (default: train)")
+    parser.add_argument("--with-screenshots", action="store_true",
+                        help="Include anchored screenshots from each moment's "
+                             "context window. Requires a vision-capable model.")
     args = parser.parse_args()
 
     from common.logging_setup import setup_logging
@@ -456,6 +610,8 @@ def main():
     style = params["style"]
     prompt_version = params["prompt_version"]
 
+    setup_logging(version=version)
+
     phase_cfg = get_phase_config("annotate", profile)
     model = args.model or phase_cfg["model"]
     mode = args.mode or phase_cfg.get("mode", "batch")
@@ -470,7 +626,7 @@ def main():
                           phase_cfg=phase_cfg, dialogue_only=args.dialogue_only,
                           context_window=context_window, gold=args.gold,
                           annotator_style=style, dry_run=args.dry_run,
-                          profile=profile, split=args.split)
+                          profile=profile, split=args.split, with_screenshots=args.with_screenshots)
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""

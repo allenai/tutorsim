@@ -184,7 +184,8 @@ def _filter_turns(turns: list[dict], dialogue_only: bool) -> list[dict]:
     return [t for t in turns if not t.get("is_enrichment", False)]
 
 
-def format_transcript(conversation: dict, dialogue_only: bool = False) -> str:
+def format_transcript(conversation: dict, dialogue_only: bool = False,
+                      screenshots: list[dict] | None = None) -> str:
     """Format conversation turns as: Turn {n}. {ROLE}: {text}
 
     Enrichments are shown inline without a turn number (they share the turn_number
@@ -192,8 +193,16 @@ def format_transcript(conversation: dict, dialogue_only: bool = False) -> str:
 
     Args:
         conversation: Consolidated conversation dict with "turns" key.
-        dialogue_only: If True, exclude enrichment turns.
+        dialogue_only: If True, exclude non-dialogue turns (enrichments).
+        screenshots: Optional list of screenshot dicts. When provided, inlines a
+            marker '  [SCREEN @ turn N: image K]' after each anchor turn. K is
+            the 1-based index of the screenshot in the list.
     """
+    ss_by_turn: dict[int, list[int]] = {}
+    if screenshots:
+        for idx, s in enumerate(screenshots, start=1):
+            ss_by_turn.setdefault(s["anchor_turn"], []).append(idx)
+
     lines = []
     for turn in _filter_turns(conversation["turns"], dialogue_only):
         n = turn["turn_number"]
@@ -203,12 +212,15 @@ def format_transcript(conversation: dict, dialogue_only: bool = False) -> str:
             lines.append(text)  # no turn number prefix
         else:
             lines.append(f"Turn {n}. {role}: {text}")
+            for idx in ss_by_turn.get(n, []):
+                lines.append(f"  [SCREEN @ turn {n}: image {idx}]")
     return "\n".join(lines)
 
 
 def format_excerpt(conversation: dict, turn_start: int, turn_end: int,
                    context_before: int = 20, context_after: int = 20,
-                   dialogue_only: bool = False) -> str:
+                   dialogue_only: bool = False,
+                   screenshots: list[dict] | None = None) -> str:
     """Extract a transcript excerpt around a detected moment, with context.
 
     Outputs the detected range with >>> markers, surrounded by context turns.
@@ -221,6 +233,10 @@ def format_excerpt(conversation: dict, turn_start: int, turn_end: int,
         context_before: Number of turns before the detection to include.
         context_after: Number of turns after the detection to include.
         dialogue_only: If True, exclude non-dialogue turns (enrichments).
+        screenshots: Optional list of screenshot dicts. When provided, inlines
+            '  [SCREEN @ turn N: image K]' markers for screenshots whose
+            anchor_turn falls inside the rendered excerpt range. Screenshots
+            are numbered by their position in the passed list (K=1..len).
     """
     turns = _filter_turns(conversation["turns"], dialogue_only)
     if not turns:
@@ -234,6 +250,13 @@ def format_excerpt(conversation: dict, turn_start: int, turn_end: int,
     # Calculate excerpt boundaries
     excerpt_start = max(min_turn, turn_start - context_before)
     excerpt_end = min(max_turn, turn_end + context_after)
+
+    # Build screenshot marker index, only for anchors inside the excerpt window.
+    ss_by_turn: dict[int, list[int]] = {}
+    if screenshots:
+        for idx, s in enumerate(screenshots, start=1):
+            if excerpt_start <= s["anchor_turn"] <= excerpt_end:
+                ss_by_turn.setdefault(s["anchor_turn"], []).append(idx)
 
     lines = []
 
@@ -262,6 +285,8 @@ def format_excerpt(conversation: dict, turn_start: int, turn_end: int,
         else:
             marker = " <<<" if turn_start <= n <= turn_end else ""
             lines.append(f"Turn {n}. {role}: {text}{marker}")
+            for idx in ss_by_turn.get(n, []):
+                lines.append(f"  [SCREEN @ turn {n}: image {idx}]")
 
         # Emit end marker after the last dialogue turn at turn_end
         if n == turn_end and not is_enrichment:

@@ -119,3 +119,19 @@ We confirmed this with variance checks (rerunning identical prompts). A +4pp ann
 ### 11. Go back to the source material
 
 When a prompt has drifted through iteration, don't patch further. Go back to the original research instructions and rewrite from scratch. The original research framing ("We are studying how tutors decide to push for rigor versus introduce scaffolds...") was clear and well-scoped. v3 had drifted away from it. Going back improved the prompts more than any advisor cycle.
+
+---
+
+## 2026-04-28: Benchmark screenshots — wired, but data-pairing gap blocks validation
+
+**Original gap:** The annotator pipeline supports `--with-screenshots` (delivered 2026-04-24) but the benchmark — which reuses the annotator under the hood — never threaded the flag. Detection ran without images; tutor/student exchanges were text-only; annotation didn't see the screen even though the equivalent annotator-standalone run did.
+
+**Why the flag was a no-op:** `build_analysis_entries` and `build_detection_entries` were keying screenshot lookup on `conv_id`. The benchmark bridge remaps `conv_id -> scenario_id` to namespace bulk batch keys, so the lookup silently returned `[]`.
+
+**Fix (committed 2026-04-28):** Decoupled screenshot loading from screenshot use. Both functions now accept an optional `screenshots_by_conv` dict — if provided, the function uses it directly instead of looking up by conv_id. The bridge loads screenshots using the original `scenario.conv_id` and passes a dict keyed on `scenario_id` so the function's iteration key still matches. Phase 1 exchange similarly accepts `images=` (sync) and `images_by_scenario=` (batch). Vision validation runs once at run start when `--with-screenshots` is on. Default off — existing text-only runs are byte-for-byte unchanged.
+
+**Caveat — data-pairing gap (not yet resolved):** Smoke-tested but **never exercised end-to-end with real images**. The S3 bucket has screenshots for only 3 conv UUIDs (`099bf759`, `202f38ab`, `9c6f61b1`) under `deidentified/screenshots/`, and *none* of those UUIDs appear anywhere else in the bucket — not in `deidentified/step_up.jsonl` (250 deidentified transcripts, all `has_video: False`), not in `transcripts/text transcripts.zip` (109 transcripts), not in our local 212 transcripts. Until someone deidentifies-and-publishes transcripts for those video sessions (or deidentifies more screenshots for already-published transcripts), every benchmark run with `--with-screenshots` degrades to text-only because the loader honestly returns `[]` for every conv. This isn't an S3 access problem (creds work fine via boto3 default chain) — it's a data-completeness problem owned by whoever runs the deidentification pipeline.
+
+**How to verify when data lands:** any conv that's in both the local transcript set and S3's `deidentified/screenshots/` will produce non-zero `total_images_sent` in `detections.json`. That's the cleanest single-field signal that real images flowed.
+
+**Latent gap noted but not fixed:** Benchmark annotation shards don't track `images_attached`/`images_seen` because `annotator_bridge.execute_and_parse_bulk` calls `parse_and_merge` directly, skipping the `_stamp_and_shard` step in `annotator/core/annotate.py:343-356` that adds those fields. Worth a follow-up so annotation-side image flow is visible per-shard, not only inferable from API request logs.

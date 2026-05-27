@@ -36,6 +36,7 @@ Usage:
     python data/build_ground_truth.py --dry-run
     python data/build_ground_truth.py --labeller v2
     python data/build_ground_truth.py --input path/to/annotations.jsonl
+    python data/build_ground_truth.py --labeller hybrid   # routes per annotation_type via config
 """
 import argparse
 import hashlib
@@ -47,7 +48,7 @@ DATA_DIR = Path(__file__).parent
 REPO_ROOT = DATA_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from annotator.core.label import JUNK_TEXTS
+from annotator.core.label import JUNK_TEXTS, load_labeller_templates, pick_template
 
 ANNOTATIONS_JSONL = DATA_DIR / "teacher_annotations" / "step_up_annotations.jsonl"
 GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"
@@ -146,16 +147,23 @@ def load_existing_labels():
 def classify_batch(items, labeller="v2"):
     """Run batch classification. `items` is list of dicts with keys:
     key, annotation_type, situation, action, result_text.
-    Returns {key: label}."""
+    Returns {key: label}.
+
+    labeller="hybrid" routes per annotation_type using the `annotator.labeller`
+    dict in config.yaml. Any other value loads classify_{labeller}.txt as a
+    single shared template (legacy behavior)."""
     if not items:
         return {}
     from annotator.core.client import ModelClient, run_batch, build_batch_entry
-    from annotator.core.config import get_phase_config
+    from annotator.core.config import get_phase_config, get_annotator_defaults
 
     cfg = get_phase_config("label")
     client = ModelClient(cfg["model"])
 
-    template = _load_prompt(f"classify_{labeller}")
+    if labeller == "hybrid":
+        templates = load_labeller_templates(get_annotator_defaults()["labeller"])
+    else:
+        templates = {None: _load_prompt(f"classify_{labeller}")}
 
     entries = []
     labels = {}
@@ -165,8 +173,10 @@ def classify_batch(items, labeller="v2"):
         if stripped in JUNK_TEXTS:
             labels[it["key"]] = "unclear"
             continue
+        annotation_type = it.get("annotation_type", "unknown")
+        template = pick_template(templates, annotation_type)
         prompt = (template
-                  .replace("{annotation_type}", it.get("annotation_type", "unknown"))
+                  .replace("{annotation_type}", annotation_type)
                   .replace("{situation}", it.get("situation", ""))
                   .replace("{action}", it.get("action", ""))
                   .replace("{result_text}", text))
@@ -223,7 +233,10 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Show counts without submitting batch or writing files")
     parser.add_argument("--labeller", default="v2",
-                        help="Labeller version (determines output dir and prompt, default: v2)")
+                        help="Labeller version. 'hybrid' routes per annotation_type using "
+                             "config.yaml's annotator.labeller dict. Any other value loads "
+                             "classify_{labeller}.txt as a single template. Determines output "
+                             "dir (ground_truth_{labeller}/). Default: v2.")
     parser.add_argument("--input", default=str(ANNOTATIONS_JSONL),
                         help="Path to annotations JSONL file (default: teacher_annotations/step_up_annotations.jsonl)")
     args = parser.parse_args()

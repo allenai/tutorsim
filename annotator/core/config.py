@@ -13,9 +13,12 @@ Usage:
     mode = cfg.get("mode", "batch")
 """
 
+import logging
 import yaml
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
 _loaded_config = None
@@ -136,8 +139,9 @@ def get_benchmark_config(overrides: dict | None = None) -> dict:
     This is the single entry point for benchmark configuration.
     Replaces benchmark/run.py's local load_config().
     """
+    import copy
     config = load_config()
-    bm = config.get("benchmark", {})
+    bm = copy.deepcopy(config.get("benchmark", {}))
 
     if overrides:
         # Direct key overrides (e.g. tutor_profiles, exchange, etc.)
@@ -158,6 +162,8 @@ def get_benchmark_config(overrides: dict | None = None) -> dict:
             bm["annotator"]["mode"] = overrides["mode"]
         if overrides.get("test_transcripts"):
             bm["scenarios"]["test_transcripts"] = overrides["test_transcripts"]
+        if overrides.get("with_screenshots"):
+            bm["with_screenshots"] = True
 
     return bm
 
@@ -187,7 +193,7 @@ def resolve_run_params(
     else:
         date_str = datetime.date.today().strftime("%Y-%m-%d")
         version = f"{profile}_{date_str}"
-        print(f"  Auto-generated version: {version}")
+        logger.info("Auto-generated version: %s", version)
 
     style = cli_style
     if style is None:
