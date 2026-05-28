@@ -1,37 +1,48 @@
 """
 8-metric evaluation scorecard.
 
-Supports three modes:
-  --mode detections   : evaluate only key moment detection (reads detections.json)
-  --mode annotations  : evaluate only labeling quality (reads annotations.json)
-  --mode full         : evaluate everything (reads annotations.json)
+Supports four modes:
+  --mode detections      : evaluate only key moment detection (reads detections.json)
+  --mode annotations_old : evaluate only labeling quality -- original approach (Cohen's kappa,
+                           majority-vote consensus)
+  --mode annotations     : evaluate labeling quality -- new approach (Krippendorff's alpha,
+                           mean-score consensus)
+  --mode full            : temporarily disabled; choose an explicit annotations mode
 
-Metrics:
-  PRIMARY (optimize):
-    1. Cluster Recall (IoU >= 0.3)  -- fraction of human clusters found
-    2. Binary Kappa                 -- effective vs not-effective agreement
+Annotation evaluation approach (annotations and annotations_old modes)
+-----------------------------------------------------------------------
+For each conversation, human moments and LM annotations are compared as follows:
 
-  DIAGNOSTIC (understand quality):
-    3. Moment Precision (IoU >= 0.3) -- fraction of LLM moments matching a human cluster
-    4. Mean IoU                      -- average overlap quality of matched pairs
-    5. Within-Human-Range            -- % of LLM labels matching at least one annotator
+  1. UNIQUENESS: moments are deduplicated by (conversation, turn_start, turn_end,
+     annotation_type). Each unique span is one unit of evaluation.
 
-  GUARDRAILS (flag regressions):
-    6. Effective Rate                -- flag if >60% (rubber-stamping)
-    7. Zero-Partial Rate             -- flag if >30% (missing nuance)
-    8. Invalid Labels                -- flag if >0 (hallucinated values)
+  2. CONSENSUS: when multiple human annotators labeled the same span, their
+     effectiveness labels are aggregated into a single consensus label.
+     - annotations_old: majority vote with ordinal median tiebreak
+     - annotations:     mean score (effective=1, partial=0, ineffective=-1);
+                        DEFAULT_CONSENSUS_THRESHOLD -> effective, <=-DEFAULT_CONSENSUS_THRESHOLD -> ineffective, else partial
 
-  CONTEXT (not for hill-climbing):
-    - Human ceiling, confusion matrix, counts, binary accuracy
+  3. MATCHING: each unique human span is matched to a single LM annotation.
+     - gold mode (--gold):     exact (turn_start, turn_end, annotation_type) lookup;
+                               first LM annotation wins if duplicates exist
+     - non-gold mode:          highest-IoU LM annotation (threshold 0.3);
+                               each LM annotation can only be matched once
+
+  4. AGREEMENT metric:
+     - annotations_old: Cohen's kappa (binary and 3-way) between consensus and LM label
+     - annotations:     Krippendorff's alpha (ordinal) between consensus and LM label
+
+In annotations mode, agreement metrics (Krippendorff's alpha) are reported per
+annotation type only — no aggregated totals across types. In annotations_old mode,
+aggregate effectiveness metrics (binary kappa, accuracy) are also reported.
 
 Usage:
-    python -m annotator.eval.eval --version v1
+    python -m annotator.eval.eval --version v1 --mode annotations --profile anthropic
     python -m annotator.eval.eval --version v1 --mode detections
-    python -m annotator.eval.eval --version v1 --mode annotations
+    python -m annotator.eval.eval --version v1 --mode annotations_old --profile anthropic
 
     # Compare versions side-by-side
     python -m annotator.eval.eval --compare v1 v2 --mode detections
-    python -m annotator.eval.eval --compare v1 v2 v3 --mode full
 
 Ported from archive_per_annotator/eval.py with multi-mode support.
 """
@@ -41,7 +52,10 @@ import copy
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from ..core.config import get_valid_styles
+import numpy as np
+import krippendorff
+
+from ..core.config import get_valid_styles, get_annotation_types
 from ..core.utils import (
     compute_iou, merge_overlapping_ranges, load_ground_truth, load_split_ids,
     EXAMPLE_CONV_IDS,
@@ -54,6 +68,7 @@ from ..core.storage import (
 EFFECTIVENESS_LABELS = ["effective", "partial", "ineffective"]
 BINARY_LABELS = ["right", "wrong"]
 ANNOTATION_TYPES = ["scaffolding", "rapport"]
+DEFAULT_CONSENSUS_THRESHOLD = 0.4
 
 
 def compute_consensus_label(labels):
@@ -71,6 +86,140 @@ def compute_consensus_label(labels):
     if not values:
         return "unclear"
     return reverse[values[len(values) // 2]]
+
+
+def compute_mean_consensus_label(labels, threshold=DEFAULT_CONSENSUS_THRESHOLD):
+    """Mean score with thresholds: effective=1, partial=0, ineffective=-1.
+
+    Score >= threshold -> effective, score <= -threshold -> ineffective, else partial.
+    """
+    _score = {"effective": 1, "partial": 0, "ineffective": -1}
+    scores = [_score[l] for l in labels if l in _score]
+    if not scores:
+        return "unclear"
+    mean = sum(scores) / len(scores)
+    if mean >= threshold:
+        return "effective"
+    if mean <= -threshold:
+        return "ineffective"
+    return "partial"
+
+
+_ORDINAL_CODE = {"effective": 0, "partial": 1, "ineffective": 2}
+
+
+ALPHA_THRESHOLDS = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+
+def _float_keys(d: dict) -> dict:
+    """Normalize threshold dict keys to float. JSON round-trips turn float keys into strings."""
+    try:
+        return {float(k): v for k, v in d.items()}
+    except (ValueError, AttributeError):
+        return d
+MIN_ANNOTATOR_MOMENTS = 50
+
+
+def compute_per_annotator_alpha(matches, ground_truth, ann_type):
+    """Compute Krippendorff's alpha between each prolific annotator and the LLM.
+
+    Only includes annotators with more than MIN_ANNOTATOR_MOMENTS key moments
+    in the ground truth for this annotation type. Alpha is computed over the
+    subset of matched moments where that annotator has a label.
+    """
+    # Count unique spans per annotator for this type (an annotator may appear
+    # multiple times for the same span in the raw ground truth).
+    annotator_spans: dict[str, set] = defaultdict(set)
+    for conv_id, conv_data in ground_truth.get("conversations", {}).items():
+        for m in conv_data.get("key_moments", []):
+            if (m.get("annotation_type") == ann_type
+                    and m.get("strategy_label") in EFFECTIVENESS_LABELS):
+                annotator_spans[m.get("annotator_id")].add(
+                    (conv_id, m["turn_start"], m["turn_end"]))
+    annotator_totals = {aid: len(spans) for aid, spans in annotator_spans.items()}
+
+    results = {}
+    for annotator_id, n_total in annotator_totals.items():
+        if n_total <= MIN_ANNOTATOR_MOMENTS:
+            continue
+
+        pairs = [
+            (_ORDINAL_CODE[m["per_annotator_labels"][annotator_id]],
+             _ORDINAL_CODE[m["llm_label_3way"]])
+            for m in matches
+            if annotator_id in m["per_annotator_labels"]
+            and m["per_annotator_labels"][annotator_id] in EFFECTIVENESS_LABELS
+            and m["llm_label_3way"] in EFFECTIVENESS_LABELS
+        ]
+        if not pairs:
+            continue
+
+        matrix = np.full((2, len(pairs)), np.nan)
+        for j, (ann_code, llm_code) in enumerate(pairs):
+            matrix[0, j] = ann_code
+            matrix[1, j] = llm_code
+
+        try:
+            alpha = round(
+                krippendorff.alpha(reliability_data=matrix, level_of_measurement="ordinal"),
+                4,
+            )
+        except ValueError:
+            alpha = 1.0
+
+        results[annotator_id] = {"alpha": alpha, "n_matched": len(pairs), "n_total": n_total}
+
+    return results
+
+
+def recompute_consensus(matches, threshold):
+    """Return a copy of matches with consensus_3way recomputed at a given threshold."""
+    result = []
+    for m in matches:
+        labels = [l for l in m["per_annotator_labels"].values() if l in EFFECTIVENESS_LABELS]
+        consensus = compute_mean_consensus_label(labels, threshold=threshold) if labels else "unclear"
+        result.append({**m, "consensus_3way": consensus,
+                        "consensus_binary": map_to_binary(consensus)})
+    return result
+
+
+def compute_krippendorff_alpha(all_matches, consensus_label="unknown"):
+    """Compute Krippendorff's alpha (ordinal) between human consensus and LLM.
+
+    Builds a 2-row matrix: row 0 = human consensus label per unit,
+    row 1 = LLM label per unit. consensus_3way on each match must already
+    be set by the calling match function using the appropriate consensus_fn.
+    """
+    if not all_matches:
+        return {"alpha": None, "n_units": 0, "consensus": consensus_label,
+                "confusion": {}}
+
+    matrix = np.full((2, len(all_matches)), np.nan)
+    pairs = []
+    for j, match in enumerate(all_matches):
+        human_code = _ORDINAL_CODE.get(match["consensus_3way"])
+        llm_code = _ORDINAL_CODE.get(match["llm_label_3way"])
+        if human_code is not None:
+            matrix[0, j] = human_code
+        if llm_code is not None:
+            matrix[1, j] = llm_code
+        if match["consensus_3way"] in EFFECTIVENESS_LABELS and match["llm_label_3way"] in EFFECTIVENESS_LABELS:
+            pairs.append((match["consensus_3way"], match["llm_label_3way"]))
+
+    try:
+        alpha = round(
+            krippendorff.alpha(reliability_data=matrix, level_of_measurement="ordinal"),
+            4,
+        )
+    except ValueError:
+        alpha = 1.0
+
+    return {
+        "alpha": alpha,
+        "n_units": len(all_matches),
+        "consensus": consensus_label,
+        "confusion": build_confusion(pairs, EFFECTIVENESS_LABELS),
+    }
 
 
 def map_to_binary(label):
@@ -227,27 +376,40 @@ def compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv,
 
 
 # ===================================================================
-# 2. EFFECTIVENESS -- Binary Kappa + Within-Human-Range (IoU >= 0.5)
+# 2. EFFECTIVENESS -- Binary Kappa + Within-Human-Range (IoU >= 0.3)
 # ===================================================================
 
-def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.5):
-    """Match LLM moments to human clusters by IoU for effectiveness comparison."""
-    clusters = merge_overlapping_ranges(human_moments)
+def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
+                            consensus_fn=None):
+    """Match unique human spans to the best LLM moment by IoU.
+
+    Groups human moments by (turn_start, turn_end, annotation_type) first,
+    collecting all annotators' labels for each unique span into a consensus.
+    Then finds the best-matching LLM annotation by IoU for each unique span.
+    """
+    fn = consensus_fn or compute_consensus_label
+
+    # Group human moments by unique span, collecting all annotators' labels
+    human_groups = defaultdict(list)
+    for m in human_moments:
+        key = (m["turn_start"], m["turn_end"], m.get("annotation_type", ""))
+        human_groups[key].append(m)
+
     matches = []
     used_llm = set()
 
-    for cluster in clusters:
-        c_range = (cluster["turn_start"], cluster["turn_end"])
-        c_type = cluster["annotation_type"]
+    for key, group_moments in human_groups.items():
+        h_range = (key[0], key[1])
+        h_type = key[2]
         best_iou = 0
         best_idx = None
 
         for i, l in enumerate(llm_moments):
             if i in used_llm:
                 continue
-            if l.get("annotation_type") != c_type:
+            if l.get("annotation_type") != h_type:
                 continue
-            iou = compute_iou(c_range, (l["turn_start"], l["turn_end"]))
+            iou = compute_iou(h_range, (l["turn_start"], l["turn_end"]))
             if iou > best_iou:
                 best_iou = iou
                 best_idx = i
@@ -256,72 +418,96 @@ def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.5):
             llm_moment = llm_moments[best_idx]
             used_llm.add(best_idx)
 
-            labels_3way = [m.get("strategy_label", "unclear") for m in cluster["moments"]]
-            valid_labels = [l for l in labels_3way if l in EFFECTIVENESS_LABELS]
-            consensus_3way = compute_consensus_label(valid_labels) if valid_labels else "unclear"
-            consensus_binary = map_to_binary(consensus_3way)
+            per_annotator = {}
+            for m in group_moments:
+                ann_id = m.get("annotator_id", "unknown")
+                per_annotator[ann_id] = m.get("strategy_label", "unclear")  # last entry wins
 
+            valid_labels = [l for l in per_annotator.values() if l in EFFECTIVENESS_LABELS]
+            consensus_3way = fn(valid_labels) if valid_labels else "unclear"
             llm_label_3way = llm_moment.get("effectiveness", "unclear")
-            llm_label_binary = map_to_binary(llm_label_3way)
-
-            per_annotator = {
-                m.get("annotator_id", "unknown"): m.get("strategy_label", "unclear")
-                for m in cluster["moments"]
-            }
 
             matches.append({
-                "cluster": cluster,
+                "cluster": {
+                    "turn_start": key[0],
+                    "turn_end": key[1],
+                    "annotation_type": h_type,
+                    "moments": group_moments,
+                },
                 "llm_moment": llm_moment,
                 "iou": round(best_iou, 4),
                 "consensus_3way": consensus_3way,
-                "consensus_binary": consensus_binary,
+                "consensus_binary": map_to_binary(consensus_3way),
                 "llm_label_3way": llm_label_3way,
-                "llm_label_binary": llm_label_binary,
+                "llm_label_binary": map_to_binary(llm_label_3way),
                 "per_annotator_labels": per_annotator,
             })
 
     return matches
 
 
-def match_gold_direct(human_moments, llm_moments):
-    """Direct 1-to-1 matching for annotations mode (gold moments).
+def match_gold_direct(human_moments, llm_moments, consensus_fn=None):
+    """Matching for gold moments, grouping by (turn_start, turn_end, annotation_type).
 
-    When LLM annotated gold truth moments, turn ranges are identical.
-    Match by exact (turn_start, turn_end, annotation_type) -- no IoU needed.
-    Each human moment gets compared to its corresponding LLM annotation.
+    Multiple human annotators may label the same turn range; their labels are
+    collected and aggregated into a single consensus via consensus_fn.
+    For the LLM side, the first annotation for each key is used; a warning is
+    printed if duplicates are found (they should not exist after load_gold_moments
+    deduplication).
     """
-    # Index LLM moments by (turn_start, turn_end, annotation_type)
-    llm_index = {}
+    fn = consensus_fn or compute_consensus_label
+
+    # Index LLM annotations by turn range key; warn and take first if multiple
+    llm_groups = {}
     for l in llm_moments:
         key = (l["turn_start"], l["turn_end"], l.get("annotation_type", ""))
-        llm_index[key] = l
+        if key in llm_groups:
+            print(f"WARNING: multiple LLM annotations for gold moment "
+                  f"turns {key[0]}-{key[1]} ({key[2]}); using first")
+        else:
+            llm_groups[key] = l  # store full annotation to preserve action/result text
 
-    matches = []
+    # Group human moments by turn range key
+    human_groups = defaultdict(list)
     for m in human_moments:
         key = (m["turn_start"], m["turn_end"], m.get("annotation_type", ""))
-        llm_moment = llm_index.get(key)
-        if not llm_moment:
+        human_groups[key].append(m)
+
+    matches = []
+    for key, group_moments in human_groups.items():
+        if key not in llm_groups:
             continue
 
-        human_label = m.get("strategy_label", "unclear")
-        llm_label_3way = llm_moment.get("effectiveness", "unclear")
+        per_annotator = {}
+        for m in group_moments:
+            ann_id = m.get("annotator_id", "unknown")
+            if ann_id not in per_annotator:
+                per_annotator[ann_id] = m.get("strategy_label", "unclear")
+
+        valid_human = [l for l in per_annotator.values() if l in EFFECTIVENESS_LABELS]
+        consensus_3way = fn(valid_human) if valid_human else "unclear"
+
+        llm_ann = llm_groups[key]
+        llm_label_3way = llm_ann.get("effectiveness", "unclear")
+        if llm_label_3way not in EFFECTIVENESS_LABELS:
+            llm_label_3way = "unclear"
+
+        llm_moment = llm_ann
 
         matches.append({
             "cluster": {
-                "turn_start": m["turn_start"],
-                "turn_end": m["turn_end"],
-                "annotation_type": m.get("annotation_type", ""),
-                "moments": [m],
+                "turn_start": key[0],
+                "turn_end": key[1],
+                "annotation_type": key[2],
+                "moments": group_moments,
             },
             "llm_moment": llm_moment,
             "iou": 1.0,
-            "consensus_3way": human_label,
-            "consensus_binary": map_to_binary(human_label),
+            "consensus_3way": consensus_3way,
+            "consensus_binary": map_to_binary(consensus_3way),
             "llm_label_3way": llm_label_3way,
             "llm_label_binary": map_to_binary(llm_label_3way),
-            "per_annotator_labels": {
-                m.get("annotator_id", "unknown"): human_label,
-            },
+            "per_annotator_labels": per_annotator,
         })
 
     return matches
@@ -428,59 +614,86 @@ def compute_guardrails(annotations_by_conv):
 # 4. HUMAN CEILING -- Inter-annotator agreement context
 # ===================================================================
 
+def _cluster_moments_for_iaa(moments):
+    """Group moments from different annotators into IoU-based connected-component clusters.
+
+    Uses union-find so that transitively overlapping moments end up in the same unit.
+    Single-annotator moments are included but will be filtered by callers.
+    """
+    if not moments:
+        return []
+    n = len(moments)
+    parent = list(range(n))
+
+    def _find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if moments[i].get("annotator_id") == moments[j].get("annotator_id"):
+                continue
+            if compute_iou(
+                (moments[i]["turn_start"], moments[i]["turn_end"]),
+                (moments[j]["turn_start"], moments[j]["turn_end"]),
+            ) >= 0.3:
+                ri, rj = _find(i), _find(j)
+                if ri != rj:
+                    parent[ri] = rj
+
+    clusters = defaultdict(list)
+    for i in range(n):
+        clusters[_find(i)].append(moments[i])
+    return list(clusters.values())
+
+
 def compute_human_ceiling(ground_truth, ann_type_filter=None):
-    """Compute inter-annotator agreement (the ceiling we're trying to reach)."""
-    pairs_3way = []
-    pairs_binary = []
+    """Compute human-human Krippendorff's alpha (ordinal) as the agreement ceiling.
+
+    Builds a raters x units reliability matrix from IoU-clustered human moments,
+    where each unit is a cluster of overlapping moments from 2+ annotators.
+    ann_type_filter must be specified (scaffolding or rapport) — do not call
+    without it, as mixing annotation types is not meaningful.
+    """
+    units = []
 
     for conv_data in ground_truth.get("conversations", {}).values():
-        moments = conv_data["key_moments"]
-        by_type = defaultdict(list)
-        for m in moments:
-            by_type[m.get("annotation_type")].append(m)
-
-        for t, type_moments in by_type.items():
-            if ann_type_filter and t != ann_type_filter:
+        moments = [
+            m for m in conv_data.get("key_moments", [])
+            if m.get("strategy_label") in EFFECTIVENESS_LABELS
+            and (ann_type_filter is None or m.get("annotation_type") == ann_type_filter)
+        ]
+        for cluster in _cluster_moments_for_iaa(moments):
+            if len({m["annotator_id"] for m in cluster}) < 2:
                 continue
-            for i, m1 in enumerate(type_moments):
-                for j in range(i + 1, len(type_moments)):
-                    m2 = type_moments[j]
-                    if m1.get("annotator_id") == m2.get("annotator_id"):
-                        continue
-                    iou = compute_iou(
-                        (m1["turn_start"], m1["turn_end"]),
-                        (m2["turn_start"], m2["turn_end"])
-                    )
-                    if iou >= 0.3:
-                        l1 = m1.get("strategy_label", "unclear")
-                        l2 = m2.get("strategy_label", "unclear")
-                        if l1 in EFFECTIVENESS_LABELS and l2 in EFFECTIVENESS_LABELS:
-                            pairs_3way.append((l1, l2))
-                            b1, b2 = map_to_binary(l1), map_to_binary(l2)
-                            if b1 and b2:
-                                pairs_binary.append((b1, b2))
+            unit = {}
+            for m in cluster:
+                if m["annotator_id"] not in unit:
+                    unit[m["annotator_id"]] = _ORDINAL_CODE[m["strategy_label"]]
+            units.append(unit)
 
-    result = {"overlapping_pairs": len(pairs_3way)}
+    if not units:
+        return {"alpha": None, "n_units": 0, "n_raters": 0}
 
-    if pairs_3way:
-        h3, l3 = zip(*pairs_3way)
-        agree = sum(1 for a, b in pairs_3way if a == b)
-        result["three_way_agreement"] = round(agree / len(pairs_3way), 4)
-        result["three_way_kappa"] = cohens_kappa(list(h3), list(l3), EFFECTIVENESS_LABELS)
-    else:
-        result["three_way_agreement"] = 0
-        result["three_way_kappa"] = 0
+    all_annotators = sorted({a for u in units for a in u})
+    rater_idx = {a: i for i, a in enumerate(all_annotators)}
 
-    if pairs_binary:
-        hb, lb = zip(*pairs_binary)
-        agree = sum(1 for a, b in pairs_binary if a == b)
-        result["binary_agreement"] = round(agree / len(pairs_binary), 4)
-        result["binary_kappa"] = cohens_kappa(list(hb), list(lb), BINARY_LABELS)
-    else:
-        result["binary_agreement"] = 0
-        result["binary_kappa"] = 0
+    matrix = np.full((len(all_annotators), len(units)), np.nan)
+    for j, unit in enumerate(units):
+        for ann_id, code in unit.items():
+            matrix[rater_idx[ann_id], j] = code
 
-    return result
+    try:
+        alpha = round(
+            krippendorff.alpha(reliability_data=matrix, level_of_measurement="ordinal"),
+            4,
+        )
+    except ValueError:
+        alpha = 1.0
+
+    return {"alpha": alpha, "n_units": len(units), "n_raters": len(all_annotators)}
 
 
 # ===================================================================
@@ -516,41 +729,182 @@ def filter_ground_truth_by_archetype(ground_truth: dict, archetype_ids: set[str]
     return filtered
 
 
-def load_detections_as_moments(version: str) -> dict[str, list[dict]] | None:
-    """Load detections.json and return as {conv_id: [moment dicts]}."""
-    data = load_annotator_result(version, "detections.json")
+def load_detections_as_moments(version: str,
+                               profile: str | None = None,
+                               annotator_style: str | None = None,
+                               split: str = "train") -> dict[str, list[dict]] | None:
+    """Load detections file and return as {conv_id: [moment dicts]}.
+
+    Tries suffixed filenames (matching detect.py output naming) before
+    falling back to detections.json.
+    """
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    # Only fall back to unsuffixed files for the default train split
+    candidates = [f"detections{profile_suffix}{style_suffix}{split_suffix}.json"]
+    if split == "train":
+        candidates += [f"detections{profile_suffix}{style_suffix}.json", "detections.json"]
+    # Deduplicate while preserving order
+    seen: set = set()
+    candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+
+    data = None
+    for filename in candidates:
+        data = load_annotator_result(version, filename)
+        if data is not None:
+            print(f"Loaded detections: {filename}")
+            break
+
+    # If no combined file found, try merging per-target files
+    if data is None:
+        merged_results: dict = {}
+        for t in get_annotation_types():
+            per_target_candidates = [f"detections{profile_suffix}{style_suffix}{split_suffix}_{t}.json"]
+            if split == "train":
+                per_target_candidates.append(f"detections{profile_suffix}{style_suffix}_{t}.json")
+            for fname in per_target_candidates:
+                tdata = load_annotator_result(version, fname)
+                if tdata is not None:
+                    print(f"Loaded detections: {fname}")
+                    for conv_id, conv_data in tdata["results"].items():
+                        if conv_id not in merged_results:
+                            merged_results[conv_id] = {"detections": []}
+                        merged_results[conv_id]["detections"].extend(conv_data.get("detections", []))
+                    break
+        if merged_results:
+            data = {"results": merged_results}
+
     if data is None:
         return None
 
     moments_by_conv = {}
     for conv_id, conv_data in data["results"].items():
-        moments_by_conv[conv_id] = conv_data.get("detections", [])
+        transcript_id = conv_id.rsplit("_", 1)[-1]
+        moments_by_conv[transcript_id] = conv_data.get("detections", [])
     return moments_by_conv
 
 
 def resolve_annotations_filename(version: str, mode: str,
-                                  annotator_style: str | None = None) -> str | None:
-    """Resolve the correct annotations filename given mode and optional style.
+                                  annotator_style: str | None = None,
+                                  profile: str | None = None,
+                                  split: str = "train") -> str | None:
+    """Resolve the correct annotations filename given mode, optional style, profile, and split.
 
-    Preference order (annotations mode):
-      1. annotations_gold_{style}.json  (style-specific gold run)
-      2. annotations_gold.json          (baseline gold run, any style eval)
-      3. annotations_{style}.json       (style-specific detected-moments run)
-      4. annotations.json               (baseline detected-moments run)
+    Preference order (annotations mode), split-suffixed candidates tried first:
+      1. annotations_gold_{profile}_{style}_{split}.json
+      2. annotations_gold_{profile}_{style}.json
+      3. annotations_gold_{profile}_{split}.json
+      4. annotations_gold_{profile}.json
+      5. annotations_gold_{style}_{split}.json
+      6. annotations_gold_{style}.json
+      7. annotations_gold_{split}.json
+      8. annotations_gold.json
+      (then same pattern without _gold prefix)
     """
+    profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
 
-    if mode == "annotations":
-        f = f"annotations_gold{style_suffix}.json"
-        if annotator_result_exists(version, f):
-            return f
-        if annotator_result_exists(version, "annotations_gold.json"):
-            return "annotations_gold.json"
+    def _find_first(prefixes: list[str]) -> str | None:
+        base_candidates = [
+            f"{p}{profile_suffix}{style_suffix}{split_suffix}.json" for p in prefixes
+        ] + [
+            f"{p}{profile_suffix}{split_suffix}.json" for p in prefixes
+        ] + [
+            f"{p}{style_suffix}{split_suffix}.json" for p in prefixes
+        ] + [
+            f"{p}{split_suffix}.json" for p in prefixes
+        ]
+        # Only fall back to unsuffixed files for the default train split
+        if split == "train":
+            base_candidates += [
+                f"{p}{profile_suffix}{style_suffix}.json" for p in prefixes
+            ] + [
+                f"{p}{profile_suffix}.json" for p in prefixes
+            ] + [
+                f"{p}{style_suffix}.json" for p in prefixes
+            ] + [
+                f"{p}.json" for p in prefixes
+            ]
+        # When no style specified, also try per-target suffixed files as fallback
+        if not annotator_style:
+            for t in get_annotation_types():
+                t_suffix = f"_{t}"
+                base_candidates += [f"{p}{profile_suffix}{split_suffix}{t_suffix}.json" for p in prefixes]
+                if split == "train":
+                    base_candidates += [f"{p}{profile_suffix}{t_suffix}.json" for p in prefixes]
+        seen: set = set()
+        for f in base_candidates:
+            if f in seen:
+                continue
+            seen.add(f)
+            if annotator_result_exists(version, f):
+                return f
+        return None
 
-    f = f"annotations{style_suffix}.json"
-    if annotator_result_exists(version, f):
-        return f
-    return "annotations.json"
+    if mode in ("annotations_old", "annotations"):
+        result = _find_first(["annotations_gold"])
+        if result:
+            return result
+
+    result = _find_first(["annotations"])
+    return result or "annotations.json"
+
+
+def load_annotations_for_eval(version: str, mode: str,
+                               annotator_style: str | None = None,
+                               profile: str | None = None,
+                               split: str = "train") -> tuple[dict, bool, str] | tuple[None, None, None]:
+    """Load and merge per-target annotation files, falling back to a single combined file.
+
+    Returns (annotations_by_conv, is_gold, description) or (None, None, None).
+    """
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    want_gold = mode in ("annotations_old", "annotations")
+
+    merged: dict = {}
+    loaded_files: list = []
+    is_gold = False
+
+    for target in get_annotation_types():
+        candidates = []
+        if want_gold:
+            candidates.append(f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json")
+            if split == "train":
+                candidates += [
+                    f"annotations_gold{profile_suffix}{style_suffix}_{target}.json",
+                    f"annotations_gold{profile_suffix}_{target}.json",
+                ]
+        candidates.append(f"annotations{profile_suffix}{style_suffix}{split_suffix}_{target}.json")
+        if split == "train":
+            candidates += [
+                f"annotations{profile_suffix}{style_suffix}_{target}.json",
+                f"annotations{profile_suffix}_{target}.json",
+            ]
+        for fname in candidates:
+            data = load_annotator_result(version, fname)
+            if data is not None:
+                loaded_files.append(fname)
+                is_gold = data.get("source") == "gold_truth"
+                for conv_id, conv_data in data["results"].items():
+                    transcript_id = conv_id.rsplit("_", 1)[-1]
+                    if transcript_id not in merged:
+                        merged[transcript_id] = []
+                    merged[transcript_id].extend(conv_data.get("annotations", []))
+                break
+
+    if merged:
+        return merged, is_gold, ", ".join(loaded_files)
+
+    # Fall back to single combined file
+    filename = resolve_annotations_filename(version, mode, annotator_style, profile=profile, split=split)
+    annotations_by_conv, is_gold = load_annotations(version, filename)
+    if annotations_by_conv is None:
+        return None, None, None
+    return annotations_by_conv, is_gold, filename
 
 
 def load_annotations(version: str, filename: str) -> tuple[dict[str, list[dict]], bool] | tuple[None, None]:
@@ -568,7 +922,10 @@ def load_annotations(version: str, filename: str) -> tuple[dict[str, list[dict]]
 
     annotations_by_conv = {}
     for conv_id, conv_data in data["results"].items():
-        annotations_by_conv[conv_id] = conv_data.get("annotations", [])
+        # Annotation results use compound keys (tutor_student_<uuid>);
+        # ground truth uses the bare transcript UUID as its key.
+        transcript_id = conv_id.rsplit("_", 1)[-1]
+        annotations_by_conv[transcript_id] = conv_data.get("annotations", [])
     return annotations_by_conv, is_gold
 
 
@@ -649,17 +1006,6 @@ def print_scorecard(output):
         print(f"     Distribution:       {dist_str}")
         print(f"     Per conversation:   {guard['annotations_per_conversation']} annotations")
 
-    # --- Human ceiling ---
-    ceiling = output.get("human_ceiling", {})
-    if ceiling.get("overlapping_pairs", 0) > 0:
-        print(f"\n  HUMAN CEILING")
-        print(f"  {'-' * 40}")
-        print(f"  Binary Kappa:          {ceiling.get('binary_kappa', 0):.4f}  "
-              f"(agreement: {ceiling.get('binary_agreement', 0):.1%})")
-        print(f"  3-Way Kappa:           {ceiling.get('three_way_kappa', 0):.4f}  "
-              f"(agreement: {ceiling.get('three_way_agreement', 0):.1%})")
-        print(f"  Overlapping pairs:     {ceiling['overlapping_pairs']}")
-
     # --- Per-type ---
     if output.get("by_type"):
         print(f"\n{'=' * 68}")
@@ -673,6 +1019,7 @@ def print_scorecard(output):
 
             t_det = td.get("detection", {})
             t_eff = td.get("effectiveness", {})
+            t_iaa = td.get("iaa", {})
             t_guard = td.get("guardrails", {})
             t_ceil = td.get("human_ceiling", {})
 
@@ -691,13 +1038,51 @@ def print_scorecard(output):
                 print(f"  Within Human Range: {t_eff.get('within_human_range_pct', 0):.4f}  "
                       f"({t_eff.get('within_human_range', 0)}/{t_eff.get('total_matched', 0)})")
 
+            if t_iaa.get("alpha") is not None:
+                n_all = t_iaa.get('n_units', 0)
+                n_dense3 = td.get("iaa_dense", {}).get("n_units", 0)
+                n_dense5 = td.get("iaa_dense5", {}).get("n_units", 0)
+                print(f"  Model-Human α (Krippendorff ordinal):")
+                print(f"    {'threshold':<14s}  {'all units':>10s}  {'>=3 annotators':>14s}  {'>=5 annotators':>14s}")
+                by_thresh = _float_keys(td.get("iaa_by_threshold", {}))
+                by_thresh_dense3 = _float_keys(td.get("iaa_dense_by_threshold", {}))
+                by_thresh_dense5 = _float_keys(td.get("iaa_dense5_by_threshold", {}))
+                for t in ALPHA_THRESHOLDS:
+                    a_all = by_thresh.get(t, {}).get("alpha")
+                    a_d3 = by_thresh_dense3.get(t, {}).get("alpha")
+                    a_d5 = by_thresh_dense5.get(t, {}).get("alpha")
+                    marker = " *" if t == DEFAULT_CONSENSUS_THRESHOLD else ""
+                    print(f"    ±{t:<13}  "
+                          f"{(f'{a_all:.4f}' if a_all is not None else 'n/a'):>10s}  "
+                          f"{(f'{a_d3:.4f}' if a_d3 is not None else 'n/a'):>14s}  "
+                          f"{(f'{a_d5:.4f}' if a_d5 is not None else 'n/a'):>14s}"
+                          f"{marker}")
+                print(f"    {'n units':<14s}  {n_all:>10d}  {n_dense3:>14d}  {n_dense5:>14d}")
+                cm = t_iaa.get("confusion", {})
+                if cm:
+                    print(f"  Confusion at ±{DEFAULT_CONSENSUS_THRESHOLD} (rows=human consensus, cols=LLM):")
+                    print(f"    {'':>12s}  {'effective':>10s}  {'partial':>10s}  {'ineffective':>12s}")
+                    for h in EFFECTIVENESS_LABELS:
+                        row = cm.get(h, {})
+                        print(f"    {h:>12s}  {row.get('effective', 0):>10d}  "
+                              f"{row.get('partial', 0):>10d}  {row.get('ineffective', 0):>12d}")
+
+                per_ann = td.get("per_annotator_alpha", {})
+                if per_ann:
+                    print(f"  Per-annotator α vs LLM (>{MIN_ANNOTATOR_MOMENTS} moments in GT):")
+                    print(f"    {'annotator':>10s}  {'α':>8s}  {'matched':>8s}  {'unique GT':>10s}")
+                    for ann_id, info in sorted(per_ann.items(), key=lambda x: -x[1]["alpha"]):
+                        print(f"    {ann_id[:10]:>10s}  {info['alpha']:>8.4f}  "
+                              f"{info['n_matched']:>8d}  {info['n_total']:>10d}")
+
+            if t_ceil.get("alpha") is not None:
+                print(f"  Human-Human α:      {t_ceil['alpha']:.4f}  "
+                      f"(ceiling, {t_ceil.get('n_units', 0)} units, "
+                      f"{t_ceil.get('n_raters', 0)} raters)")
+
             if t_guard.get("total_annotations", 0) > 0:
                 print(f"  Effective Rate:     {t_guard.get('effective_rate', 0):.1%}  |  "
                       f"Invalid: {t_guard.get('invalid_labels', 0)}")
-
-            if t_ceil.get("overlapping_pairs", 0) > 0:
-                print(f"  Human ceiling:      kappa={t_ceil.get('binary_kappa', 0):.4f}  "
-                      f"({t_ceil['overlapping_pairs']} pairs)")
 
     print(f"\n{'=' * 68}")
 
@@ -808,8 +1193,8 @@ def print_comparison(versions, evals, mode):
             row += f" {fmt_delta(bv, ev, as_pct=False):>{delta_w}}"
         print(row)
 
-    # --- RQ2: Effectiveness ---
-    if mode in ("annotations", "full"):
+    # --- RQ2: Effectiveness (annotations_old) ---
+    if mode in ("annotations_old", "full"):
         print(f"\n  EFFECTIVENESS (RQ2)")
         for key, label in [
             ("binary_kappa", "Binary Kappa"),
@@ -846,12 +1231,19 @@ def print_comparison(versions, evals, mode):
                 row += f" {fmt_delta(bv, ev, as_pct=not is_count):>{delta_w}}"
             print(row)
 
-    # Human ceiling (context, from first version)
-    ceiling = baseline.get("human_ceiling", {})
-    if ceiling.get("overlapping_pairs", 0) > 0:
-        print(f"\n  HUMAN CEILING (context)")
-        print(f"  Binary Kappa:  {ceiling.get('binary_kappa', 0):.4f}  |  "
-              f"3-Way Kappa:  {ceiling.get('three_way_kappa', 0):.4f}")
+    # --- RQ2: Agreement (annotations) ---
+    if mode == "annotations":
+        for ann_type in ANNOTATION_TYPES:
+            print(f"\n  MODEL-HUMAN α ({ann_type.upper()})")
+            row = f"  {'Krippendorff alpha':<{metric_w}}"
+            for e in evals:
+                val = e.get("by_type", {}).get(ann_type, {}).get("iaa", {}).get("alpha")
+                row += f" {fmt_pct(val) if val is not None else 'n/a':>{val_w}}"
+            if n >= 2:
+                bv = baseline.get("by_type", {}).get(ann_type, {}).get("iaa", {}).get("alpha", 0)
+                ev = latest.get("by_type", {}).get(ann_type, {}).get("iaa", {}).get("alpha", 0)
+                row += f" {fmt_delta(bv, ev):>{delta_w}}"
+            print(row)
 
     print(f"\n{'=' * 68}")
 
@@ -865,7 +1257,7 @@ def main():
         description="8-metric evaluation scorecard")
     parser.add_argument("--version", default=None,
                         help="Results version (e.g. v1)")
-    parser.add_argument("--mode", choices=["full", "detections", "annotations"],
+    parser.add_argument("--mode", choices=["full", "detections", "annotations_old", "annotations"],
                         default="full",
                         help="What to evaluate (default: full)")
     parser.add_argument("--compare", nargs="+", metavar="VERSION",
@@ -873,6 +1265,10 @@ def main():
     parser.add_argument("--annotator-style", "--style", choices=get_valid_styles(),
                         default=None, dest="annotator_style",
                         help="Evaluate against only this annotator archetype's ground truth")
+    parser.add_argument("--profile", default=None,
+                        help="Config profile used when generating annotations (e.g. anthropic, gemini)")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to evaluate against (default: train)")
     args = parser.parse_args()
 
     # --- Compare mode ---
@@ -906,20 +1302,28 @@ def main():
         if cfg_style is not None:
             style = cfg_style
 
-    # Load ground truth (with optional archetype filtering), restricted to train split
+    # Load ground truth (with optional archetype filtering), restricted to the requested split
     ground_truth = load_ground_truth(annotator_style=style)
-    train_ids = load_split_ids("train")
+    split_ids = load_split_ids(args.split)
     ground_truth["conversations"] = {
         conv_id: conv_data
         for conv_id, conv_data in ground_truth["conversations"].items()
-        if conv_id in train_ids
+        if conv_id in split_ids
     }
-    print(f"Restricted ground truth to train split: {len(ground_truth['conversations'])} conversations")
+    print(f"Restricted ground truth to {args.split} split: {len(ground_truth['conversations'])} conversations")
 
     if style:
         print(f"Filtered ground truth to '{style}' annotators")
         print(f"  Conversations with matching annotations: "
               f"{len(ground_truth['conversations'])}")
+
+    if args.mode == "full":
+        print("ERROR: --mode full is temporarily disabled.")
+        print("  Choose an explicit annotations mode:")
+        print("    --mode detections      (detection metrics only)")
+        print("    --mode annotations_old (labeling quality, majority-vote consensus, Cohen's kappa)")
+        print("    --mode annotations     (labeling quality, mean-score consensus, Krippendorff alpha)")
+        return
 
     # --- Load LLM data based on mode ---
     llm_moments_by_conv = {}
@@ -927,21 +1331,23 @@ def main():
     is_gold = False
 
     if args.mode == "detections":
-        llm_moments_by_conv = load_detections_as_moments(version)
+        llm_moments_by_conv = load_detections_as_moments(version,
+                                                         profile=args.profile,
+                                                         annotator_style=style,
+                                                         split=args.split)
         if llm_moments_by_conv is None:
-            print(f"ERROR: detections.json not found for version {version}")
+            print(f"ERROR: detections file not found for version {version}")
             return
-        print(f"Loaded detections for version {version}")
     else:
-        ann_filename = resolve_annotations_filename(version, args.mode, style)
-        annotations_by_conv, is_gold = load_annotations(version, ann_filename)
+        annotations_by_conv, is_gold, ann_desc = load_annotations_for_eval(
+            version, args.mode, style, profile=args.profile, split=args.split)
         if annotations_by_conv is None:
-            print(f"ERROR: {ann_filename} not found for version {version}")
+            print(f"ERROR: No annotation files found for version {version}")
             return
         # Also use annotations as moments for detection metrics
         llm_moments_by_conv = annotations_by_conv
         source_str = "gold truth moments" if is_gold else "detected moments"
-        print(f"Loaded annotations: {ann_filename} (source: {source_str})")
+        print(f"Loaded annotations: {ann_desc} (source: {source_str})")
 
     # --- Build human moments ---
     if llm_moments_by_conv:
@@ -956,6 +1362,8 @@ def main():
         print(f"Excluded {len(excluded)} example conversations from evaluation")
 
     print(f"Evaluating {len(eval_conv_ids)} conversations (mode: {args.mode})")
+
+    consensus_fn = compute_mean_consensus_label if args.mode == "annotations" else compute_consensus_label
 
     human_moments_by_conv = {}
     all_matches = []
@@ -984,11 +1392,11 @@ def main():
         if args.mode != "detections":
             llm_moments = annotations_by_conv.get(conv_id, [])
             if is_gold:
-                # Direct 1-to-1 matching (gold moments have identical turn ranges)
-                matches = match_gold_direct(human_moments, llm_moments)
+                matches = match_gold_direct(human_moments, llm_moments,
+                                            consensus_fn=consensus_fn)
             else:
-                # IoU-based cluster matching (detected moments have different ranges)
-                matches = match_for_effectiveness(human_moments, llm_moments)
+                matches = match_for_effectiveness(human_moments, llm_moments,
+                                                  consensus_fn=consensus_fn)
             all_matches.extend(matches)
 
     # --- Compute metrics ---
@@ -999,13 +1407,14 @@ def main():
     if args.mode in ("full", "detections"):
         detection = compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv)
 
-    if args.mode in ("full", "annotations"):
+    if args.mode in ("full", "annotations_old"):
         effectiveness = compute_effectiveness_metrics(all_matches)
         guardrails = compute_guardrails(annotations_by_conv)
 
-    ceiling = compute_human_ceiling(ground_truth)
+    if args.mode == "annotations":
+        guardrails = compute_guardrails(annotations_by_conv)
 
-    # --- Per-type ---
+    # --- Per-type (all agreement metrics disaggregated by type) ---
     by_type = {}
     for ann_type in ANNOTATION_TYPES:
         type_result = {}
@@ -1021,8 +1430,57 @@ def main():
             type_result["effectiveness"] = compute_effectiveness_metrics(m_filtered)
             type_result["guardrails"] = compute_guardrails(a_filtered)
 
-        type_result["human_ceiling"] = compute_human_ceiling(
-            ground_truth, ann_type_filter=ann_type)
+        if args.mode == "annotations":
+            m_filtered = filter_matches_by_type(all_matches, ann_type)
+            a_filtered = filter_annotations_by_type(annotations_by_conv, ann_type)
+            m_dense3 = [m for m in m_filtered if len(m["per_annotator_labels"]) >= 3]
+            m_dense5 = [m for m in m_filtered if len(m["per_annotator_labels"]) >= 5]
+            type_result["iaa"] = compute_krippendorff_alpha(
+                m_filtered, consensus_label=f"mean (±{DEFAULT_CONSENSUS_THRESHOLD} threshold)")
+            type_result["iaa_by_threshold"] = {
+                t: compute_krippendorff_alpha(
+                    recompute_consensus(m_filtered, t),
+                    consensus_label=f"mean (±{t} threshold)",
+                )
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["iaa_dense"] = compute_krippendorff_alpha(
+                m_dense3, consensus_label=f"mean (±{DEFAULT_CONSENSUS_THRESHOLD} threshold), >=3 annotators")
+            type_result["iaa_dense_by_threshold"] = {
+                t: compute_krippendorff_alpha(
+                    recompute_consensus(m_dense3, t),
+                    consensus_label=f"mean (±{t} threshold), >=3 annotators",
+                )
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["iaa_dense5"] = compute_krippendorff_alpha(
+                m_dense5, consensus_label=f"mean (±{DEFAULT_CONSENSUS_THRESHOLD} threshold), >=5 annotators")
+            type_result["iaa_dense5_by_threshold"] = {
+                t: compute_krippendorff_alpha(
+                    recompute_consensus(m_dense5, t),
+                    consensus_label=f"mean (±{t} threshold), >=5 annotators",
+                )
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["kappa_by_threshold"] = {
+                t: compute_effectiveness_metrics(recompute_consensus(m_filtered, t))
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["kappa_dense_by_threshold"] = {
+                t: compute_effectiveness_metrics(recompute_consensus(m_dense3, t))
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["kappa_dense5_by_threshold"] = {
+                t: compute_effectiveness_metrics(recompute_consensus(m_dense5, t))
+                for t in ALPHA_THRESHOLDS
+            }
+            type_result["per_annotator_alpha"] = compute_per_annotator_alpha(
+                m_filtered, ground_truth, ann_type)
+            type_result["guardrails"] = compute_guardrails(a_filtered)
+
+        if args.mode != "detections":
+            type_result["human_ceiling"] = compute_human_ceiling(
+                ground_truth, ann_type_filter=ann_type)
 
         by_type[ann_type] = type_result
 
@@ -1038,7 +1496,6 @@ def main():
         output["effectiveness"] = effectiveness
     if guardrails:
         output["guardrails"] = guardrails
-    output["human_ceiling"] = ceiling
     output["by_type"] = by_type
 
     # Print and save
@@ -1046,7 +1503,8 @@ def main():
 
     compact_output = strip_per_conversation(output)
     style_suffix = f"_{style}" if style else ""
-    eval_filename = f"eval_{args.mode}{style_suffix}.json"
+    split_suffix = f"_{args.split}" if args.split != "train" else ""
+    eval_filename = f"eval_{args.mode}{style_suffix}{split_suffix}.json"
     save_annotator_result(version, eval_filename, compact_output)
     print(f"\nSaved to: {eval_filename} (version: {version})")
 

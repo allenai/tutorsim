@@ -22,16 +22,17 @@ from ..core.storage import (
 )
 
 
-def find_llm_file(version: str, gold: bool = False):
+def find_llm_file(version: str, gold: bool = False, profile: str | None = None):
     """Find the best available LLM results filename for this version.
 
-    Checks in order: annotations_gold.json (if --gold), annotations.json,
-    outputs.json (archive format), detections.json (detection-only).
+    Checks profile-suffixed names first, then falls back to unprefixed names
+    for backward compatibility with older results.
     """
+    profile_suffix = f"_{profile}" if profile else ""
     if gold:
-        candidates = ["annotations_gold.json"]
+        candidates = [f"annotations_gold{profile_suffix}.json", "annotations_gold.json"]
     else:
-        candidates = ["annotations.json", "outputs.json"]
+        candidates = [f"annotations{profile_suffix}.json", "annotations.json", "outputs.json"]
 
     for name in candidates:
         if annotator_result_exists(version, name):
@@ -44,7 +45,7 @@ def find_llm_file(version: str, gold: bool = False):
     return None, None
 
 
-def load_data(version: str, gold: bool = False):
+def load_data(version: str, gold: bool = False, profile: str | None = None):
     """Load ground truth, LLM results, and consolidated transcripts."""
     ground_truth = load_ground_truth()
     train_ids = load_split_ids("train")
@@ -52,7 +53,7 @@ def load_data(version: str, gold: bool = False):
         k: v for k, v in ground_truth["conversations"].items() if k in train_ids
     }
 
-    llm_filename, llm_type = find_llm_file(version, gold=gold)
+    llm_filename, llm_type = find_llm_file(version, gold=gold, profile=profile)
     if not llm_filename:
         raise FileNotFoundError(f"No LLM results found for version {version}")
 
@@ -393,10 +394,12 @@ def main():
     parser.add_argument("--version", required=True, help="Results version (e.g. v1)")
     parser.add_argument("--gold", action="store_true",
                         help="Use gold truth annotations (annotations_gold.json)")
+    parser.add_argument("--profile", default=None,
+                        help="Config profile used when generating annotations (e.g. anthropic, gemini)")
     args = parser.parse_args()
 
     version = args.version
-    conversations = load_data(version, gold=args.gold)
+    conversations = load_data(version, gold=args.gold, profile=args.profile)
     print(f"Loaded {len(conversations)} conversations with both human and LLM annotations")
 
     html_content = build_html(conversations, version)

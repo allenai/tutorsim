@@ -23,7 +23,9 @@ Output format — one JSON file per conversation:
         "situation": "<str>",
         "action": "<str>",
         "result": "<str>",
-        "strategy_label": "effective" | "partial" | "ineffective"
+        "strategy_label": "effective" | "partial" | "ineffective",
+        "cut_turn": <int>,          # optional — annotator-chosen benchmark cut point
+        "moment_id": "<str>"        # optional — links cut point to its parent moment
       },
       ...
     ]
@@ -81,7 +83,7 @@ def load_from_jsonl(path):
             for ta in record.get("turn_annotations", []):
                 if ta.get("turn_number_start") is None or ta.get("turn_number_end") is None:
                     continue
-                groups[conv_id].append({
+                entry = {
                     "annotator_id": annotator_id,
                     "turn_start": ta["turn_number_start"],
                     "turn_end": ta["turn_number_end"],
@@ -90,7 +92,12 @@ def load_from_jsonl(path):
                     "action": ta.get("action", ""),
                     "result": ta.get("result", ""),
                     "_timestamp": ta.get("annotation_timestamp", ""),
-                })
+                }
+                if "cut_turn" in ta:
+                    entry["cut_turn"] = ta["cut_turn"]
+                if "moment_id" in ta:
+                    entry["moment_id"] = ta["moment_id"]
+                groups[conv_id].append(entry)
 
     result = []
     for conv_id, annotations in sorted(groups.items()):
@@ -137,7 +144,7 @@ def load_existing_labels():
     return existing
 
 
-def classify_batch(items, labeller="v2"):
+def classify_batch(items, labeller="hybrid"):
     """Run batch classification. `items` is list of dicts with keys:
     key, annotation_type, situation, action, result_text.
     Returns {key: label}.
@@ -204,7 +211,7 @@ def classify_batch(items, labeller="v2"):
 
 
 def build_moment(ann, label):
-    return {
+    moment = {
         "turn_start": ann.get("turn_start"),
         "turn_end": ann.get("turn_end"),
         "annotation_type": ann.get("annotation_type", ""),
@@ -214,17 +221,22 @@ def build_moment(ann, label):
         "result": ann.get("result", ""),
         "strategy_label": label,
     }
+    if "cut_turn" in ann:
+        moment["cut_turn"] = ann["cut_turn"]
+    if "moment_id" in ann:
+        moment["moment_id"] = ann["moment_id"]
+    return moment
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
                         help="Show counts without submitting batch or writing files")
-    parser.add_argument("--labeller", default="v2",
+    parser.add_argument("--labeller", default="hybrid",
                         help="Labeller version. 'hybrid' routes per annotation_type using "
                              "config.yaml's annotator.labeller dict. Any other value loads "
                              "classify_{labeller}.txt as a single template. Determines output "
-                             "dir (ground_truth_{labeller}/). Default: v2.")
+                             "dir (ground_truth_{labeller}/).")
     parser.add_argument("--input", default=str(ANNOTATIONS_JSONL),
                         help="Path to annotations JSONL file (default: teacher_annotations/step_up_annotations.jsonl)")
     args = parser.parse_args()

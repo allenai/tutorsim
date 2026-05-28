@@ -1,13 +1,14 @@
 """
 Pass 1 -- Key moment detection.
 
-Reads transcripts, sends full transcripts to Gemini batch API,
+Reads transcripts, sends full transcripts to the model provider's batch API,
 outputs detected moments (turn ranges + brief descriptions).
 
 Usage:
     python -m annotator.core.detect --version v1
     python -m annotator.core.detect --version v1 --test 3
     python -m annotator.core.detect --version v1 --target scaffolding
+    python -m annotator.core.detect --version v1 --split test
 """
 
 import argparse
@@ -22,6 +23,7 @@ from .client import (
     ModelClient, build_batch_entry, write_jsonl, run_batch, run_sync_entries,
 )
 from .config import get_phase_config, get_valid_styles, get_annotation_types
+
 from .storage import (
     load_all_transcripts, save_annotator_result, get_annotator_result_path,
     save_annotator_shard, list_annotator_shard_ids, load_annotator_shards,
@@ -45,17 +47,17 @@ VALID_TARGETS = get_annotation_types()
 VALID_ANNOTATION_TYPES = set(get_annotation_types())
 
 
-def load_conversations(limit: int = 0) -> list[dict]:
-    """Load train-split transcripts via storage layer."""
+def load_conversations(limit: int = 0, split: str = "train") -> list[dict]:
+    """Load split transcripts via storage layer."""
     transcripts = load_all_transcripts()
     if not transcripts:
         raise FileNotFoundError(
             "No transcripts found. Ensure data/transcripts/ contains JSON files, "
             "or configure transcript paths in config.yaml under storage.paths.transcripts."
         )
-    train_ids = load_split_ids("train")
+    split_ids = load_split_ids(split)
     conversations = sorted(
-        (c for c in transcripts.values() if c.get("transcript_id", "") in train_ids),
+        (c for c in transcripts.values() if c.get("transcript_id", "") in split_ids),
         key=lambda c: c.get("conversation_id", ""),
     )
     if limit > 0:
@@ -161,11 +163,17 @@ def parse_detection_results(raw_entries: dict,
 
         try:
             parsed = json.loads(text)
-            for det in parsed.get("detections", []):
-                if "annotation_type" not in det:
-                    det["annotation_type"] = ann_type
-                if det["annotation_type"] not in VALID_ANNOTATION_TYPES:
-                    det["annotation_type"] = ann_type
+            # Some models return a bare array instead of {"detections": [...]}
+            detections = parsed if isinstance(parsed, list) else parsed.get("detections", [])
+            for det in detections:
+                # Normalize new compact field names to canonical names
+                if "start" in det and "turn_start" not in det:
+                    det["turn_start"] = det.pop("start")
+                if "end" in det and "turn_end" not in det:
+                    det["turn_end"] = det.pop("end")
+                if "description" in det and "brief_description" not in det:
+                    det["brief_description"] = det.pop("description")
+                det["annotation_type"] = ann_type
                 # Validate and enforce suggested_cut_turn
                 sct = det.get("suggested_cut_turn")
                 ts = det.get("turn_start", 0)
@@ -193,24 +201,32 @@ def parse_detection_results(raw_entries: dict,
 def run_detect(version: str, model: str, mode: str, prompt_version: str,
                targets: list[str], phase_cfg: dict,
                test: int = 0, dialogue_only: bool = False,
-               with_screenshots: bool = False) -> dict:
+               profile: str | None = None,
+               annotator_style: str | None = None,
+               split: str = "train", with_screenshots: bool = False) -> dict:
     """Run detection pass. Returns the full output dict (with 'results' key).
 
     Resumable: per-conv results are written to shards under
-    results/annotator/{version}/shards/detections/{conv_id}.json as they parse.
-    A re-run with the same version skips conv_ids that already have a shard
+    results/annotator/{version}/shards/{shard_namespace}/{conv_id}.json as they parse,
+    where shard_namespace matches the output filename prefix (e.g. detections_anthropic_test).
+    A re-run with the same flags skips conv_ids that already have a shard
     and only sends the remainder to the model. Delete the version directory
     to force a clean re-run.
     """
     output_dir = get_annotator_result_path(version)
 
-    conversations = load_conversations(limit=test)
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    shard_namespace = f"detections{profile_suffix}{style_suffix}{split_suffix}"
+
+    conversations = load_conversations(limit=test, split=split)
     if test > 0:
         logger.info("TEST MODE: %d conversations", test)
     logger.info("Loaded %d conversations", len(conversations))
     logger.info("Model: %s | Mode: %s | Targets: %s", model, mode, targets)
 
-    existing_ids = set(list_annotator_shard_ids(version, "detections"))
+    existing_ids = set(list_annotator_shard_ids(version, shard_namespace))
     to_process = [c for c in conversations if c["conversation_id"] not in existing_ids]
     if existing_ids:
         logger.info("Resuming version %s: %d shards already on disk, %d to process",
@@ -242,7 +258,7 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
             poll_interval = phase_cfg["poll_interval"]
 
             # Resume an in-flight batch if the sidecar matches our current entries.
-            inflight = load_inflight_batch(version, "detections")
+            inflight = load_inflight_batch(version, shard_namespace)
             existing_batch_id = None
             if inflight:
                 expected = inflight.get("entry_keys_hash")
@@ -255,13 +271,13 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                     logger.error(
                         "In-flight detect batch sidecar exists but entry-keys hash differs "
                         "(sidecar=%s, current=%s). Convs may have changed between runs. "
-                        "Delete %s/in_flight/detections.json to start a fresh batch.",
-                        expected, actual, version,
+                        "Delete %s/in_flight/%s.json to start a fresh batch.",
+                        expected, actual, version, shard_namespace,
                     )
                     raise RuntimeError("entry-keys mismatch on in-flight batch resume")
 
             def _record(batch_id: str) -> None:
-                save_inflight_batch(version, "detections", {
+                save_inflight_batch(version, shard_namespace, {
                     "provider": client.provider,
                     "model": model,
                     "batch_id": batch_id,
@@ -280,9 +296,9 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                             on_batch_created=_record)
             new_by_conv = parse_detection_results(raw, images_per_key=images_per_key)
             for conv_id, conv_data in new_by_conv.items():
-                save_annotator_shard(version, "detections", conv_id, conv_data)
+                save_annotator_shard(version, shard_namespace, conv_id, conv_data)
                 logger.debug("Shard saved: %s", conv_id)
-            clear_inflight_batch(version, "detections")
+            clear_inflight_batch(version, shard_namespace)
         else:
             # Per-conv sync: shard after each conv's entries return so a
             # ctrl-C between convs leaves valid partial state on disk.
@@ -296,13 +312,13 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                 raw_conv = run_sync_entries(client, conv_entries)
                 parsed_conv = parse_detection_results(raw_conv, images_per_key=images_per_key)
                 if conv_id in parsed_conv:
-                    save_annotator_shard(version, "detections", conv_id, parsed_conv[conv_id])
+                    save_annotator_shard(version, shard_namespace, conv_id, parsed_conv[conv_id])
                     logger.debug("Shard saved: %s", conv_id)
     else:
         logger.info("All %d conversations already have shards -- nothing to send", len(conversations))
 
     # Aggregate the monolithic JSON from the union of all shards.
-    detections_by_conv = load_annotator_shards(version, "detections")
+    detections_by_conv = load_annotator_shards(version, shard_namespace)
 
     total_dets = sum(len(d.get("detections", [])) for d in detections_by_conv.values())
     avg = total_dets / len(detections_by_conv) if detections_by_conv else 0
@@ -327,11 +343,29 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
         "results": detections_by_conv,
     }
 
-    save_annotator_result(version, "detections.json", output)
-
-    logger.info("Saved: detections.json (version: %s)", version)
-    logger.info("  %d detections across %d conversations (avg %.1f/conv)",
-                total_dets, len(detections_by_conv), avg)
+    if len(targets) > 1:
+        logger.info("")
+        for target in sorted(targets):
+            target_results = {
+                conv_id: {
+                    "detections": [d for d in data["detections"] if d.get("annotation_type") == target],
+                    "usage": data["usage"],
+                }
+                for conv_id, data in detections_by_conv.items()
+            }
+            n = sum(len(d["detections"]) for d in target_results.values())
+            avg_t = n / len(target_results) if target_results else 0
+            target_output = {**output, "targets": [target], "total_detections": n,
+                             "avg_detections_per_conversation": round(avg_t, 1),
+                             "results": target_results}
+            filename = f"detections{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+            save_annotator_result(version, filename, target_output)
+            logger.info(f"Saved: {filename} | {n} detections across {len(target_results)} conversations (avg {avg_t:.1f}/conv)")
+    else:
+        filename = f"detections{profile_suffix}{style_suffix}{split_suffix}_{targets[0]}.json"
+        save_annotator_result(version, filename, output)
+        logger.info(f"\nSaved: {filename} (version: {version})")
+        logger.info(f"  {total_dets} detections across {len(detections_by_conv)} conversations (avg {avg:.1f}/conv)")
 
     return output
 
@@ -358,10 +392,17 @@ def main():
     parser.add_argument("--style", choices=get_valid_styles(),
                         default=None,
                         help="Use per-style detection prompts from profiles/{style}/p1/")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print an example prompt without calling the API")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to run on (default: train)")
     parser.add_argument("--with-screenshots", action="store_true",
                         help="Include anchored screenshots in detection prompts. "
                              "Requires a vision-capable model.")
     args = parser.parse_args()
+
+    from common.logging_setup import setup_logging
+    setup_logging()
 
     from .config import resolve_run_params
     params = resolve_run_params(
@@ -387,12 +428,26 @@ def main():
         if style_p1_dir.exists():
             prompt_version = f"profiles/{style}"
 
+    if args.dry_run:
+        conversations = load_conversations(limit=args.test or 1, split=args.split)
+        entries = build_detection_entries(conversations, args.target, prompt_version,
+                                         dialogue_only=args.dialogue_only)
+        print(f"\n--- DRY RUN: showing first of {len(entries)} prompt(s) ---\n")
+        print(entries[0]["request"]["contents"][0]["parts"][0]["text"])
+        return
+
     output = run_detect(version=version, model=model, mode=mode,
                         prompt_version=prompt_version, targets=args.target,
                         phase_cfg=phase_cfg, test=args.test,
                         dialogue_only=args.dialogue_only,
-                        with_screenshots=args.with_screenshots)
-    logger.info("Next: python -m annotator.core.annotate --version %s", version)
+                        profile=profile, annotator_style=style,
+                        split=args.split, with_screenshots=args.with_screenshots)
+    style_flag = f" --annotator-style {style}" if style else ""
+    profile_flag = f" --profile {profile}" if profile else ""
+    split_flag = f" --split {args.split}" if args.split != "train" else ""
+    with_screenshots_flag = f" --with-screenshots" if args.with_screenshots else ""
+    print(f"\nNext: python -m annotator.core.annotate --version {version}{profile_flag}{style_flag}{split_flag}{with_screenshots_flag}")
+    logger.info(f"Next: python -m annotator.core.annotate --version {version}{profile_flag}{style_flag}{split_flag}{with_screenshots_flag}")
 
 
 if __name__ == "__main__":

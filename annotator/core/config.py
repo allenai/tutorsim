@@ -201,7 +201,9 @@ def resolve_run_params(
         if cfg_style is not None:
             style = cfg_style
 
-    prompt_version = cli_prompt_version or defaults.get("prompt_version") or version
+    # Explicit --prompt-version wins; then explicit --version wins over config default;
+    # finally fall back to config prompt_version or the resolved version.
+    prompt_version = cli_prompt_version or (cli_version if cli_version else defaults.get("prompt_version")) or version
 
     return {
         "version": version,

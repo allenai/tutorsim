@@ -13,7 +13,7 @@ class TestParseDetectionResults:
                         "turn_start": 1,
                         "turn_end": 5,
                         "annotation_type": "scaffolding",
-                        "brief_description": "test",
+                        "situation": "test",
                         "suggested_cut_turn": 1,
                     }]
                 }),
@@ -56,7 +56,7 @@ class TestParseDetectionResults:
                         "turn_start": 5,
                         "turn_end": 10,
                         "annotation_type": "scaffolding",
-                        "brief_description": "test",
+                        "situation": "test",
                     }]
                 }),
                 "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},

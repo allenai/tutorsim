@@ -62,6 +62,8 @@ def main():
                         help="Annotator style: use per-style prompts for annotation and labeling")
     parser.add_argument("--context", type=int, default=None,
                         help="Context window for annotation excerpts")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to run on (default: train)")
     args = parser.parse_args()
 
     from .core.config import resolve_run_params
@@ -105,6 +107,7 @@ def main():
             phase_cfg=detect_cfg,
             test=args.test,
             dialogue_only=args.dialogue_only,
+            split=args.split,
         )
         detections_data = detect_output["results"]
 
@@ -127,6 +130,8 @@ def main():
             gold=args.gold,
             annotator_style=style,
             detections_by_conv=detections_data,
+            profile=profile,
+            split=args.split,
         )
         if annotations_data is None:
             logger.error("Annotation failed. Aborting.")
@@ -143,12 +148,17 @@ def main():
         gold=args.gold,
         annotator_style=style,
         annotations_data=annotations_data,
+        profile=profile,
+        targets=args.target,
+        split=args.split,
     )
 
     logger.info("=== Pipeline complete ===")
     style_flag = f" --annotator-style {style}" if style else ""
-    logger.info("Next: python -m annotator.eval.eval --version %s%s", version, style_flag)
-
+    profile_flag = f" --profile {profile}" if profile else ""
+    split_flag = f" --split {args.split}" if args.split != "train" else ""
+    logger.info(f"  Next: python -m annotator.eval.eval --version {version}{profile_flag}{style_flag}{split_flag}")
+    logger.info("=" * 60)
 
 if __name__ == "__main__":
     main()

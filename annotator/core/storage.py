@@ -693,7 +693,7 @@ def load_annotator_shards(version: str, basename: str) -> dict[str, dict]:
 #
 # When a batch is submitted to a provider, the batch keeps running server-side
 # even if our process exits. We persist the provider's batch ID to a sidecar
-# at results/annotator/{version}/in_flight_{basename}.json BEFORE entering the
+# at results/annotator/{version}/in_flight/{basename}.json BEFORE entering the
 # poll loop, so a re-run after ctrl-C can resume polling on the same batch
 # instead of re-submitting and double-charging compute.
 #
@@ -708,7 +708,7 @@ def _inflight_rel(version: str, basename: str) -> str:
 
 def save_inflight_batch(version: str, basename: str, data: dict) -> None:
     """Record an in-flight batch's metadata. Expected keys:
-    provider, model, batch_id, n_entries, display_name, submitted_at."""
+    provider, model, batch_id, n_entries, entry_keys_hash, display_name, submitted_at."""
     _get_backend().write_json(_inflight_rel(version, basename), data)
 
 

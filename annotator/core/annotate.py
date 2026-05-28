@@ -2,7 +2,7 @@
 Pass 2 -- Annotate key moments with situation/action/result.
 
 Reads detected moments (from detect.py output OR gold truth) and sends
-focused excerpts to Gemini batch API for detailed analysis.
+focused excerpts to the model provider's batch API for detailed analysis.
 
 Usage:
     # Annotate moments found by detect.py
@@ -13,6 +13,9 @@ Usage:
 
     # Custom context window
     python -m annotator.core.annotate --version v1 --context 30
+
+    # Run on test split
+    python -m annotator.core.annotate --version v1 --split test
 """
 
 import argparse
@@ -51,52 +54,97 @@ VALID_ANNOTATION_TYPES = set(get_annotation_types())
 VALID_ANNOTATOR_STYLES = get_valid_styles()
 
 
-def load_conversations_map() -> dict[str, dict]:
-    """Load train-split transcripts as {conv_id: conversation} via storage layer."""
-    train_ids = load_split_ids("train")
+def load_conversations_map(split: str = "train") -> dict[str, dict]:
+    """Load split transcripts as {conv_id: conversation} via storage layer."""
+    split_ids = load_split_ids(split)
     return {
         conv_id: conv
         for conv_id, conv in load_all_transcripts().items()
-        if conv.get("transcript_id", "") in train_ids
+        if conv.get("transcript_id", "") in split_ids
     }
 
 
-def load_detections_from_version(version: str) -> dict[str, dict] | None:
-    """Load detections from detect.py output via storage layer."""
-    data = load_annotator_result(version, "detections.json")
-    if data is None:
-        return None
-    return data["results"]
+def load_detections_from_version(version: str,
+                                  targets: list[str] | None = None,
+                                  profile: str | None = None,
+                                  annotator_style: str | None = None,
+                                  split: str = "train") -> dict[str, dict] | None:
+    """Load detections from detect.py output, merging per-target files."""
+    effective_targets = targets if targets else get_annotation_types()
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+
+    merged: dict = {}
+    for target in effective_targets:
+        fname = f"detections{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+        data = load_annotator_result(version, fname)
+        if data is not None:
+            for conv_id, conv_data in data["results"].items():
+                if conv_id not in merged:
+                    merged[conv_id] = {"detections": [], "usage": dict(conv_data.get("usage", {}))}
+                merged[conv_id]["detections"].extend(conv_data.get("detections", []))
+    if merged:
+        return merged
+
+    fallbacks = [f"detections{profile_suffix}{style_suffix}{split_suffix}.json"]
+    if split == "train":
+        fallbacks += [f"detections{profile_suffix}{style_suffix}.json",
+                      f"detections{profile_suffix}.json",
+                      "detections.json"]
+    for fname in fallbacks:
+        data = load_annotator_result(version, fname)
+        if data is not None:
+            return data["results"]
+    return None
 
 
 def load_gold_moments(targets: list[str],
-                      annotator_style: str | None = None) -> dict[str, dict]:
-    """Load train-split ground truth moments as detection-like dicts.
+                      annotator_style: str | None = None,
+                      split: str = "train") -> dict[str, dict]:
+    """Load split ground truth moments as detection-like dicts.
 
     Converts gold annotations into the same format as detect.py output
     so the rest of the pipeline works identically.
     """
     ground_truth = load_ground_truth(annotator_style=annotator_style)
-    train_ids = load_split_ids("train")
+    split_ids = load_split_ids(split)
+
+    # Ground truth keys by UUID (transcript_id), but conversations_map keys by
+    # the full conversation_id (e.g. {tutor_id}_{student_id}_{UUID}). Build a
+    # mapping so detections use the same key as conversations_map.
+    transcript_id_to_conv_id = {
+        conv.get("transcript_id", ""): conv_id
+        for conv_id, conv in load_all_transcripts().items()
+        if conv.get("transcript_id")
+    }
 
     detections_by_conv = {}
-    for conv_id, conv_data in ground_truth.get("conversations", {}).items():
-        if conv_id not in train_ids:
+    for gt_id, conv_data in ground_truth.get("conversations", {}).items():
+        if gt_id not in split_ids:
             continue
-        dets = []
+        conv_id = transcript_id_to_conv_id.get(gt_id, gt_id)
+
+        # Deduplicate by (turn_start, turn_end, annotation_type), keeping
+        # the longest situation text across all annotators who labeled that moment.
+        best: dict[tuple, dict] = {}
         for moment in conv_data.get("key_moments", []):
             ann_type = moment.get("annotation_type", "")
             if ann_type not in targets:
                 continue
-            dets.append({
-                "turn_start": moment["turn_start"],
-                "turn_end": moment["turn_end"],
-                "annotation_type": ann_type,
-                "brief_description": moment.get("situation", "Human-identified moment"),
-            })
-        if dets:
+            key = (moment["turn_start"], moment["turn_end"], ann_type)
+            situation = moment.get("situation", "")
+            if key not in best or len(situation) > len(best[key]["situation"]):
+                best[key] = {
+                    "turn_start": moment["turn_start"],
+                    "turn_end": moment["turn_end"],
+                    "annotation_type": ann_type,
+                    "situation": situation or "Human-identified moment",
+                }
+
+        if best:
             detections_by_conv[conv_id] = {
-                "detections": dets,
+                "detections": list(best.values()),
                 "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
             }
 
@@ -108,6 +156,7 @@ def load_prompt(version: str, target: str) -> str:
     for ext in ("md", "txt"):
         path = PROMPTS_DIR / version / "p2" / f"{target}.{ext}"
         if path.exists():
+            logger.info("Loaded prompt: %s (%d chars)", path, path.stat().st_size)
             with open(path, "r", encoding="utf-8") as f:
                 return f.read()
     raise FileNotFoundError(
@@ -163,7 +212,7 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
             turn_start = det.get("turn_start", 0)
             turn_end = det.get("turn_end", turn_start)
-            brief_desc = det.get("brief_description", "")
+            situation = det.get("situation", "") or det.get("brief_description", "")
 
             excerpt_start = max(min_turn, turn_start - context_window)
             excerpt_end = min(max_turn, turn_end + context_window)
@@ -185,7 +234,7 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
             prompt = prompt_cache[ann_type]
             prompt = prompt.replace("{annotator_style}", "")
-            prompt = prompt.replace("{brief_description}", brief_desc)
+            prompt = prompt.replace("{situation}", situation)
             prompt = prompt.replace("{excerpt}", excerpt)
             prompt = prompt.replace("{turn_start}", str(turn_start))
             prompt = prompt.replace("{turn_end}", str(turn_end))
@@ -247,10 +296,10 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
             if key in analyses:
                 a = analyses[key]
                 annotations.append({
-                    "annotation_type": a.get("annotation_type", ann_type),
-                    "turn_start": a.get("turn_start", det.get("turn_start")),
-                    "turn_end": a.get("turn_end", det.get("turn_end")),
-                    "situation": a.get("situation", ""),
+                    "annotation_type": ann_type,
+                    "turn_start": det.get("turn_start"),
+                    "turn_end": det.get("turn_end"),
+                    "situation": a.get("situation", "") or det.get("situation", "") or det.get("brief_description", ""),
                     "action": a.get("action", ""),
                     "result": a.get("result", ""),
                 })
@@ -263,7 +312,7 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
                     "annotation_type": ann_type,
                     "turn_start": det.get("turn_start", 0),
                     "turn_end": det.get("turn_end", 0),
-                    "situation": det.get("brief_description", ""),
+                    "situation": det.get("situation", ""),
                     "action": "[Analysis unavailable -- batch failed for this moment]",
                     "result": "",
                 })
@@ -287,34 +336,46 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  dialogue_only: bool = False, context_window: int = 20,
                  gold: bool = False, annotator_style: str | None = None,
                  detections_by_conv: dict | None = None,
+                 dry_run: bool = False,
+                 profile: str | None = None,
+                 split: str = "train",
                  with_screenshots: bool = False) -> dict:
     """Run annotation pass. Returns the full output dict (with 'results' key).
 
     If detections_by_conv is provided, uses it directly instead of reading
     from disk. This allows in-memory chaining from run_detect().
 
+    If dry_run is True, loads data and builds all entries but stops before
+    any API call. Writes annotate_requests{profile_suffix}.jsonl and returns None.
+
     Resumable: per-conv results write to shards under
+
     results/annotator/{version}/shards/{basename}/{conv_id}.json as they parse
     (basename = output filename without .json, e.g. "annotations_generous").
     A re-run with the same flags skips conv_ids that already have a shard.
     """
     output_dir = get_annotator_result_path(version)
 
+    profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
-    filename = f"annotations_gold{style_suffix}.json" if gold else f"annotations{style_suffix}.json"
-    output_basename = filename[:-5]  # strip .json -- this is the shard namespace
+    split_suffix = f"_{split}" if split != "train" else ""
+    gold_prefix = "annotations_gold" if gold else "annotations"
+    output_basename = f"{gold_prefix}{profile_suffix}{style_suffix}{split_suffix}"
 
-    conversations_map = load_conversations_map()
+    conversations_map = load_conversations_map(split=split)
+
     logger.info("Loaded %d transcripts", len(conversations_map))
 
     if detections_by_conv is None:
         if gold:
             logger.info("Using gold truth moments")
-            detections_by_conv = load_gold_moments(targets, annotator_style=annotator_style)
+            detections_by_conv = load_gold_moments(targets, annotator_style=annotator_style, split=split)
         else:
-            detections_by_conv = load_detections_from_version(version)
+            detections_by_conv = load_detections_from_version(
+                version, targets=targets, profile=profile,
+                annotator_style=annotator_style, split=split)
             if detections_by_conv is None:
-                logger.error("detections.json not found for version %s. Run detect first, or use --gold.", version)
+                logger.error("No detections found for version %s. Run detect first, or use --gold.", version)
                 return None
             logger.info("Loaded detections for version %s", version)
 
@@ -346,9 +407,13 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
             dialogue_only=dialogue_only, annotator_style=annotator_style,
             with_screenshots=with_screenshots,
         )
-        jsonl_path = str(output_dir / "annotate_requests.jsonl")
+        jsonl_path = str(output_dir / f"annotate_requests{profile_suffix}.jsonl")
         write_jsonl(entries, jsonl_path)
         logger.info("Wrote %d analysis entries", len(entries))
+
+        if dry_run:
+            logger.info("DRY RUN: stopping before API call. Requests written to %s", jsonl_path)
+            return None
 
         # Per-annotation `images_seen` = images attached to that single prompt.
         # Per-conv `images_attached` = sum across this conv's prompts -- matches
@@ -471,10 +536,25 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
         },
     }
 
-    save_annotator_result(version, filename, output)
+    if len(targets) > 1:
+        logger.info("")
+    for target in sorted(targets):
+        target_results = {
+            conv_id: {
+                **conv_data,
+                "annotations": [a for a in conv_data["annotations"] if a.get("annotation_type") == target],
+            }
+            for conv_id, conv_data in results.items()
+        }
+        n = sum(len(r["annotations"]) for r in target_results.values())
+        target_output = {**output, "targets": [target], "total_annotations": n, "results": target_results}
+        if gold:
+            filename = f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+        else:
+            filename = f"annotations{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+        save_annotator_result(version, filename, target_output)
+        logger.info("Saved: %s | %d annotations across %d conversations", filename, n, len(target_results))
 
-    logger.info("Saved: %s (version: %s)", filename, version)
-    logger.info("  %d annotations across %d conversations", total_annotations, len(results))
     logger.info("  Errors: %d", error_count)
     logger.info("  Tokens: %s", f"{total_input + total_output:,}")
 
@@ -505,10 +585,17 @@ def main():
     parser.add_argument("--annotator-style", "--style", choices=VALID_ANNOTATOR_STYLES,
                         default=None, dest="annotator_style",
                         help="Annotator archetype to simulate (generous/balanced/demanding)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Build and write all entries but stop before any API call")
+    parser.add_argument("--split", choices=["train", "test"], default="train",
+                        help="Which split to run on (default: train)")
     parser.add_argument("--with-screenshots", action="store_true",
                         help="Include anchored screenshots from each moment's "
                              "context window. Requires a vision-capable model.")
     args = parser.parse_args()
+
+    from common.logging_setup import setup_logging
+    setup_logging()
 
     from .config import resolve_run_params
     params = resolve_run_params(
@@ -537,12 +624,14 @@ def main():
                           prompt_version=prompt_version, targets=args.target,
                           phase_cfg=phase_cfg, dialogue_only=args.dialogue_only,
                           context_window=context_window, gold=args.gold,
-                          annotator_style=style,
-                          with_screenshots=args.with_screenshots)
+                          annotator_style=style, dry_run=args.dry_run,
+                          profile=profile, split=args.split, with_screenshots=args.with_screenshots)
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""
-        logger.info("Next: python -m annotator.core.label --version %s%s%s", version, gold_flag, style_flag)
+        profile_flag = f" --profile {profile}" if profile else ""
+        split_flag = f" --split {args.split}" if args.split != "train" else ""
+        logger.info("Next: python -m annotator.core.label --version %s%s%s%s%s", version, profile_flag, gold_flag, style_flag, split_flag)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ Two entry points:
   # Gemini advisor -- sends error examples + current prompt for analysis
   python -m annotator.iteration.advisor --pass detection --version v2 --type scaffolding
   python -m annotator.iteration.advisor --pass annotation --version v2 --type rapport
+  python -m annotator.iteration.advisor --pass annotation_draft --version v2 --type rapport
+  python -m annotator.iteration.advisor --pass detection_draft --version v2 --type scaffolding
 
   # Detection disagreement analysis -- detailed error breakdown
   python -m annotator.iteration.advisor analyze --version v1
@@ -13,6 +15,7 @@ Two entry points:
 
 import argparse
 import json
+import random
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -39,28 +42,50 @@ def _load_ground_truth_train(annotator_style=None):
 # Detection error collection
 # ===================================================================
 
-def collect_detection_errors(version, ann_type, transcripts, limit=10):
+def collect_detection_errors(version, ann_type, transcripts, limit=10, iou_threshold=0.5, profile=None,
+                             show_human_annotations=True):
     """Collect detection errors and correct matches for comprehensive analysis."""
     gt = _load_ground_truth_train()
 
-    det_data = load_annotator_result(version, "detections.json")
+    profile_suffix = f"_{profile}" if profile else ""
+    candidates = [
+        f"detections{profile_suffix}_{ann_type}.json",
+        f"detections{profile_suffix}.json",
+        f"detections_{ann_type}.json",
+        "detections.json",
+    ]
+    det_data = None
+    for candidate in candidates:
+        det_data = load_annotator_result(version, candidate)
+        if det_data is not None:
+            print(f"Loaded detections: {candidate} (version: {version})")
+            break
     if det_data is None:
-        raise FileNotFoundError(f"No detections found for version {version}")
+        raise FileNotFoundError(f"No detections found for version {version}. Tried: {', '.join(candidates)}")
 
     complete_misses = []
     near_misses = []
     false_positives = []
     good_matches = []
 
+    # Detections use compound keys (tutor_student_uuid); ground truth uses bare UUIDs.
+    uuid_to_det_conv = {}
+    uuid_to_compound_key = {}
+    for compound, conv_data in det_data.get("results", {}).items():
+        uuid = compound.rsplit("_", 1)[-1]
+        uuid_to_det_conv[uuid] = conv_data
+        uuid_to_compound_key[uuid] = compound
+
     eval_ids = sorted(
-        (set(gt["conversations"].keys()) & set(det_data.get("results", {}).keys()))
+        (set(gt["conversations"].keys()) & set(uuid_to_det_conv.keys()))
         - EXAMPLE_CONV_IDS
     )
     for conv_id in eval_ids:
+        compound_key = uuid_to_compound_key[conv_id]
         human_moments = gt["conversations"][conv_id]["key_moments"]
         human_moments = [m for m in human_moments if m.get("annotation_type") == ann_type]
         llm_moments = [
-            m for m in det_data["results"].get(conv_id, {}).get("detections", [])
+            m for m in uuid_to_det_conv[conv_id].get("detections", [])
             if m.get("annotation_type") == ann_type
         ]
 
@@ -77,8 +102,8 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
                     best_iou = iou
                     best_det = det
 
-            entry = {"conv_id": conv_id, "cluster": cluster, "nearest_det": best_det, "iou": best_iou}
-            if best_iou >= IOU_THRESHOLD:
+            entry = {"conv_id": compound_key, "cluster": cluster, "nearest_det": best_det, "iou": best_iou}
+            if best_iou >= iou_threshold:
                 good_matches.append(entry)
             elif best_iou > 0:
                 near_misses.append(entry)
@@ -93,8 +118,8 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
                 iou = compute_iou(d_range, (cluster["turn_start"], cluster["turn_end"]))
                 if iou > best_iou:
                     best_iou = iou
-            if best_iou < IOU_THRESHOLD:
-                false_positives.append({"conv_id": conv_id, "detection": det, "best_iou": best_iou})
+            if best_iou < iou_threshold:
+                false_positives.append({"conv_id": compound_key, "detection": det, "best_iou": best_iou})
 
     # Format examples as text blocks
     examples = []
@@ -106,31 +131,35 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
         c = entry["cluster"]
         det = entry["nearest_det"]
         excerpt = get_excerpt(transcripts, entry["conv_id"], c["turn_start"], c["turn_end"])
-        human_anns = "\n".join(
-            f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
-            for m in c["moments"]
-        )
         det_info = f"LLM: turns {det['turn_start']}-{det['turn_end']}, desc: {det.get('brief_description', '')[:200]}" if det else ""
-        examples.append(
+        block = (
             f"Match {i+1}: Human turns {c['turn_start']}-{c['turn_end']} | {det_info} | IoU={entry['iou']:.2f}\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  Human annotations:\n{human_anns}\n"
         )
+        if show_human_annotations:
+            human_anns = "\n".join(
+                f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
+                for m in c["moments"]
+            )
+            block += f"  Human annotations:\n{human_anns}\n"
+        examples.append(block)
 
     examples.append(f"\n=== COMPLETE MISSES ({len(complete_misses)} total, showing {min(limit, len(complete_misses))}) ===")
     examples.append("These are human-annotated moments the LLM completely missed.\n")
     for i, entry in enumerate(complete_misses[:limit]):
         c = entry["cluster"]
         excerpt = get_excerpt(transcripts, entry["conv_id"], c["turn_start"], c["turn_end"])
-        human_anns = "\n".join(
-            f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
-            for m in c["moments"]
-        )
-        examples.append(
+        block = (
             f"Miss {i+1}: {entry['conv_id'][:50]} turns {c['turn_start']}-{c['turn_end']}\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  Human annotations:\n{human_anns}\n"
         )
+        if show_human_annotations:
+            human_anns = "\n".join(
+                f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
+                for m in c["moments"]
+            )
+            block += f"  Human annotations:\n{human_anns}\n"
+        examples.append(block)
 
     examples.append(f"\n=== NEAR-MISSES ({len(near_misses)} total, showing {min(limit, len(near_misses))}) ===")
     examples.append("LLM detected something nearby but IoU < 0.3 (wrong boundaries).\n")
@@ -138,16 +167,18 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
         c = entry["cluster"]
         det = entry["nearest_det"]
         excerpt = get_excerpt(transcripts, entry["conv_id"], c["turn_start"], c["turn_end"])
-        human_anns = "\n".join(
-            f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
-            for m in c["moments"]
-        )
         det_info = f"LLM: turns {det['turn_start']}-{det['turn_end']}, desc: {det.get('brief_description', '')[:200]}" if det else "LLM: no nearby detection"
-        examples.append(
+        block = (
             f"Near-miss {i+1}: Human turns {c['turn_start']}-{c['turn_end']} | {det_info} | IoU={entry['iou']:.2f}\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  Human annotations:\n{human_anns}\n"
         )
+        if show_human_annotations:
+            human_anns = "\n".join(
+                f"    [{m.get('annotator_id', '?')}] S: {m.get('situation', '')[:200]} | A: {m.get('action', '')[:200]} | R: {m.get('result', '')[:200]}"
+                for m in c["moments"]
+            )
+            block += f"  Human annotations:\n{human_anns}\n"
+        examples.append(block)
 
     examples.append(f"\n=== FALSE POSITIVES ({len(false_positives)} total, showing {min(limit, len(false_positives))}) ===")
     examples.append("LLM detected a moment that doesn't match any human annotation.\n")
@@ -174,8 +205,90 @@ def collect_detection_errors(version, ann_type, transcripts, limit=10):
 # Annotation error collection
 # ===================================================================
 
+ANNOTATOR_PROMPTS_DIR = REPO_ROOT / "prompts" / "annotator"
+
+
+def collect_teacher_examples(ann_type: str, transcripts: dict,
+                              batch_size: int = 100, batch_idx: int = 0,
+                              ground_truth=None, annotator_style=None,
+                              max_annotators: int = 5) -> tuple[str, str]:
+    """Collect human SAR examples for annotation_draft mode.
+
+    Groups ground truth moments by unique (conv_id, turn_start, turn_end),
+    batches them, and formats up to 5 sampled annotators per moment.
+    Returns (formatted_examples, batch_info).
+    """
+    if ground_truth is None:
+        gt = _load_ground_truth_train(annotator_style=annotator_style)
+    else:
+        gt = ground_truth
+
+    # Build UUID -> compound transcript key mapping
+    uuid_to_compound = {k.rsplit("_", 1)[-1]: k for k in transcripts.keys()}
+
+    # Collect all unique moments across conversations
+    all_units = []
+    for conv_id, conv_data in gt["conversations"].items():
+        if conv_id in EXAMPLE_CONV_IDS:
+            continue
+        moments = [m for m in conv_data.get("key_moments", [])
+                   if m.get("annotation_type") == ann_type]
+        by_span = defaultdict(list)
+        for m in moments:
+            by_span[(m["turn_start"], m["turn_end"])].append(m)
+        for (turn_start, turn_end), span_moments in by_span.items():
+            all_units.append({
+                "conv_id": conv_id,
+                "compound_key": uuid_to_compound.get(conv_id, conv_id),
+                "turn_start": turn_start,
+                "turn_end": turn_end,
+                "moments": span_moments,
+            })
+
+    total = len(all_units)
+    n_batches = max(1, (total + batch_size - 1) // batch_size)
+    start = batch_idx * batch_size
+    end = min(start + batch_size, total)
+    batch = all_units[start:end]
+
+    lines = []
+    for i, unit in enumerate(batch):
+        excerpt = get_excerpt(transcripts, unit["compound_key"],
+                              unit["turn_start"], unit["turn_end"])
+        sampled = random.sample(unit["moments"], min(max_annotators, len(unit["moments"])))
+        lines.append(
+            f"Example {i + 1}: turns {unit['turn_start']}-{unit['turn_end']} "
+            f"({len(unit['moments'])} annotator(s), showing {len(sampled)})\n"
+            f"  Transcript:\n{excerpt}\n"
+        )
+        for j, m in enumerate(sampled):
+            label = m.get("strategy_label", "unclear")
+            lines.append(
+                f"  Annotator {j + 1} [{label}]:\n"
+                f"    S: {m.get('situation', '')[:300]}\n"
+                f"    A: {m.get('action', '')[:300]}\n"
+                f"    R: {m.get('result', '')[:300]}\n"
+            )
+
+    batch_info = (f"Batch {batch_idx + 1} of {n_batches} "
+                  f"(moments {start + 1}-{end} of {total} total for {ann_type})")
+    return "".join(lines), batch_info, n_batches
+
+
+def _format_human_annotators(annotators: list[dict]) -> str:
+    """Format up to 5 sampled human annotators' SAR text for display."""
+    lines = []
+    for j, ann in enumerate(annotators):
+        lines.append(f"    Annotator {j+1} [{ann['label']}]:\n"
+                     f"      S: {ann['situation'][:300]}\n"
+                     f"      A: {ann['action'][:300]}\n"
+                     f"      R: {ann['result'][:300]}\n")
+    return "".join(lines)
+
+
 def collect_annotation_errors(version, ann_type, transcripts, limit=10,
-                               ground_truth=None, annotator_style=None):
+                               ground_truth=None, annotator_style=None,
+                               profile=None):
     """Collect annotation disagreements and agreements for comprehensive analysis.
 
     If ground_truth is provided, uses it directly (allows archetype filtering).
@@ -183,6 +296,7 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     """
     from ..eval.eval import (
         EFFECTIVENESS_LABELS, match_gold_direct, map_to_binary,
+        compute_mean_consensus_label,
     )
 
     if ground_truth is None:
@@ -190,21 +304,46 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     else:
         gt = ground_truth
 
-    # Try style-specific gold annotations, then gold, then regular
+    # Try per-target first, then combined, then fallbacks
+    profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
     candidates = [
+        f"annotations_gold{profile_suffix}{style_suffix}_{ann_type}.json",
+        f"annotations_gold{profile_suffix}_{ann_type}.json",
+        f"annotations_gold{style_suffix}_{ann_type}.json",
+        f"annotations_gold_{ann_type}.json",
+        f"annotations_gold{profile_suffix}{style_suffix}.json",
+        f"annotations_gold{profile_suffix}.json",
         f"annotations_gold{style_suffix}.json",
         "annotations_gold.json",
+        f"annotations{profile_suffix}{style_suffix}_{ann_type}.json",
+        f"annotations{profile_suffix}_{ann_type}.json",
+        f"annotations{style_suffix}_{ann_type}.json",
+        f"annotations_{ann_type}.json",
+        f"annotations{profile_suffix}{style_suffix}.json",
+        f"annotations{profile_suffix}.json",
         f"annotations{style_suffix}.json",
         "annotations.json",
     ]
     llm_data = None
+    loaded_file = None
     for candidate in candidates:
         llm_data = load_annotator_result(version, candidate)
         if llm_data is not None:
+            loaded_file = candidate
             break
     if llm_data is None:
-        raise FileNotFoundError(f"No annotations found for version {version}")
+        raise FileNotFoundError(
+            f"No annotations found for version {version}. Tried: {', '.join(candidates)}")
+    print(f"Loaded annotations: {loaded_file} (version: {version})")
+
+    # Results use compound keys (tutor_student_uuid); ground truth uses bare UUIDs.
+    uuid_to_llm_conv = {}
+    uuid_to_compound_key = {}
+    for compound, conv_data in llm_data.get("results", {}).items():
+        uuid = compound.rsplit("_", 1)[-1]
+        uuid_to_llm_conv[uuid] = conv_data
+        uuid_to_compound_key[uuid] = compound
 
     agreements = []
     disagreements = []
@@ -213,14 +352,15 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     for conv_id, conv_data in gt["conversations"].items():
         if conv_id in EXAMPLE_CONV_IDS:
             continue
-        llm_conv = llm_data.get("results", {}).get(conv_id)
+        llm_conv = uuid_to_llm_conv.get(conv_id)
         if not llm_conv:
             continue
 
         human_moments = [m for m in conv_data["key_moments"] if m.get("annotation_type") == ann_type]
         llm_moments = [m for m in llm_conv.get("annotations", []) if m.get("annotation_type") == ann_type]
 
-        matches = match_gold_direct(human_moments, llm_moments)
+        matches = match_gold_direct(human_moments, llm_moments,
+                                    consensus_fn=compute_mean_consensus_label)
 
         for match in matches:
             human_label = match["consensus_3way"]
@@ -230,17 +370,27 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
 
             confusion_counts[f"{human_label}_vs_{llm_label}" if human_label != llm_label else "agree"] += 1
 
-            human_m = match["cluster"]["moments"][0]
             llm_m = match["llm_moment"]
+            moments = match["cluster"]["moments"]
+            sampled = random.sample(moments, min(5, len(moments)))
+            human_annotators = [
+                {
+                    "annotator_id": m.get("annotator_id", "unknown"),
+                    "label": m.get("strategy_label", "unclear"),
+                    "situation": m.get("situation", ""),
+                    "action": m.get("action", ""),
+                    "result": m.get("result", ""),
+                }
+                for m in sampled
+            ]
             entry = {
-                "conv_id": conv_id,
+                "conv_id": uuid_to_compound_key.get(conv_id, conv_id),
                 "turn_start": match["cluster"]["turn_start"],
                 "turn_end": match["cluster"]["turn_end"],
                 "human_label": human_label,
                 "llm_label": llm_label,
-                "human_situation": human_m.get("situation", ""),
-                "human_action": human_m.get("action", ""),
-                "human_result": human_m.get("result", ""),
+                "human_annotators": human_annotators,
+                "n_annotators": len(match["per_annotator_labels"]),
                 "llm_situation": llm_m.get("situation", ""),
                 "llm_action": llm_m.get("action", ""),
                 "llm_result": llm_m.get("result", ""),
@@ -258,13 +408,11 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     examples.append("These are cases where human and LLM annotations produced the same label. Study what makes these work.\n")
     for i, d in enumerate(agreements[:limit]):
         excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
+        human_block = _format_human_annotators(d["human_annotators"])
         examples.append(
             f"Agreement {i+1}: turns {d['turn_start']}-{d['turn_end']} (both={d['human_label']})\n"
             f"  Transcript:\n{excerpt}\n"
-            f"  HUMAN:\n"
-            f"    S: {d['human_situation'][:300]}\n"
-            f"    A: {d['human_action'][:300]}\n"
-            f"    R: {d['human_result'][:300]}\n"
+            f"  HUMAN ({len(d['human_annotators'])} annotator(s) sampled):\n{human_block}"
             f"  LLM:\n"
             f"    S: {d['llm_situation'][:300]}\n"
             f"    A: {d['llm_action'][:300]}\n"
@@ -278,17 +426,19 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
 
     total_shown = 0
     for confusion_type, cases in sorted(by_confusion.items(), key=lambda x: -len(x[1])):
-        examples.append(f"\n=== {confusion_type.upper()} ({len(cases)} total, showing {min(limit, len(cases))}) ===\n")
+        dense = [d for d in cases if d["n_annotators"] >= 3]
+        pool = dense if dense else cases
+        source_note = "" if dense else " (no >=3-annotator cases; using full pool)"
+        examples.append(f"\n=== {confusion_type.upper()} ({len(cases)} total, showing {min(limit, len(pool))}{source_note}) ===\n")
 
-        for i, d in enumerate(cases[:limit]):
+        for i, d in enumerate(pool[:limit]):
             excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
+            human_block = _format_human_annotators(d["human_annotators"])
             examples.append(
                 f"Disagreement {total_shown + i + 1}: turns {d['turn_start']}-{d['turn_end']}\n"
                 f"  Transcript:\n{excerpt}\n"
-                f"  HUMAN ({d['human_label']}):\n"
-                f"    S: {d['human_situation'][:300]}\n"
-                f"    A: {d['human_action'][:300]}\n"
-                f"    R: {d['human_result'][:300]}\n"
+                f"  HUMAN consensus={d['human_label']} ({len(d['human_annotators'])} annotator(s) sampled):\n"
+                f"{human_block}"
                 f"  LLM ({d['llm_label']}):\n"
                 f"    S: {d['llm_situation'][:300]}\n"
                 f"    A: {d['llm_action'][:300]}\n"
@@ -411,7 +561,7 @@ def main():
         description="Single-shot Gemini advisor for prompt iteration"
     )
     parser.add_argument("--pass", dest="pass_type", required=True,
-                        choices=["detection", "annotation"],
+                        choices=["detection", "annotation", "annotation_draft", "detection_draft"],
                         help="Which pass to iterate on")
     parser.add_argument("--version", required=True,
                         help="Results version to analyze (e.g. v2)")
@@ -422,16 +572,22 @@ def main():
                         help="Model name (overrides config)")
     parser.add_argument("--profile", default=None,
                         help="Config profile to use (overrides config.yaml default)")
-    parser.add_argument("--limit", type=int, default=10,
-                        help="Max examples per error category (default: 10)")
+    parser.add_argument("--limit", type=int, default=20,
+                        help="Max examples per error category (default: 20)")
     parser.add_argument("--prompt-version", default=None,
                         help="Prompt version to load (default: same as --version)")
+    parser.add_argument("--iou-threshold", type=float, default=0.5,
+                        help="IoU threshold for advisor correct-match vs near-miss (default: 0.5)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the meta-prompt without calling the API")
     parser.add_argument("--annotator-style", choices=get_valid_styles(),
                         default=None,
                         help="Filter ground truth to this annotator archetype and tune the "
                              "## Annotator Calibration section of the prompt")
+    parser.add_argument("--batch-size", type=int, default=100,
+                        help="Number of moments per batch for annotation_draft (default: 100)")
+    parser.add_argument("--no-human-annotations", action="store_true",
+                        help="Omit human annotation details from detection error examples")
     args = parser.parse_args()
 
     profile_name = args.profile or load_config().get("profile")
@@ -442,10 +598,10 @@ def main():
     prompt_version = args.prompt_version or args.version
 
     # Determine which pass's prompt to load
-    if args.pass_type == "detection":
+    if args.pass_type in ("detection", "detection_draft"):
         pass_dir = "p1"
     else:
-        pass_dir = "p2"
+        pass_dir = "p2"  # annotation and annotation_draft use the p2 prompt
 
     prompt_path = None
     for ext in ("md", "txt"):
@@ -471,7 +627,9 @@ def main():
 
     if args.pass_type == "detection":
         error_examples, stats = collect_detection_errors(
-            args.version, args.type, transcripts, limit=args.limit
+            args.version, args.type, transcripts, limit=args.limit,
+            iou_threshold=args.iou_threshold, profile=profile_name,
+            show_human_annotations=not args.no_human_annotations,
         )
         # Load evaluation metrics (eval.py must have been run first)
         eval_metrics = load_eval_metrics(args.version, "detections", ann_type=args.type)
@@ -481,7 +639,9 @@ def main():
                   f"precision={eval_metrics.get('moment_precision', 0):.1%}, "
                   f"IoU={eval_metrics.get('mean_iou', 0):.3f}")
 
-        meta_template = load_iteration_prompt("detection", profile_name)
+        advisor_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_detection.md"
+        with open(advisor_prompt_path, "r", encoding="utf-8") as f:
+            meta_template = f.read()
         meta_prompt = meta_template.format(
             ann_type=args.type,
             current_prompt=current_prompt,
@@ -492,6 +652,88 @@ def main():
             false_positives=stats["false_positives"],
             error_examples=error_examples,
         )
+    elif args.pass_type in ("annotation_draft", "detection_draft"):
+        if args.pass_type == "annotation_draft":
+            meta_prompt_filename = "advisor_drafting_annotation.md"
+            output_prefix = "advisor_annotation_draft"
+            mode_label = "annotation_draft"
+        else:
+            meta_prompt_filename = "advisor_drafting_detection.md"
+            output_prefix = "advisor_detection_draft"
+            mode_label = "detection_draft"
+
+        meta_prompt_path = ANNOTATOR_PROMPTS_DIR / meta_prompt_filename
+        if not meta_prompt_path.exists():
+            print(f"ERROR: Meta-prompt not found at {meta_prompt_path}")
+            return
+        with open(meta_prompt_path, "r", encoding="utf-8") as f:
+            meta_template = f.read()
+
+        filtered_gt = None
+        if args.annotator_style:
+            filtered_gt = _load_ground_truth_train(annotator_style=args.annotator_style)
+            print(f"Ground truth filtered to '{args.annotator_style}' annotators")
+
+        current_prompt = current_prompt.replace("{annotator_style}", "")
+
+        profile_suffix = f"_{profile_name}" if profile_name else ""
+        style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
+        client = ModelClient(model)
+
+        max_annotators = 1 if args.pass_type == "detection_draft" else 5
+
+        # Determine total batch count from batch 0
+        _, _, n_batches = collect_teacher_examples(
+            ann_type=args.type, transcripts=transcripts,
+            batch_size=args.batch_size, batch_idx=0,
+            ground_truth=filtered_gt, annotator_style=args.annotator_style,
+            max_annotators=max_annotators,
+        )
+        print(f"{mode_label}: {n_batches} batch(es) of {args.batch_size} moments each")
+
+        for batch_idx in range(n_batches):
+            teacher_examples, batch_info, _ = collect_teacher_examples(
+                ann_type=args.type, transcripts=transcripts,
+                batch_size=args.batch_size, batch_idx=batch_idx,
+                ground_truth=filtered_gt, annotator_style=args.annotator_style,
+                max_annotators=max_annotators,
+            )
+            meta_prompt = meta_template.format(
+                ann_type=args.type,
+                current_prompt=current_prompt,
+                teacher_examples=teacher_examples,
+                batch_info=batch_info,
+            )
+            print(f"\n[{batch_info}] {len(meta_prompt)} chars (~{len(meta_prompt)//4} tokens)")
+
+            if args.dry_run:
+                print(f"--- DRY RUN (batch 0 of {n_batches} shown) ---\n")
+                print(meta_prompt.encode("ascii", errors="replace").decode("ascii"))
+                return
+
+            response = client.generate(
+                meta_prompt,
+                json_mode=True,
+                max_tokens=phase_cfg.get("max_tokens", 16384),
+                timeout=phase_cfg.get("timeout", 300),
+                thinking=phase_cfg.get("thinking", False),
+                thinking_budget=phase_cfg.get("thinking_budget", 0),
+            )
+            print(f"  Tokens: {response.usage}")
+
+            try:
+                advice = json.loads(response.text)
+            except json.JSONDecodeError:
+                print("  WARNING: Response is not valid JSON. Saving raw text.")
+                advice = {"raw_text": response.text}
+
+            filename = (f"{output_prefix}_{args.type}"
+                        f"{profile_suffix}{style_suffix}_batch{batch_idx}.json")
+            save_annotator_result(args.version, filename, advice)
+            print(f"  Saved: {filename}")
+
+        return
+
     else:
         # --- Archetype filtering ---
         # Filter ground truth to the archetype's annotators only.
@@ -509,6 +751,7 @@ def main():
             args.version, args.type, transcripts, limit=args.limit,
             ground_truth=filtered_gt,
             annotator_style=args.annotator_style,
+            profile=profile_name,
         )
         confusion_summary = ", ".join(f"{k}: {v}" for k, v in stats["confusion_counts"].items())
 
@@ -527,7 +770,9 @@ def main():
         # Always use the regular annotation meta-prompt.
         # When --annotator-style is set, the only difference is that
         # error examples come from the archetype-filtered ground truth.
-        meta_template = load_iteration_prompt("annotation", profile_name)
+        advisor_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_annotation.md"
+        with open(advisor_prompt_path, "r", encoding="utf-8") as f:
+            meta_template = f.read()
         meta_prompt = meta_template.format(
             ann_type=args.type,
             current_prompt=current_prompt,
@@ -568,8 +813,9 @@ def main():
         advice = {"raw_text": response.text}
 
     # Save to results directory
+    profile_suffix = f"_{profile_name}" if profile_name else ""
     style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
-    filename = f"advisor_{args.pass_type}_{args.type}{style_suffix}.json"
+    filename = f"advisor_{args.pass_type}_{args.type}{profile_suffix}{style_suffix}.json"
     save_annotator_result(args.version, filename, advice)
     print(f"\nSaved: {filename} (version: {args.version})")
 
@@ -589,7 +835,9 @@ def main():
         print(f"\n  PROPOSED CHANGES ({len(advice['proposed_changes'])}):")
         for c in advice["proposed_changes"]:
             risk = c.get("regression_risk", c.get("directional_effect", "?"))
-            print(f"    - [{c['change_type']}] {c['target_pattern']} (risk: {risk})".encode('ascii', 'replace').decode())
+            change_type = c.get("change_type", "")
+            prefix = f"[{change_type}] " if change_type else ""
+            print(f"    - {prefix}{c['target_pattern']} (risk: {risk})".encode('ascii', 'replace').decode())
             if c.get("current_text"):
                 print(f"      FROM: {c['current_text'][:100]}".encode('ascii', 'replace').decode())
             print(f"      TO:   {c['proposed_text'][:100]}".encode('ascii', 'replace').decode())
