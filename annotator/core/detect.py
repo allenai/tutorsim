@@ -1,7 +1,7 @@
 """
 Pass 1 -- Key moment detection.
 
-Reads transcripts, sends full transcripts to Gemini batch API,
+Reads transcripts, sends full transcripts to the model provider's batch API,
 outputs detected moments (turn ranges + brief descriptions).
 
 Usage:

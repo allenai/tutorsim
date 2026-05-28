@@ -176,7 +176,7 @@ def get_excerpt(transcripts, conv_id, turn_start, turn_end, context=5,
 def _filter_turns(turns: list[dict], dialogue_only: bool) -> list[dict]:
     """Filter turns based on dialogue_only flag.
 
-    When dialogue_only=True, only include turns with type == "DIALOGUE".
+    When dialogue_only=True, exclude turns where is_enrichment=True.
     When False (enriched mode), include all turns.
     """
     if not dialogue_only:

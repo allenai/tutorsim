@@ -32,8 +32,9 @@ For each conversation, human moments and LM annotations are compared as follows:
      - annotations_old: Cohen's kappa (binary and 3-way) between consensus and LM label
      - annotations:     Krippendorff's alpha (ordinal) between consensus and LM label
 
-All agreement metrics are reported per annotation type (scaffolding / rapport) only —
-no aggregated totals across types.
+In annotations mode, agreement metrics (Krippendorff's alpha) are reported per
+annotation type only — no aggregated totals across types. In annotations_old mode,
+aggregate effectiveness metrics (binary kappa, accuracy) are also reported.
 
 Usage:
     python -m annotator.eval.eval --version v1 --mode annotations --profile anthropic
@@ -108,6 +109,14 @@ _ORDINAL_CODE = {"effective": 0, "partial": 1, "ineffective": 2}
 
 
 ALPHA_THRESHOLDS = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+
+
+def _float_keys(d: dict) -> dict:
+    """Normalize threshold dict keys to float. JSON round-trips turn float keys into strings."""
+    try:
+        return {float(k): v for k, v in d.items()}
+    except (ValueError, AttributeError):
+        return d
 MIN_ANNOTATOR_MOMENTS = 50
 
 
@@ -367,7 +376,7 @@ def compute_detection_metrics(human_moments_by_conv, llm_moments_by_conv,
 
 
 # ===================================================================
-# 2. EFFECTIVENESS -- Binary Kappa + Within-Human-Range (IoU >= 0.5)
+# 2. EFFECTIVENESS -- Binary Kappa + Within-Human-Range (IoU >= 0.3)
 # ===================================================================
 
 def match_for_effectiveness(human_moments, llm_moments, iou_threshold=0.3,
@@ -1035,9 +1044,9 @@ def print_scorecard(output):
                 n_dense5 = td.get("iaa_dense5", {}).get("n_units", 0)
                 print(f"  Model-Human α (Krippendorff ordinal):")
                 print(f"    {'threshold':<14s}  {'all units':>10s}  {'>=3 annotators':>14s}  {'>=5 annotators':>14s}")
-                by_thresh = td.get("iaa_by_threshold", {})
-                by_thresh_dense3 = td.get("iaa_dense_by_threshold", {})
-                by_thresh_dense5 = td.get("iaa_dense5_by_threshold", {})
+                by_thresh = _float_keys(td.get("iaa_by_threshold", {}))
+                by_thresh_dense3 = _float_keys(td.get("iaa_dense_by_threshold", {}))
+                by_thresh_dense5 = _float_keys(td.get("iaa_dense5_by_threshold", {}))
                 for t in ALPHA_THRESHOLDS:
                     a_all = by_thresh.get(t, {}).get("alpha")
                     a_d3 = by_thresh_dense3.get(t, {}).get("alpha")
@@ -1057,23 +1066,6 @@ def print_scorecard(output):
                         row = cm.get(h, {})
                         print(f"    {h:>12s}  {row.get('effective', 0):>10d}  "
                               f"{row.get('partial', 0):>10d}  {row.get('ineffective', 0):>12d}")
-
-                kappa_thresh = td.get("kappa_by_threshold", {})
-                if kappa_thresh:
-                    print(f"  Cohen's κ 3-way (mean consensus):")
-                    print(f"    {'threshold':<14s}  {'all units':>10s}  {'>=3 annotators':>14s}  {'>=5 annotators':>14s}")
-                    kappa_d3 = td.get("kappa_dense_by_threshold", {})
-                    kappa_d5 = td.get("kappa_dense5_by_threshold", {})
-                    for t in ALPHA_THRESHOLDS:
-                        k_all = kappa_thresh.get(t, {}).get("three_way_kappa")
-                        k_d3  = kappa_d3.get(t, {}).get("three_way_kappa")
-                        k_d5  = kappa_d5.get(t, {}).get("three_way_kappa")
-                        marker = " *" if t == DEFAULT_CONSENSUS_THRESHOLD else ""
-                        print(f"    ±{t:<13}  "
-                              f"{(f'{k_all:.4f}' if k_all is not None else 'n/a'):>10s}  "
-                              f"{(f'{k_d3:.4f}'  if k_d3  is not None else 'n/a'):>14s}  "
-                              f"{(f'{k_d5:.4f}'  if k_d5  is not None else 'n/a'):>14s}"
-                              f"{marker}")
 
                 per_ann = td.get("per_annotator_alpha", {})
                 if per_ann:

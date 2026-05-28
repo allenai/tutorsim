@@ -6,8 +6,9 @@ The labeller routes by annotation_type when `annotator.labeller` is a dict
 loads a single template when it's a string. Same shared prompts are used by
 data/build_ground_truth.py so labels stay on a consistent scale.
 
-Reads annotations (from annotate.py output) and classifies each result
-text as effective / partial / ineffective.
+Reads annotations (from annotate.py output) and classifies each as
+effective / partial / ineffective. In 3-way mode, the labeller prompt
+receives situation, action, and result; in binary mode, result only.
 
 Usage:
     python -m annotator.core.label --version v1
@@ -38,7 +39,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "annot
 
 
 def _load_prompt(name: str) -> str:
-    """Load a labeller prompt from the prompts/labeller/ directory."""
+    """Load a labeller prompt from the prompts/annotator/labeller/ directory."""
     path = PROMPTS_DIR / f"{name}.txt"
     logger.info("Loading labeller prompt: %s", path)
     with open(path, "r", encoding="utf-8") as f:

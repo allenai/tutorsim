@@ -2,7 +2,7 @@
 Pass 2 -- Annotate key moments with situation/action/result.
 
 Reads detected moments (from detect.py output OR gold truth) and sends
-focused excerpts to Gemini batch API for detailed analysis.
+focused excerpts to the model provider's batch API for detailed analysis.
 
 Usage:
     # Annotate moments found by detect.py
@@ -346,7 +346,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     from disk. This allows in-memory chaining from run_detect().
 
     If dry_run is True, loads data and builds all entries but stops before
-    any API call. Writes annotate_requests.jsonl and prints the first prompt.
+    any API call. Writes annotate_requests{profile_suffix}.jsonl and returns None.
+
     Resumable: per-conv results write to shards under
 
     results/annotator/{version}/shards/{basename}/{conv_id}.json as they parse
