@@ -35,8 +35,8 @@ Usage:
     python data/build_ground_truth.py
     python data/build_ground_truth.py --dry-run
     python data/build_ground_truth.py --labeller v2
-    python data/build_ground_truth.py --input path/to/annotations.jsonl
     python data/build_ground_truth.py --labeller hybrid   # routes per annotation_type via config
+    python data/build_ground_truth.py --input path/to/annotations.jsonl
 """
 import argparse
 import hashlib

@@ -193,10 +193,12 @@ def format_transcript(conversation: dict, dialogue_only: bool = False,
 
     Args:
         conversation: Consolidated conversation dict with "turns" key.
-        dialogue_only: If True, exclude non-dialogue turns (enrichments).
+        dialogue_only: If True, exclude enrichment turns.
         screenshots: Optional list of screenshot dicts. When provided, inlines a
             marker '  [SCREEN @ turn N: image K]' after each anchor turn. K is
-            the 1-based index of the screenshot in the list.
+            the 1-based index of the screenshot in the list. Screenshot markers
+            fire only on dialogue turns (anchor_turn references dialogue
+            numbering), never on enrichments at the same turn_number.
     """
     ss_by_turn: dict[int, list[int]] = {}
     if screenshots:
