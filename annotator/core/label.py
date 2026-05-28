@@ -40,6 +40,7 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts" / "annot
 def _load_prompt(name: str) -> str:
     """Load a labeller prompt from the prompts/labeller/ directory."""
     path = PROMPTS_DIR / f"{name}.txt"
+    logger.info("Loading labeller prompt: %s", path)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 

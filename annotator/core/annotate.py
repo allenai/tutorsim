@@ -355,9 +355,11 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     """
     output_dir = get_annotator_result_path(version)
 
+    profile_suffix = f"_{profile}" if profile else ""
     style_suffix = f"_{annotator_style}" if annotator_style else ""
-    filename = f"annotations_gold{style_suffix}.json" if gold else f"annotations{style_suffix}.json"
-    output_basename = filename[:-5]  # strip .json -- this is the shard namespace
+    split_suffix = f"_{split}" if split != "train" else ""
+    gold_prefix = "annotations_gold" if gold else "annotations"
+    output_basename = f"{gold_prefix}{profile_suffix}{style_suffix}{split_suffix}"
 
     conversations_map = load_conversations_map(split=split)
 
@@ -404,7 +406,6 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
             dialogue_only=dialogue_only, annotator_style=annotator_style,
             with_screenshots=with_screenshots,
         )
-        profile_suffix = f"_{profile}" if profile else ""
         jsonl_path = str(output_dir / f"annotate_requests{profile_suffix}.jsonl")
         write_jsonl(entries, jsonl_path)
         logger.info("Wrote %d analysis entries", len(entries))
@@ -533,9 +534,6 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
             "errors": error_count,
         },
     }
-
-    style_suffix = f"_{annotator_style}" if annotator_style else ""
-    split_suffix = f"_{split}" if split != "train" else ""
 
     if len(targets) > 1:
         logger.info("")

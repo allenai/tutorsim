@@ -207,12 +207,18 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
     """Run detection pass. Returns the full output dict (with 'results' key).
 
     Resumable: per-conv results are written to shards under
-    results/annotator/{version}/shards/detections/{conv_id}.json as they parse.
-    A re-run with the same version skips conv_ids that already have a shard
+    results/annotator/{version}/shards/{shard_namespace}/{conv_id}.json as they parse,
+    where shard_namespace matches the output filename prefix (e.g. detections_anthropic_test).
+    A re-run with the same flags skips conv_ids that already have a shard
     and only sends the remainder to the model. Delete the version directory
     to force a clean re-run.
     """
     output_dir = get_annotator_result_path(version)
+
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    shard_namespace = f"detections{profile_suffix}{style_suffix}{split_suffix}"
 
     conversations = load_conversations(limit=test, split=split)
     if test > 0:
@@ -220,7 +226,7 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
     logger.info("Loaded %d conversations", len(conversations))
     logger.info("Model: %s | Mode: %s | Targets: %s", model, mode, targets)
 
-    existing_ids = set(list_annotator_shard_ids(version, "detections"))
+    existing_ids = set(list_annotator_shard_ids(version, shard_namespace))
     to_process = [c for c in conversations if c["conversation_id"] not in existing_ids]
     if existing_ids:
         logger.info("Resuming version %s: %d shards already on disk, %d to process",
@@ -252,7 +258,7 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
             poll_interval = phase_cfg["poll_interval"]
 
             # Resume an in-flight batch if the sidecar matches our current entries.
-            inflight = load_inflight_batch(version, "detections")
+            inflight = load_inflight_batch(version, shard_namespace)
             existing_batch_id = None
             if inflight:
                 expected = inflight.get("entry_keys_hash")
@@ -265,13 +271,13 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                     logger.error(
                         "In-flight detect batch sidecar exists but entry-keys hash differs "
                         "(sidecar=%s, current=%s). Convs may have changed between runs. "
-                        "Delete %s/in_flight/detections.json to start a fresh batch.",
-                        expected, actual, version,
+                        "Delete %s/in_flight/%s.json to start a fresh batch.",
+                        expected, actual, version, shard_namespace,
                     )
                     raise RuntimeError("entry-keys mismatch on in-flight batch resume")
 
             def _record(batch_id: str) -> None:
-                save_inflight_batch(version, "detections", {
+                save_inflight_batch(version, shard_namespace, {
                     "provider": client.provider,
                     "model": model,
                     "batch_id": batch_id,
@@ -290,9 +296,9 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                             on_batch_created=_record)
             new_by_conv = parse_detection_results(raw, images_per_key=images_per_key)
             for conv_id, conv_data in new_by_conv.items():
-                save_annotator_shard(version, "detections", conv_id, conv_data)
+                save_annotator_shard(version, shard_namespace, conv_id, conv_data)
                 logger.debug("Shard saved: %s", conv_id)
-            clear_inflight_batch(version, "detections")
+            clear_inflight_batch(version, shard_namespace)
         else:
             # Per-conv sync: shard after each conv's entries return so a
             # ctrl-C between convs leaves valid partial state on disk.
@@ -306,13 +312,13 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                 raw_conv = run_sync_entries(client, conv_entries)
                 parsed_conv = parse_detection_results(raw_conv, images_per_key=images_per_key)
                 if conv_id in parsed_conv:
-                    save_annotator_shard(version, "detections", conv_id, parsed_conv[conv_id])
+                    save_annotator_shard(version, shard_namespace, conv_id, parsed_conv[conv_id])
                     logger.debug("Shard saved: %s", conv_id)
     else:
         logger.info("All %d conversations already have shards -- nothing to send", len(conversations))
 
     # Aggregate the monolithic JSON from the union of all shards.
-    detections_by_conv = load_annotator_shards(version, "detections")
+    detections_by_conv = load_annotator_shards(version, shard_namespace)
 
     total_dets = sum(len(d.get("detections", [])) for d in detections_by_conv.values())
     avg = total_dets / len(detections_by_conv) if detections_by_conv else 0
@@ -336,10 +342,6 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
         "total_images_sent": total_images_sent,
         "results": detections_by_conv,
     }
-
-    profile_suffix = f"_{profile}" if profile else ""
-    style_suffix = f"_{annotator_style}" if annotator_style else ""
-    split_suffix = f"_{split}" if split != "train" else ""
 
     if len(targets) > 1:
         logger.info("")
