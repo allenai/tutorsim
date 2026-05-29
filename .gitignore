@@ -17,6 +17,9 @@ logs/
 # Raw S3 data (14GB videos + transcripts)
 data/raw/s3/
 
+# Local S3 bucket mirror
+s3_bucket/
+
 # All data and results (private student data + generated outputs)
 data/*
 !data/*.py
