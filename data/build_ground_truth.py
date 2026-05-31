@@ -29,6 +29,8 @@ Output format — one JSON file per conversation:
           "rigor": "yes" | "no" | "unclear" | "no_mention"
         },
         "situation_label_agg": "both" | "scaffolding" | "rigor" | "neither" | "mixed" | "unknown",  # scaffolding only; majority-voted across overlapping annotators (IoU >= 0.7), no_mention/unclear → no; "mixed" = tie, "unknown" = no annotator gave signal
+        "action_decomposed": ["<str>", ...],  # atomic facets of the action field
+        "result_decomposed": ["<str>", ...],  # atomic facets of the result field
         "cut_turn": <int>,          # optional — annotator-chosen benchmark cut point
         "moment_id": "<str>"        # optional — links cut point to its parent moment
       },
@@ -59,6 +61,11 @@ from annotator.core.situate import (
     JUNK_TEXTS as SIT_JUNK_TEXTS,
     _load_prompt as _load_situation_prompt,
     _parse_situation_label,
+)
+from annotator.core.decompose import (
+    JUNK_TEXTS as DECOMPOSE_JUNK_TEXTS,
+    _load_prompt as _load_decompose_prompt,
+    _parse_decomposed,
 )
 from annotator.core.utils import compute_iou
 
@@ -183,6 +190,106 @@ def load_existing_situation_labels():
     return existing
 
 
+def action_decompose_key(m):
+    """Stable key for caching action decomposition by content hash."""
+    return (
+        m.get("annotator_id", ""),
+        m.get("turn_start"),
+        m.get("turn_end"),
+        m.get("annotation_type", ""),
+        hashlib.md5((m.get("action", "") or "").encode("utf-8")).hexdigest()[:12],
+    )
+
+
+def result_decompose_key(m):
+    """Stable key for caching result decomposition by content hash."""
+    return (
+        m.get("annotator_id", ""),
+        m.get("turn_start"),
+        m.get("turn_end"),
+        m.get("annotation_type", ""),
+        hashlib.md5((m.get("result", "") or "").encode("utf-8")).hexdigest()[:12],
+    )
+
+
+def load_existing_decompositions():
+    """Return {conv_id: {"action": {action_decompose_key: facets}, "result": {result_decompose_key: facets}}}."""
+    existing = {}
+    if not GROUND_TRUTH_DIR.exists():
+        return existing
+    for f in GROUND_TRUTH_DIR.glob("*.json"):
+        with open(f, "r", encoding="utf-8") as fp:
+            d = json.load(fp)
+        action_cache = {}
+        result_cache = {}
+        for m in d.get("key_moments", []):
+            if "action_decomposed" in m:
+                action_cache[action_decompose_key(m)] = m["action_decomposed"]
+            if "result_decomposed" in m:
+                result_cache[result_decompose_key(m)] = m["result_decomposed"]
+        if action_cache or result_cache:
+            existing[f.stem] = {"action": action_cache, "result": result_cache}
+    return existing
+
+
+def decompose_batch(items):
+    """Batch decompose action and result fields into atomic facets.
+
+    items: list of {key, field ("action"|"result"), text}.
+    Returns {key: [facets]}.
+    """
+    if not items:
+        return {}
+    from annotator.core.client import ModelClient, run_batch, build_batch_entry
+    from annotator.core.config import get_phase_config
+
+    cfg = get_phase_config("label")
+    client = ModelClient(cfg["model"])
+
+    action_template = _load_decompose_prompt("decompose_action.md")
+    result_template = _load_decompose_prompt("decompose_result.md")
+
+    entries = []
+    results = {}
+    for it in items:
+        text = (it["text"] or "").strip()
+        if text.lower() in DECOMPOSE_JUNK_TEXTS:
+            results[it["key"]] = []
+            continue
+        if it["field"] == "action":
+            prompt = action_template.replace("{action}", text)
+        else:
+            prompt = result_template.replace("{result}", text)
+        entries.append(build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True))
+
+    if not entries:
+        return results
+
+    print(f"  Submitting {len(entries)} decomposition requests to batch API "
+          f"(model={cfg['model']})...")
+    raw = run_batch(
+        client, entries,
+        json_mode=True,
+        display_name="decomposition",
+        poll_interval=cfg.get("poll_interval", 60),
+        thinking=cfg.get("thinking", False),
+        thinking_budget=cfg.get("thinking_budget", 0),
+        reasoning_effort=cfg.get("reasoning_effort", ""),
+    )
+
+    for key, result in raw.items():
+        if "error" in result or not result.get("text"):
+            print(f"  WARNING: error for {key}: {result.get('error', 'no text')}")
+            results[key] = []
+            continue
+        facets, had_error = _parse_decomposed(result["text"])
+        if had_error:
+            print(f"  WARNING: could not parse decomposition for {key}: {result['text'][:100]!r}")
+        results[key] = facets
+
+    return results
+
+
 def situation_classify_batch(items):
     """Batch classify situation appropriateness for scaffolding moments.
 
@@ -217,6 +324,9 @@ def situation_classify_batch(items):
         json_mode=True,
         display_name="situation_classification",
         poll_interval=cfg.get("poll_interval", 60),
+        thinking=cfg.get("thinking", False),
+        thinking_budget=cfg.get("thinking_budget", 0),
+        reasoning_effort=cfg.get("reasoning_effort", ""),
     )
 
     for key, result in results.items():
@@ -285,6 +395,9 @@ def classify_batch(items, labeller="hybrid"):
         json_mode=False,
         display_name="effectiveness_classification_refresh",
         poll_interval=cfg.get("poll_interval", 60),
+        thinking=cfg.get("thinking", False),
+        thinking_budget=cfg.get("thinking_budget", 0),
+        reasoning_effort=cfg.get("reasoning_effort", ""),
     )
 
     for key, result in results.items():
@@ -450,20 +563,31 @@ def main():
     existing_situation_labels = load_existing_situation_labels()
     sit_cache_total = sum(len(v) for v in existing_situation_labels.values())
     print(f"Loaded existing situation labels for {len(existing_situation_labels)} conversations ({sit_cache_total} moments)")
+    existing_decompositions = load_existing_decompositions()
+    decomp_action_total = sum(len(v.get("action", {})) for v in existing_decompositions.values())
+    decomp_result_total = sum(len(v.get("result", {})) for v in existing_decompositions.values())
+    print(f"Loaded existing decompositions: {decomp_action_total} action, {decomp_result_total} result")
 
     # First pass: build per-conv plan (reuse vs classify) for both strategy and situation labels
     conv_plans = []
     to_classify = []          # [{key, annotation_type, situation, action, result_text}]
     to_situation_classify = []  # [{key, situation}] — scaffolding moments only
+    to_decompose = []         # [{key, field, text}]
     situation_plans = {}      # {conv_id: [s_item, ...]} parallel to plan
+    decompose_plans = {}      # {conv_id: [(action_item, result_item), ...]} parallel to plan
 
     for conv_id, conv_data in conversations:
         annotations = conv_data.get("annotations", [])
         known = existing_labels.get(conv_id, {})
         known_s = existing_situation_labels.get(conv_id, {})
 
+        known_decomp = existing_decompositions.get(conv_id, {})
+        known_action_decomp = known_decomp.get("action", {})
+        known_result_decomp = known_decomp.get("result", {})
+
         plan = []
         s_plan = []
+        d_plan = []
         for idx, ann in enumerate(annotations):
             k = moment_key(ann)
             if k in known:
@@ -490,29 +614,54 @@ def main():
             else:
                 s_plan.append(None)
 
+            ak = action_decompose_key(ann)
+            if ak in known_action_decomp:
+                action_item = ("reuse", known_action_decomp[ak])
+            else:
+                dkey = f"{conv_id}__{idx}__action"
+                to_decompose.append({"key": dkey, "field": "action", "text": ann.get("action", "")})
+                action_item = ("classify", dkey)
+
+            rk = result_decompose_key(ann)
+            if rk in known_result_decomp:
+                result_item = ("reuse", known_result_decomp[rk])
+            else:
+                dkey = f"{conv_id}__{idx}__result"
+                to_decompose.append({"key": dkey, "field": "result", "text": ann.get("result", "")})
+                result_item = ("classify", dkey)
+
+            d_plan.append((action_item, result_item))
+
         conv_plans.append((conv_id, conv_data, plan))
         situation_plans[conv_id] = s_plan
+        decompose_plans[conv_id] = d_plan
 
     total_moments = sum(len(p) for _, _, p in conv_plans)
     reused = sum(1 for _, _, p in conv_plans for kind, *_ in p if kind == "reuse")
     to_class = total_moments - reused
     new_convs = sum(1 for cid, _, _ in conv_plans if cid not in existing_labels)
     sit_reused = sum(1 for sp in situation_plans.values() for item in sp if item and item[0] == "reuse")
+    decomp_action_reused = sum(1 for dp in decompose_plans.values() for a, _ in dp if a[0] == "reuse")
+    decomp_result_reused = sum(1 for dp in decompose_plans.values() for _, r in dp if r[0] == "reuse")
 
     print(f"Plan: {len(conv_plans)} conversations, {total_moments} moments")
     print(f"  Reuse existing strategy labels:   {reused}")
     print(f"  Classify new strategy labels:     {to_class}")
     print(f"  Reuse existing situation labels:  {sit_reused}")
     print(f"  Classify new situation labels:    {len(to_situation_classify)}")
+    print(f"  Reuse existing action decomps:    {decomp_action_reused}")
+    print(f"  Reuse existing result decomps:    {decomp_result_reused}")
+    print(f"  New decompositions (action+result): {len(to_decompose)}")
     print(f"  Brand new conversations:          {new_convs}")
 
     if args.dry_run:
         print("\nDry run — exiting without classifying or writing.")
         return
 
-    # Second pass: batch classify strategy labels + situation labels
+    # Second pass: batch classify strategy labels, situation labels, and decompositions
     new_labels = classify_batch(to_classify, labeller=args.labeller)
     new_situation_labels = situation_classify_batch(to_situation_classify)
+    new_decompositions = decompose_batch(to_decompose)
 
     def _resolve_situation(s_item):
         if s_item is None:
@@ -526,13 +675,22 @@ def main():
     gt_written = 0
     for conv_id, conv_data, plan in conv_plans:
         s_plan = situation_plans[conv_id]
+        d_plan = decompose_plans[conv_id]
         moments = []
-        for (kind, ann, val), s_item in zip(plan, s_plan):
+        for (kind, ann, val), s_item, (action_item, result_item) in zip(plan, s_plan, d_plan):
             label = val if kind == "reuse" else new_labels.get(val, "unclear")
             moment = build_moment(ann, label)
             sit = _resolve_situation(s_item)
             if sit is not None:
                 moment["situation_label"] = sit
+            moment["action_decomposed"] = (
+                action_item[1] if action_item[0] == "reuse"
+                else new_decompositions.get(action_item[1], [])
+            )
+            moment["result_decomposed"] = (
+                result_item[1] if result_item[0] == "reuse"
+                else new_decompositions.get(result_item[1], [])
+            )
             moments.append(moment)
         agg = compute_situation_label_agg(moments)
         for idx, agg_label in agg.items():
