@@ -385,7 +385,6 @@ def classify_batch(items, labeller="hybrid"):
             key=it["key"],
             prompt_text=prompt,
             json_mode=False,
-            max_tokens=32,
         ))
 
     if not entries:
