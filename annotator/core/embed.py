@@ -6,8 +6,32 @@ Reads decomposed facets (action_decomposed / result_decomposed) from either:
   - A decomposed_*.json result produced by decompose.py
 
 Encodes all facets in a single batch with sentence-transformers/all-MiniLM-L6-v2
-and writes action_embeddings / result_embeddings (list[list[float]]) parallel to
-the facet lists.
+(384-dim vectors) and writes action_embeddings / result_embeddings (list[list[float]])
+parallel to the facet lists. A progress bar is shown when there are >100 facets.
+
+Output structure
+----------------
+Ground truth mode  →  data/embeddings_{labeller}.json
+    {
+      "<conv_id>": {
+        "conversation_id": "...",
+        "num_turns": N,
+        "key_moments": [
+          {
+            "action_decomposed": ["facet1", "facet2", ...],
+            "result_decomposed": ["facet1", ...],
+            "action_embeddings": [[...384 floats...], ...],  # parallel to action_decomposed
+            "result_embeddings": [[...384 floats...], ...],  # parallel to result_decomposed
+            ...original moment fields...
+          }
+        ]
+      }
+    }
+
+Decompose mode  →  results/annotator/{version}/embedded_{...}_{target}.json
+    Same structure as the input decomposed_*.json but each annotation gains:
+      "action_embeddings": [[...384 floats...], ...]  # parallel to action_decomposed
+      "result_embeddings": [[...384 floats...], ...]  # parallel to result_decomposed
 
 Usage:
     # Embed the ground truth

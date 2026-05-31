@@ -154,6 +154,20 @@ One JSON file per conversation. Built from `step_up_annotations.jsonl` by `build
 | `action` | string | SAR action text |
 | `result` | string | SAR result text |
 | `strategy_label` | string | `"effective"`, `"partial"`, or `"ineffective"` |
+| `action_decomposed` | list[str] | Atomic tutor action facets extracted by decompose.py |
+| `result_decomposed` | list[str] | Atomic student indicator facets extracted by decompose.py |
+
+### Decomposed facet prevalence (scaffolding moments only)
+
+**Tutor actions** (`action_decomposed`): 88.2% of scaffolding moments have at least one action facet; avg **1.72 facets/moment** (max 12).
+
+**Student indicators** (`result_decomposed`): 55.3% of scaffolding moments have at least one result facet; avg **0.83 facets/moment** (max 6).
+
+| Split | Moments | Actions ≥1 | Avg actions | Indicators ≥1 | Avg indicators |
+|---|---|---|---|---|---|
+| All | 3,106 | 88.2% | 1.72 | 55.3% | 0.83 |
+| Train | 1,628 | 90.0% | 1.77 | 57.5% | 0.88 |
+| Test | 1,478 | 86.3% | 1.66 | 52.9% | 0.78 |
 
 ---
 
