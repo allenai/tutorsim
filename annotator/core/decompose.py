@@ -133,6 +133,7 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
             if ann.get("annotation_type", target) != target:
                 continue
 
+            situation = ann.get("situation", "")
             action = ann.get("action", "")
             result_text = ann.get("result", "")
 
@@ -150,7 +151,10 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
                 skipped_result += 1
             else:
                 key = f"result__{conv_id}__{idx}"
-                prompt = result_template.replace("{result}", result_text)
+                prompt = (result_template
+                          .replace("{situation}", situation)
+                          .replace("{action}", action)
+                          .replace("{result}", result_text))
                 result_entries.append(build_batch_entry(key, prompt, json_mode=True))
                 locations_result.append((conv_id, idx))
 

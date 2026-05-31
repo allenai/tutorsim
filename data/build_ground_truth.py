@@ -235,7 +235,7 @@ def load_existing_decompositions():
 def decompose_batch(items):
     """Batch decompose action and result fields into atomic facets.
 
-    items: list of {key, field ("action"|"result"), text}.
+    items: list of {key, field ("action"|"result"), text} plus situation+action for result items.
     Returns {key: [facets]}.
     """
     if not items:
@@ -259,7 +259,10 @@ def decompose_batch(items):
         if it["field"] == "action":
             prompt = action_template.replace("{action}", text)
         else:
-            prompt = result_template.replace("{result}", text)
+            prompt = (result_template
+                      .replace("{situation}", it.get("situation", ""))
+                      .replace("{action}", it.get("action", ""))
+                      .replace("{result}", text))
         entries.append(build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True))
 
     if not entries:
@@ -627,7 +630,8 @@ def main():
                 result_item = ("reuse", known_result_decomp[rk])
             else:
                 dkey = f"{conv_id}__{idx}__result"
-                to_decompose.append({"key": dkey, "field": "result", "text": ann.get("result", "")})
+                to_decompose.append({"key": dkey, "field": "result", "text": ann.get("result", ""),
+                                     "situation": ann.get("situation", ""), "action": ann.get("action", "")})
                 result_item = ("classify", dkey)
 
             d_plan.append((action_item, result_item))

@@ -91,7 +91,10 @@ def run(sample_size: int, dry_run: bool):
         else:
             entries.append(build_batch_entry(
                 key=f"{key_base}__result",
-                prompt_text=result_template.replace("{result}", result_text),
+                prompt_text=(result_template
+                             .replace("{situation}", item.get("situation", ""))
+                             .replace("{action}", item.get("action", ""))
+                             .replace("{result}", result_text)),
                 json_mode=True,
             ))
 
