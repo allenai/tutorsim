@@ -4,6 +4,12 @@ Index of planned work and change log for the project. Plans live in this directo
 
 ## Plans
 
+### 2026-06-01 — [Benchmark student modes](specs/2026-06-01-benchmark-student-modes-design.md)
+
+**Goal**: Replace the benchmark's single hardcoded synthetic student prompt with selectable student "modes" ported from Alexis's synth-students repo, making `imitate_example` (her strongest realism mode) the shipping default.
+**Status**: Shipped.
+**Result**: Added `prompts/benchmark/v2/` with `tutor_system.txt` (copy of v1) and `students/{imitate_example,simple,expert,paraphrase_with_example}.txt`. `benchmark.student.mode` config field selects which student prompt to load; null falls back to legacy `student_system.txt` so v1 still works. `_build_role_prompt` in `benchmark/core/exchange.py` dispatches on `student_mode`; `run.py` threads it through both sync and batch call sites and records it in `resolved_models`. Default config flips to `prompt_version: v2` + `student.mode: imitate_example`. Trait-based modes (`trait_*`) deferred -- they need a separate trait-generator phase. 6 new tests pass, full 175-test suite green.
+
 ### 2026-05-22 — [Labeller headroom check](2026-05-22-labeller-headroom.md)
 
 **Goal**: Decide whether the per-type hybrid labeller (test_v2 kappa 0.782) has real headroom without commissioning new human ratings.

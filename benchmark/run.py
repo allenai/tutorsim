@@ -69,6 +69,9 @@ def run_benchmark(version: str, config: dict):
     student_profile = config["student"]["profile"]
     # Student uses the base model from its profile (no separate "student" phase in config)
     resolved_models["student"] = get_phase_config("tutor", student_profile)["model"]
+    student_mode = config["student"].get("mode")
+    if student_mode:
+        resolved_models["student_mode"] = student_mode
     ann_profile = config["annotator"]["profile"]
     resolved_models["annotator"] = get_phase_config("annotate", ann_profile)["model"]
     resolved_models["labeller"] = get_phase_config("label", ann_profile)["model"]
@@ -135,6 +138,7 @@ def run_benchmark(version: str, config: dict):
     styles = annotator_cfg["styles"]
 
     student_profile = config["student"]["profile"]
+    student_mode = config["student"].get("mode")
     student_cfg = get_phase_config("tutor", student_profile)
     student_client = ModelClient(student_cfg["model"])
 
@@ -217,6 +221,7 @@ def run_benchmark(version: str, config: dict):
                     save_callback=_save_exchange,
                     prompt_version=exchange_prompt_version,
                     images_by_scenario=images_by_scenario,
+                    student_mode=student_mode,
                 )
             else:
                 new_exchanges = {}
@@ -231,6 +236,7 @@ def run_benchmark(version: str, config: dict):
                             student_max_tokens=student_cfg["max_tokens"],
                             prompt_version=exchange_prompt_version,
                             images=(images_by_scenario or {}).get(scenario.scenario_id),
+                            student_mode=student_mode,
                         )
                         new_exchanges[scenario.scenario_id] = exchange
                         logger.debug("[%d/%d] %s -> %d turns",

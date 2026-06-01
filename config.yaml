@@ -142,13 +142,21 @@ benchmark:
   exchange:
     num_turns: 2
     poll_interval: 60
-    prompt_version: v1           # tutor/student system prompt version
+    prompt_version: v2           # tutor/student system prompt version
 
   tutor_profiles:
     - anthropic
 
   student:
     profile: anthropic
+    # Selects prompts/benchmark/{prompt_version}/students/{mode}.txt.
+    # Modes ported from synth-students (Alexis et al.):
+    #   imitate_example          - imitate the real student from the transcript prefix (strongest realism)
+    #   simple                   - generic K-12 student persona
+    #   expert                   - strong student, no mistakes (upper-bound control)
+    #   paraphrase_with_example  - paraphrase the real student's style
+    # Set to null to fall back to {prompt_version}/student_system.txt (v1 behavior).
+    mode: imitate_example
 
   detect:
     profile: anthropic

@@ -1,8 +1,22 @@
 # Project Status
 
-*Last updated: 2026-05-23*
+*Last updated: 2026-06-01*
 
-## Recently Shipped: Labeller Headroom Check (2026-05-22 -> 2026-05-23)
+## Recently Shipped: Benchmark Student Modes (2026-06-01)
+
+Benchmark synthetic student is now selectable. Ported four prompt-only modes from Alexis's synth-students repo:
+- `imitate_example` (new default) -- model imitates the specific real student in the transcript prefix; strongest realism mode in her judge experiments.
+- `simple` -- generic K-12 student persona.
+- `expert` -- strong student, no mistakes (upper-bound control).
+- `paraphrase_with_example` -- paraphrase the real student's style.
+
+Wiring: new `prompts/benchmark/v2/students/{mode}.txt` files, new `benchmark.student.mode` config field, `_build_role_prompt` in `benchmark/core/exchange.py` dispatches on it, `run.py` threads it through sync + batch call sites and records it in `resolved_models`. Default config flips to `prompt_version: v2` + `student.mode: imitate_example` -- v1 stays reproducible. Null mode falls back to legacy `student_system.txt`. Trait-based modes (`trait_*`) deferred -- they need a separate trait-generator phase. 6 new tests pass, full 175-test suite green.
+
+Spec: [plans/specs/2026-06-01-benchmark-student-modes-design.md](plans/specs/2026-06-01-benchmark-student-modes-design.md)
+
+---
+
+## Previously Shipped: Labeller Headroom Check (2026-05-22 -> 2026-05-23)
 
 Tried to find headroom in the per-type labeller (test_v2 kappa 0.782) without commissioning new human ratings. Three independent angles all point to "at ceiling":
 
