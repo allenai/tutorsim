@@ -123,7 +123,7 @@ Structured SAR (Situation–Action–Result) annotations on specific moments in 
 | `result` | string | How effective the move was and what the outcome was |
 | `cut_turn` | int | *(some records)* Turn number the annotator chose as the benchmark cut point |
 | `cut_turn_reason` | string | *(some records)* Annotator's rationale for the cut point (often empty) |
-| `moment_id` | string | *(some records)* Identifier linking cut point to its parent moment. Each `moment_id` maps to exactly one `(transcript_id, turn_number_start, turn_number_end)`, but a given coordinate triple can have multiple `moment_id`s (when two annotators independently annotated the same span). |
+| `moment_id` | string | *(some key moments)* Canonical identifier for this moment, assigned by the annotation interface. Only present on a subset of key moments: 1,489 / 3,121 scaffolding (47.7%) and 4,696 / 5,653 rapport (83.1%). Each `moment_id` maps to exactly one `(transcript_id, turn_number_start, turn_number_end)`, but a given coordinate triple can have multiple `moment_id`s (when two annotators independently identified the same span). |
 | `annotator_id` | string | *(some records)* Annotator identifier at the turn level (duplicates top-level field) |
 
 **Cut point coverage:**
