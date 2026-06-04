@@ -24,6 +24,7 @@ s3_bucket/
 data/*
 !data/*.py
 !data/README.md
+data/temp_decompose.py
 results/
 benchmark/results/
 
