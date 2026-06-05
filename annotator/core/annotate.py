@@ -132,6 +132,8 @@ def load_gold_moments(targets: list[str],
             ann_type = moment.get("annotation_type", "")
             if ann_type not in targets:
                 continue
+            if moment.get("strategy_label") == "unclear":
+                continue
             key = (moment["turn_start"], moment["turn_end"], ann_type)
             situation = moment.get("situation", "")
             if key not in best or len(situation) > len(best[key]["situation"]):
@@ -339,7 +341,8 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  dry_run: bool = False,
                  profile: str | None = None,
                  split: str = "train",
-                 with_screenshots: bool = False) -> dict:
+                 with_screenshots: bool = False,
+                 rerun: bool = False) -> dict:
     """Run annotation pass. Returns the full output dict (with 'results' key).
 
     If detections_by_conv is provided, uses it directly instead of reading
@@ -384,11 +387,14 @@ def run_annotate(version: str, model: str, mode: str, prompt_version: str,
     style_str = f" | Style: {annotator_style}" if annotator_style else ""
     logger.info("Model: %s | Mode: %s | Context: +/-%d turns%s", model, mode, context_window, style_str)
 
-    existing_ids = set(list_annotator_shard_ids(version, output_basename))
+    existing_ids = set() if rerun else set(list_annotator_shard_ids(version, output_basename))
     detections_to_process = {
         cid: d for cid, d in detections_by_conv.items() if cid not in existing_ids
     }
-    if existing_ids:
+    if rerun:
+        logger.info("Rerun mode: ignoring %d existing shards, processing all %d conversations",
+                    len(list_annotator_shard_ids(version, output_basename)), len(detections_to_process))
+    elif existing_ids:
         logger.info("Resuming version %s/%s: %d shards already on disk, %d to process",
                     version, output_basename, len(existing_ids), len(detections_to_process))
 
@@ -592,6 +598,8 @@ def main():
     parser.add_argument("--with-screenshots", action="store_true",
                         help="Include anchored screenshots from each moment's "
                              "context window. Requires a vision-capable model.")
+    parser.add_argument("--rerun", action="store_true",
+                        help="Ignore existing shards and re-annotate all inputs from scratch")
     args = parser.parse_args()
 
     from common.logging_setup import setup_logging
@@ -625,7 +633,8 @@ def main():
                           phase_cfg=phase_cfg, dialogue_only=args.dialogue_only,
                           context_window=context_window, gold=args.gold,
                           annotator_style=style, dry_run=args.dry_run,
-                          profile=profile, split=args.split, with_screenshots=args.with_screenshots)
+                          profile=profile, split=args.split, with_screenshots=args.with_screenshots,
+                          rerun=args.rerun)
     if output:
         gold_flag = " --gold" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""

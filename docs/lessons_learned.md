@@ -122,6 +122,31 @@ When a prompt has drifted through iteration, don't patch further. Go back to the
 
 ---
 
+## 2026-05-31: Setting max_tokens too low breaks Anthropic thinking calls
+
+**What happened:** `build_ground_truth.py` passed `max_tokens=32` to `build_batch_entry` for the label classification step (a short yes/no output). When the label phase has `thinking: true` in `config.yaml`, the batch API rejected every request with: `max_tokens must be greater than thinking.budget_tokens`.
+
+**Why it happened:** `thinking_budget` defaults to 16384. `max_tokens` must be strictly greater than `budget_tokens` — the model needs room for both the thinking trace and the actual output. A caller-specified `max_tokens` that made sense for a tiny text output is still invalid when thinking is on.
+
+**Fix:** Removed the `max_tokens=32` override so the call uses `build_batch_entry`'s default (65536), consistent with `label.py` and `situate.py`. Also added a guard in `_run_batch_anthropic` and `_generate_anthropic` in `client.py` that bumps `max_tokens` to `budget_tokens + 64` when thinking is enabled, as a safety net for any future caller that sets a low explicit limit.
+
+**Rule:** Never set a low explicit `max_tokens` on a batch entry without accounting for the thinking budget. Prefer omitting `max_tokens` and letting the pipeline default handle it.
+
+---
+
+## 2026-05-30: situation_label_agg: must exclude both=no_mention annotators before majority vote
+
+**What happened:** First implementation of `compute_situation_label_agg` remapped `no_mention` → `no` for all annotators, then took a majority vote. This inflated "neither" counts and turned clusters into "mixed" ties. The notebook's expected counts (both=14, scaffolding=589, rigor=338, neither=157) were not reproduced.
+
+**Why it happened:** The notebook's `build_binary_conf_counts` has an explicit step: *exclude annotators whose (scaf, rigor) tuple is both `no_mention`* before collecting votes. An annotator who left both slots as `no_mention` gave no signal — including them as a `(no, no)` vote biases the result toward "neither" and creates false ties.
+
+**Fix:** Three-step process matching the notebook exactly:
+1. Normalize `unclear`/`None` → `no_mention` (mirrors notebook's `_sit` helper)
+2. Skip annotators where both slots are `no_mention`
+3. Remap remaining `no_mention` → `no`, then majority-vote
+
+---
+
 ## 2026-04-28: Benchmark screenshots — wired, but data-pairing gap blocks validation
 
 **Original gap:** The annotator pipeline supports `--with-screenshots` (delivered 2026-04-24) but the benchmark — which reuses the annotator under the hood — never threaded the flag. Detection ran without images; tutor/student exchanges were text-only; annotation didn't see the screen even though the equivalent annotator-standalone run did.

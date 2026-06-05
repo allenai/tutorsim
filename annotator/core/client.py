@@ -426,6 +426,8 @@ class ModelClient:
         if thinking:
             budget = thinking_budget if thinking_budget > 0 else 16384
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            if kwargs["max_tokens"] < budget + 64:
+                kwargs["max_tokens"] = budget + 64
 
         response = self._client.messages.create(**kwargs)
 
@@ -881,11 +883,18 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
     if existing_batch_id:
         message_batch = anthropic_client.messages.batches.retrieve(existing_batch_id)
     else:
+        thinking_min = 0
+        if thinking:
+            budget = thinking_budget if thinking_budget > 0 else 16384
+            thinking_min = budget + 64  # max_tokens must exceed budget_tokens
+
         requests = []
         for i, entry in enumerate(entries):
             key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
             if not entry_max_tokens or entry_max_tokens > max_tokens:
                 entry_max_tokens = max_tokens
+            if thinking_min and entry_max_tokens < thinking_min:
+                entry_max_tokens = thinking_min
 
             if images:
                 image_blocks = _build_image_blocks_anthropic(

@@ -28,7 +28,7 @@ from .client import (
 )
 from .config import get_phase_config, get_annotator_defaults, get_valid_styles, get_annotation_types
 from .storage import (
-    load_annotator_result, save_annotator_result, annotator_result_exists,
+    load_annotator_result, save_annotator_result,
     get_annotator_result_path,
 )
 from .utils import load_split_ids
@@ -203,6 +203,8 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     if not binary:
         by_label["partial"] = 0
     errors = 0
+    total_input = 0
+    total_output = 0
 
     for conv_id, idx in locations:
         key = f"{conv_id}__{idx}"
@@ -212,6 +214,9 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             label = "unclear"
             errors += 1
         else:
+            usage = entry.get("usage", {})
+            total_input += usage.get("input_tokens", 0)
+            total_output += usage.get("output_tokens", 0)
             label = entry["text"].strip().lower().rstrip(".")
             if label not in valid:
                 label = "unclear"
@@ -221,6 +226,12 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
 
     data["labeled"] = True
     data["label_stats"] = by_label
+    data["token_summary"] = {
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "total_tokens": total_input + total_output,
+        "errors": errors,
+    }
 
     for target in sorted(effective_targets):
         t_fname = (
@@ -247,8 +258,9 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
         logger.info("  Partial:     %d", by_label['partial'])
     logger.info("  Ineffective: %d", by_label['ineffective'])
     logger.info("  Unclear:     %d", by_label['unclear'])
+    logger.info("  Tokens: %s", f"{total_input + total_output:,}")
     if errors:
-        logger.warning("Batch errors: %d", errors)
+        logger.warning("  Errors: %d", errors)
 
     return data
 
@@ -277,7 +289,6 @@ def main():
                         help="Which split to run on (default: train)")
     args = parser.parse_args()
 
-    from common.logging_setup import setup_logging
     setup_logging()
 
     from .config import resolve_run_params
