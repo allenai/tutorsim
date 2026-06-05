@@ -150,6 +150,57 @@ class TestLocalBackend:
         assert loaded["turns"][0]["start_seconds"] == 0.0
         assert loaded["turns"][1]["start_seconds"] == 0.0
 
+    def test_conv_id_to_uuid_bench_composite(self):
+        """Bench-schema composite is {tutor_uuid}_{student_uuid}_{transcript_uuid}.
+
+        Screenshots and ground truth are keyed by transcript_id (the LAST UUID),
+        so the helper must return that, not the first UUID (tutor).
+        """
+        from annotator.core.storage import _conv_id_to_uuid
+        tutor = "007af6e2-a810-56ff-82e2-56b93c2f9e32"
+        student = "3dd84243-bf23-52a8-b189-8b5cf6340dc7"
+        transcript = "74a3d8fd-a544-5447-9a61-b8929235372a"
+        composite = f"{tutor}_{student}_{transcript}"
+        assert _conv_id_to_uuid(composite) == transcript
+
+    def test_conv_id_to_uuid_legacy_composite(self):
+        """Legacy composite {yyyy-tNN}_{yyyy-sNN}_{transcript_uuid} still works."""
+        from annotator.core.storage import _conv_id_to_uuid
+        legacy = "2024-t1_2024-s1_099bf759-2426-549b-8dff-ad3f4be80db2"
+        assert _conv_id_to_uuid(legacy) == "099bf759-2426-549b-8dff-ad3f4be80db2"
+
+    def test_conv_id_to_uuid_bare(self):
+        from annotator.core.storage import _conv_id_to_uuid
+        bare = "099bf759-2426-549b-8dff-ad3f4be80db2"
+        assert _conv_id_to_uuid(bare) == bare
+
+    def test_load_ground_truth_file_by_composite_conv_id(self, temp_data, monkeypatch):
+        """GT files keyed by transcript_id should resolve when looked up via the
+        composite conv_id produced for bench-schema transcripts."""
+        gt_dir = temp_data / "data" / "ground_truth_hybrid"
+        gt_dir.mkdir(parents=True)
+        transcript = "74a3d8fd-a544-5447-9a61-b8929235372a"
+        gt = {"conversation_id": transcript, "num_turns": 1, "key_moments": []}
+        (gt_dir / f"{transcript}.json").write_text(json.dumps(gt), encoding="utf-8")
+
+        monkeypatch.setenv("STORAGE_BACKEND", "local")
+        monkeypatch.setenv("STORAGE_ROOT", str(temp_data))
+        monkeypatch.setenv("STORAGE_GROUND_TRUTH", "data/ground_truth_hybrid")
+        import annotator.core.config as cfg_mod
+        cfg_mod._loaded_config = None
+        import annotator.core.storage as st
+        st._cache.clear()
+        st._backend = None
+
+        composite = f"007af6e2-a810-56ff-82e2-56b93c2f9e32_3dd84243-bf23-52a8-b189-8b5cf6340dc7_{transcript}"
+        from annotator.core.storage import load_ground_truth_file
+        loaded = load_ground_truth_file(composite)
+        assert loaded is not None
+        assert loaded["conversation_id"] == transcript
+
+        st._backend = None
+        st._cache.clear()
+
     def test_list_screenshots(self, local_storage):
         from annotator.core.storage import list_screenshots
         files = list_screenshots("2024-t1_2024-s1_099bf759-abcd")
