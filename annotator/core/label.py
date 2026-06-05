@@ -29,7 +29,7 @@ from .client import (
 from .config import get_phase_config, get_annotator_defaults, get_valid_styles, get_annotation_types
 from .storage import (
     load_annotator_result, save_annotator_result,
-    get_annotator_result_path,
+    get_annotator_result_path, _conv_id_to_uuid,
 )
 from .utils import load_split_ids
 
@@ -133,13 +133,15 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
             logger.error("%s not found for version %s. Run annotate first.", filename, version)
             return None
 
-    # The transcript UUID is the last _-delimited segment of the compound conv_id.
-    # Filter to the requested split as a safety net (detect/annotate already filter upstream).
+    # Filter to the requested split as a safety net (detect/annotate already
+    # filter upstream). Annotator conv_ids end in the transcript UUID; benchmark
+    # scenario IDs append a `__{type}_{idx}` suffix, so `rsplit("_", 1)` is
+    # unsafe — use the shared helper which scans for the LAST UUID match.
     split_ids = load_split_ids(split)
     results = {
         conv_id: conv_data
         for conv_id, conv_data in data["results"].items()
-        if conv_id.rsplit("_", 1)[-1] in split_ids
+        if _conv_id_to_uuid(conv_id) in split_ids
     }
 
     # Load templates once. Binary mode is a single shared template; the

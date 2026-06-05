@@ -174,6 +174,17 @@ class TestLocalBackend:
         bare = "099bf759-2426-549b-8dff-ad3f4be80db2"
         assert _conv_id_to_uuid(bare) == bare
 
+    def test_conv_id_to_uuid_benchmark_scenario_id(self):
+        """Benchmark scenario IDs append `__{type}_{idx}` to the composite.
+        The helper must still return the transcript_id (the last UUID match),
+        ignoring the trailing scenario-index suffix."""
+        from annotator.core.storage import _conv_id_to_uuid
+        tutor = "04f1df12-f52c-56d5-8577-48fd770c6809"
+        student = "e14d9ebe-c5d9-5582-90e0-30385628f56e"
+        transcript = "b2a884a4-ac23-524f-a2ed-2f97a1b9ce85"
+        scenario_id = f"{tutor}_{student}_{transcript}__rapport_0"
+        assert _conv_id_to_uuid(scenario_id) == transcript
+
     def test_load_ground_truth_file_by_composite_conv_id(self, temp_data, monkeypatch):
         """GT files keyed by transcript_id should resolve when looked up via the
         composite conv_id produced for bench-schema transcripts."""
