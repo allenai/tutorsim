@@ -78,14 +78,17 @@ _CONV_ID_PREFIX_RE = re.compile(r"^\d{4}-t\d+_\d{4}-s\d+_")
 
 
 def _conv_id_to_uuid(conv_id: str) -> str:
-    """Extract the UUID component from a full conv_id.
+    """Extract the transcript-UUID component from a full conv_id.
 
-    Accepts bare UUIDs (returned as-is) and full conv_ids like
-    '2024-tN_2024-sN_099bf759-...' (UUID extracted).
+    Accepts:
+      - bare UUIDs (returned as-is)
+      - legacy composites `2024-tN_2024-sN_{uuid}` (UUID extracted)
+      - bench composites `{tutor_uuid}_{student_uuid}_{transcript_uuid}`
+        (LAST UUID returned — transcript_id is the join key for GT/screenshots)
     """
-    m = _UUID_RE.search(conv_id)
-    if m:
-        return m.group(0)
+    matches = _UUID_RE.findall(conv_id)
+    if matches:
+        return matches[-1]
     # Strip '{year-tN}_{year-sN}_' prefix if present (handles shortened test UUIDs)
     stripped = _CONV_ID_PREFIX_RE.sub("", conv_id)
     if stripped != conv_id:
@@ -582,12 +585,22 @@ def list_transcript_ids() -> list[str]:
 # ===================================================================
 
 def load_ground_truth_file(conv_id: str) -> dict | None:
-    """Load a single ground truth JSON by conversation ID."""
+    """Load a single ground truth JSON by conversation ID.
+
+    GT files are keyed by transcript_id (UUID), while loaded transcripts may
+    use composite conv_ids like `{tutor}_{student}_{transcript}`. Falls back
+    to the extracted UUID if the direct lookup misses.
+    """
     be = _get_backend()
+    fallback_id = _conv_id_to_uuid(conv_id)
     for rel_dir in _get_path_list("ground_truth"):
         data = be.read_json(f"{rel_dir}/{conv_id}.json")
         if data is not None:
             return data
+        if fallback_id != conv_id:
+            data = be.read_json(f"{rel_dir}/{fallback_id}.json")
+            if data is not None:
+                return data
     return None
 
 
