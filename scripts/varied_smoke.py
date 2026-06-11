@@ -10,20 +10,13 @@ import logging
 import random
 import sys
 
-from annotator.core.config import (
-    get_phase_config, get_annotation_types,
-)
+from annotator.core.config import get_phase_config
 from annotator.core.storage import save_benchmark_result
 from annotator.core.utils import load_transcripts
 from annotator.core.client import ModelClient
 from benchmark.core.scenarios import extract_human_scenarios
 from benchmark.core.exchange import run_exchange
-from benchmark.core.annotator_bridge import (
-    prepare_bulk_entries, execute_and_parse_bulk, label_bulk,
-)
-from benchmark.core.aggregate import (
-    label_to_score, extract_effectiveness_by_type, DEFAULT_LABEL_WEIGHTS,
-)
+from benchmark.run import run_phase2_and_score
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -82,7 +75,7 @@ def main():
                    help="single annotator style to run (one of generous|balanced|demanding); profiles prompt is used")
     p.add_argument("--mode", default="sync", choices=["sync", "batch"])
     p.add_argument("--max-turns", type=int, default=100)
-    p.add_argument("--prompt-version", default="v4")
+    p.add_argument("--prompt-version", default="v5")
     p.add_argument("--student-mode", default="imitate_example")
     args = p.parse_args()
 
@@ -150,78 +143,24 @@ def main():
                               f"{s.scenario_id}.json", data=ex.to_dict())
         logger.info("  turns=%d ended_via=%s", len(ex.generated_turns), ex.ended_via)
 
-    # --- Phase 2: annotate (single style) ---
-    prompt_version = f"profiles/{args.style}"
-    entries, all_detections, _ = prepare_bulk_entries(
+    # --- Phase 2 + 3: annotate -> decompose -> structure -> score ---
+    summary = run_phase2_and_score(
+        version=args.version,
+        profile=args.profile,
+        annotator_profile=args.profile,
+        annotator_mode="sync",
+        prompt_version="v13",
+        context_window=20,
         scenarios=chosen,
         exchanges=exchanges,
-        annotator_style=args.style,
-        prompt_version=prompt_version,
-        context_window=50,
         with_screenshots=False,
     )
-    logger.info("Prepared %d annotation entries", len(entries))
-
-    per_scenario_results = execute_and_parse_bulk(
-        entries=entries, all_detections=all_detections,
-        annotator_profile=args.profile, mode="sync",
-        existing_batch_id=None, on_batch_created=lambda *_a, **_k: None,
-    )
-    logger.info("Parsed %d scenario results", len(per_scenario_results))
-
-    annotate_cfg = get_phase_config("annotate", args.profile)
-    per_scenario_labeled = label_bulk(
-        per_scenario_results=per_scenario_results,
-        annotator_style=args.style,
-        annotator_profile=args.profile,
-        annotator_model=annotate_cfg["model"],
-        mode="sync",
-    )
-    for sid, data in per_scenario_labeled.items():
-        save_benchmark_result(args.version, "annotations", args.profile,
-                              args.style, f"{sid}.json", data=data)
-
-    # --- Phase 3: score ---
-    style_scores = []
-    for s in chosen:
-        if s.scenario_id not in per_scenario_labeled:
-            continue
-        type_labels = extract_effectiveness_by_type(per_scenario_labeled[s.scenario_id])
-        if not type_labels:
-            continue
-        type_scores = {t: label_to_score(l, DEFAULT_LABEL_WEIGHTS) for t, l in type_labels.items()}
-        style_scores.append({
-            "scenario_id": s.scenario_id, "mode": s.mode,
-            "agg": s.detection["situation_label_agg"],
-            "labels": type_labels, "scores": type_scores,
-            "mean_score": sum(type_scores.values()) / max(1, len(type_scores)),
-        })
-
-    n = len(style_scores)
-    overall = sum(s["mean_score"] for s in style_scores) / n if n else 0.0
-    by_agg = {}
-    for label in ("scaffolding", "rigor"):
-        sub = [s for s in style_scores if s["agg"] == label]
-        by_agg[label] = sum(s["mean_score"] for s in sub) / len(sub) if sub else 0.0
-    type_means = {}
-    for t in get_annotation_types():
-        vals = [s["scores"][t] for s in style_scores if t in s["scores"]]
-        type_means[t] = sum(vals) / len(vals) if vals else 0.0
-
-    summary = {
-        "profile": args.profile,
-        "style": args.style,
-        "n_scenarios": n,
-        "mean_score": round(overall, 4),
-        "by_agg": {k: round(v, 4) for k, v in by_agg.items()},
-        "by_type": {k: round(v, 4) for k, v in type_means.items()},
-        "scenario_scores": style_scores,
-    }
-    save_benchmark_result(args.version, "scores", f"{args.profile}_{args.style}.json",
-                          data=summary)
-    logger.info("[%s] mean=%.3f n=%d  scaffolding=%.3f rigor=%.3f",
-                args.style, overall, n, by_agg.get("scaffolding", 0), by_agg.get("rigor", 0))
-    logger.info("Done. Version: %s", args.version)
+    logger.info("Done. Version: %s | scaffolding F1=%.3f rigor F1=%.3f outcome_pos_rate=%.3f n=%d",
+                args.version,
+                summary["scaffolding"]["f1"],
+                summary["rigor"]["f1"],
+                summary["outcome_pos_rate"],
+                summary["n_scenarios"])
 
 
 if __name__ == "__main__":

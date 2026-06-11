@@ -136,7 +136,7 @@ profiles:
       model: claude-opus-4-8         # tutor on latest; all other phases on 4-6
       max_tokens: 65536
     annotate:
-      context_window: 20
+      context_window: 50
     advisor:
       timeout: 300
 
@@ -210,12 +210,8 @@ benchmark:
 
   annotator:
     profile: anthropic
-    prompt_version: profiles
-    styles:
-      - generous
-      - balanced
-      - demanding
-    context_window: 50
+    prompt_version: v13            # was: profiles -- single-prompt v13 with decompose+structure pipeline
+    context_window: 20             # was: 50 -- matches Lucy's revert
     mode: batch
     poll_interval: 60
 

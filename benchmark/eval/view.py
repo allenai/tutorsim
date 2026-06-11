@@ -15,7 +15,6 @@ import argparse
 import json
 import html
 
-from annotator.core.config import get_valid_styles
 from annotator.core.storage import (
     load_transcript, load_benchmark_result,
     list_benchmark_result_files, get_benchmark_result_path,
@@ -37,16 +36,19 @@ def load_data(version: str, profile: str):
         if data:
             exchanges[fname.replace(".json", "")] = data
 
-    # Load annotations for each style
-    style_annotations = {}  # {style: {scenario_id: data}}
-    for style in get_valid_styles():
-        ann_files = list_benchmark_result_files(version, "annotations", profile, style)
-        if ann_files:
-            style_annotations[style] = {}
-            for fname in ann_files:
-                data = load_benchmark_result(version, "annotations", profile, style, fname)
-                if data:
-                    style_annotations[style][fname.replace(".json", "")] = data
+    # Annotations are flat per-scenario: annotations/{profile}/{scenario_id}.json
+    # (No per-style subdir in the new pipeline.)
+    annotations_by_scenario: dict[str, dict] = {}
+    try:
+        ann_root = get_benchmark_result_path(version, "annotations", profile)
+        if ann_root and ann_root.exists():
+            for entry in ann_root.iterdir():
+                if entry.is_file() and entry.name.endswith(".json"):
+                    sid = entry.name[:-5]
+                    with open(entry, "r", encoding="utf-8") as f:
+                        annotations_by_scenario[sid] = json.load(f)
+    except Exception:
+        annotations_by_scenario = {}
 
     # Load transcripts per conv_id (cache)
     transcripts_cache = {}
@@ -90,18 +92,14 @@ def load_data(version: str, profile: str):
                 "is_generated": True,
             })
 
-        # Collect annotations per style
-        per_style = {}
-        for style, style_data in style_annotations.items():
-            scenario_ann = style_data.get(scenario_id)
-            if not scenario_ann:
-                per_style[style] = []
-                continue
-            results = scenario_ann.get("results", {})
-            # Annotations are keyed by scenario_id (annotator_bridge remaps conv_id)
-            conv_results = results.get(scenario_id, {})
-            anns = conv_results.get("annotations", [])
-            per_style[style] = anns
+        # Annotation file is saved as {scenario_id: {conversation_id, annotations, ...}}
+        # by run_phase2_and_score. Older v12 runs saved {results: {scenario_id: ...}}
+        # so support both shapes.
+        ann_doc = annotations_by_scenario.get(scenario_id) or {}
+        if "results" in ann_doc:
+            anns = ((ann_doc.get("results") or {}).get(scenario_id) or {}).get("annotations", []) or []
+        else:
+            anns = (ann_doc.get(scenario_id) or {}).get("annotations", []) or []
 
         # Detection info (what triggered this scenario)
         detection_info = [detection] if detection else []
@@ -113,7 +111,7 @@ def load_data(version: str, profile: str):
             "mode": mode,
             "turns": all_turns,
             "generated_turn_numbers": sorted(generated_turn_numbers),
-            "style_annotations": per_style,
+            "annotations": anns,
             "detection_info": detection_info,
             "tutor_model": exchange.get("tutor_model", profile) if exchange else profile,
         })
@@ -262,6 +260,24 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 .effectiveness.unclear {{ background: #e2e3e5; color: #383d41; }}
 
 .empty {{ color: #999; font-style: italic; padding: 20px; text-align: center; }}
+
+.facet {{ margin-top: 6px; font-size: 12px; line-height: 1.4; }}
+.facet-text {{ color: #333; }}
+.facet-badge {{
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 8px; margin-left: 6px;
+  text-transform: uppercase; letter-spacing: 0.3px; vertical-align: middle;
+}}
+.facet-badge.scaffolding {{ background:#e3f2fd; color:#0d47a1; }}
+.facet-badge.rigor {{ background:#fff3e0; color:#e65100; }}
+.facet-badge.neither {{ background:#eceff1; color:#455a64; }}
+.facet-badge.both {{ background:#f3e5f5; color:#6a1b9a; }}
+.facet-badge.pos {{ background:#d4edda; color:#155724; }}
+.facet-badge.neg {{ background:#f8d7da; color:#721c24; }}
+.tag {{ background: #eef; color: #336; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }}
+.tag.appropriate-yes {{ background:#d4edda; color:#155724; border:1px solid #b1dfbb; }}
+.tag.appropriate-no {{ background:#f8d7da; color:#721c24; border:1px solid #f1aeb5; }}
+.tag.appropriate-amb {{ background:#e2e3e5; color:#383d41; border:1px solid #c6c8ca; }}
 </style>
 </head>
 <body>
@@ -395,61 +411,90 @@ function renderDetection(s) {{
   container.innerHTML = html;
 }}
 
+function appropriateClass(agg, actionLabels) {{
+  const informative = (agg === 'scaffolding' || agg === 'rigor');
+  if (!informative) return 'amb';
+  const set = new Set(actionLabels);
+  const pred = (agg === 'scaffolding') ? (set.has('scaffolding') || set.has('both'))
+                                        : (set.has('rigor') || set.has('both'));
+  return pred ? 'yes' : 'no';
+}}
+
 function renderAIAnnotations(s) {{
   const container = document.getElementById('ai-cards');
-  const styles = s.style_annotations;
-  const styleOrder = ['generous', 'balanced', 'demanding'];
+  const anns = s.annotations || [];
 
-  // Get all style names, ordered
-  const availableStyles = styleOrder.filter(st => st in styles);
-  const extraStyles = Object.keys(styles).filter(st => !styleOrder.includes(st)).sort();
-  const allStyles = availableStyles.concat(extraStyles);
+  // Determine verdict from detection agg + action labels across all annotations.
+  const det = (s.detection_info && s.detection_info[0]) || {{}};
+  const allActionLabels = [];
+  for (const a of anns) {{
+    for (const lbl of (a.action_label || [])) allActionLabels.push(lbl);
+  }}
+  const verdict = appropriateClass(det.situation_label_agg, allActionLabels);
+  const verdictTag = (verdict === 'yes') ? 'appropriate ✓'
+                   : (verdict === 'no') ? 'inappropriate ✗'
+                   : 'ambiguous —';
 
-  if (allStyles.length === 0) {{
-    container.innerHTML = '<div class="empty">No AI annotations</div>';
+  let html = '<div class="style-group">';
+  html += '<div class="style-header">verdict: <span class="tag appropriate-' + verdict + '">' + verdictTag + '</span></div>';
+
+  if (anns.length === 0) {{
+    html += '<div class="empty">No AI annotations</div>';
+    html += '</div>';
+    container.innerHTML = html;
     return;
   }}
 
-  let html = '';
   let cardIdx = 0;
+  anns.forEach((ann) => {{
+    const cardId = 'ai-card-' + cardIdx;
+    cardIdx++;
+    const type = ann.annotation_type || 'scaffolding';
 
-  allStyles.forEach(style => {{
-    const anns = styles[style] || [];
-    html += '<div class="style-group">';
-    html += '<div class="style-header ' + style + '">' + escapeHtml(style) +
-      ' (' + anns.length + ')</div>';
+    html += '<div class="ann-card" id="' + cardId + '" ';
+    html += 'onmouseenter="highlightTurns(' + (ann.turn_start || 0) + ',' + (ann.turn_end || 0) + ',\\'' + cardId + '\\')" ';
+    html += 'onmouseleave="clearHighlight()" ';
+    html += 'onclick="scrollToTurn(' + (ann.turn_start || 0) + ')">';
 
-    if (anns.length === 0) {{
-      html += '<div class="empty">No annotations</div>';
+    html += '<div class="ann-header">';
+    html += '<span class="ann-badge ' + type + '">' + escapeHtml(type) + '</span>';
+    html += '<span class="ann-turns">Turns ' + (ann.turn_start || '?') + '-' + (ann.turn_end || '?') + '</span>';
+    html += '</div>';
+
+    html += field('Situation', ann.situation);
+
+    if (ann.action_decomposed && ann.action_decomposed.length) {{
+      html += '<div class="ann-field"><div class="ann-field-label">Action facets</div>';
+      const actionLabels = ann.action_label || [];
+      for (let i = 0; i < ann.action_decomposed.length; i++) {{
+        const lbl = actionLabels[i] || '';
+        html += '<div class="facet"><span class="facet-text">' + escapeHtml(ann.action_decomposed[i]) + '</span>';
+        if (lbl) html += '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(lbl) + '</span>';
+        html += '</div>';
+      }}
+      html += '</div>';
+    }} else {{
+      html += field('Action', ann.action);
     }}
 
-    anns.forEach((ann, i) => {{
-      const cardId = 'ai-card-' + cardIdx;
-      cardIdx++;
-      const type = ann.annotation_type || 'unknown';
-      const label = ann.effectiveness || 'unclear';
-
-      html += '<div class="ann-card" id="' + cardId + '" ';
-      html += 'onmouseenter="highlightTurns(' + (ann.turn_start || 0) + ',' + (ann.turn_end || 0) + ',\\'' + cardId + '\\')" ';
-      html += 'onmouseleave="clearHighlight()" ';
-      html += 'onclick="scrollToTurn(' + (ann.turn_start || 0) + ')">';
-
-      html += '<div class="ann-header">';
-      html += '<span class="ann-badge ' + type + '">' + escapeHtml(type) + '</span>';
-      html += '<span class="ann-turns">Turns ' + (ann.turn_start || '?') + '-' + (ann.turn_end || '?') + '</span>';
+    if (ann.result_decomposed && ann.result_decomposed.length) {{
+      html += '<div class="ann-field"><div class="ann-field-label">Result facets</div>';
+      const resultLabels = ann.result_label || [];
+      for (let i = 0; i < ann.result_decomposed.length; i++) {{
+        const lbl = resultLabels[i] || '';
+        html += '<div class="facet"><span class="facet-text">' + escapeHtml(ann.result_decomposed[i]) + '</span>';
+        if (lbl) html += '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(lbl) + '</span>';
+        html += '</div>';
+      }}
       html += '</div>';
-
-      html += field('Situation', ann.situation);
-      html += field('Action', ann.action);
+    }} else {{
       html += field('Result', ann.result);
-
-      html += '<span class="effectiveness ' + label + '">' + escapeHtml(label) + '</span>';
-      html += '</div>';
-    }});
+    }}
 
     html += '</div>';
   }});
 
+  html += '</div>';
   container.innerHTML = html;
 }}
 

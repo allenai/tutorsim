@@ -2,7 +2,34 @@
 
 *Last updated: 2026-06-10*
 
-## Recently Shipped: Oracle Tutor Mode + Prompt Caching + Trait Students (2026-06-10)
+## Recently Shipped: Annotator Pipeline Migration (2026-06-10)
+
+Benchmark Phase 2 migrated from the legacy per-style profiles SAR pipeline
+to Lucy's new `annotate -> decompose -> structure` pipeline. Per-scenario
+output now includes per-facet action labels (`scaffolding | rigor | neither
+| both`) and result labels (`pos | neg`). Scoring is action-appropriateness
+F1 against the human `situation_label_agg` tag (scaffolding F1 + rigor F1)
+plus a student outcome positive rate.
+
+- Pulled annotator-side code from `scaffolding_anno`; preserved our caching
+  / composite-id / adaptive-thinking patches.
+- New `benchmark/core/score.py` and new bridge functions `decompose_bulk`,
+  `structure_bulk` in `annotator_bridge.py`.
+- `benchmark/run.py` Phase 2 collapsed from a per-style loop to a single
+  `run_phase2_and_score` call.
+- Annotations now save flat at `annotations/{profile}/{scenario_id}.json`
+  (no per-style subdir).
+- Viewers render per-facet labels with colored badges and an
+  "appropriate?" verdict against the human tag.
+- Config: `benchmark.annotator.prompt_version: v13`,
+  `context_window: 20`, `styles` removed.
+
+Spec: [plans/specs/2026-06-10-annotator-pipeline-migration-design.md](plans/specs/2026-06-10-annotator-pipeline-migration-design.md)
+Plan: [plans/2026-06-10-annotator-pipeline-migration.md](plans/2026-06-10-annotator-pipeline-migration.md)
+
+---
+
+## Previously Shipped: Oracle Tutor Mode + Prompt Caching + Trait Students (2026-06-10)
 
 Three benchmark features shipped today:
 

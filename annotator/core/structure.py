@@ -210,12 +210,17 @@ def run_structure_label(version: str, model: str, mode: str, phase_cfg: dict,
             return None
         logger.info("Loaded: %s", input_filename)
 
-    split_ids = load_split_ids(split)
-    results = {
-        conv_id: conv_data
-        for conv_id, conv_data in data["results"].items()
-        if conv_id.rsplit("_", 1)[-1] in split_ids
-    }
+    if in_memory:
+        # In-memory path (benchmark/chaining): data is already scoped by the
+        # caller; skip split filtering so synthetic scenario IDs aren't dropped.
+        results = dict(data["results"])
+    else:
+        split_ids = load_split_ids(split)
+        results = {
+            conv_id: conv_data
+            for conv_id, conv_data in data["results"].items()
+            if conv_id.rsplit("_", 1)[-1] in split_ids
+        }
 
     action_template = _load_prompt(ACTION_PROMPT_PATH)
     result_template = _load_prompt(RESULT_PROMPT_PATH)

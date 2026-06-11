@@ -2,8 +2,8 @@
 
 All-batch architecture:
   Phase 1: Generate exchanges (batch per round -- all scenarios in parallel)
-  Phase 2: Annotate all exchanges (batch per style)
-  Phase 3: Score per style (no composite aggregation)
+  Phase 2: Annotate all exchanges (annotate -> decompose -> structure)
+  Phase 3: Score (action F1 + outcome rate against situation_label_agg)
 
 Usage:
     python -m benchmark.run                              # auto-generated version
@@ -15,29 +15,19 @@ Usage:
 
 import argparse
 import datetime
-import hashlib
-import json
 import logging
 from pathlib import Path
 
 from common.logging_setup import setup_logging
 from annotator.core.client import ModelClient
-from annotator.core.config import get_phase_config, get_annotation_types, get_benchmark_config
+from annotator.core.config import get_phase_config, get_benchmark_config
 from annotator.core.detect import run_detect
 from annotator.core.storage import (
     save_benchmark_result, load_benchmark_result, list_benchmark_result_files,
-    save_benchmark_inflight_batch, load_benchmark_inflight_batch,
-    clear_benchmark_inflight_batch,
 )
 
 from .core.scenarios import load_scenarios, Scenario
 from .core.exchange import run_exchange, run_exchanges_batch, Exchange
-from .core.annotator_bridge import (
-    prepare_bulk_entries, execute_and_parse_bulk, label_bulk,
-)
-from .core.aggregate import (
-    label_to_score, extract_effectiveness_by_type, DEFAULT_LABEL_WEIGHTS,
-)
 
 
 BASE_DIR = Path(__file__).parent
@@ -46,18 +36,90 @@ REPO_ROOT = BASE_DIR.parent
 logger = logging.getLogger(__name__)
 
 
-def _entries_keys_hash(entries: list[dict]) -> str:
-    """Stable short hash of an entries list, keyed on entry order + keys.
-    Mirrors annotator/core/annotate.py:_entries_keys_hash so the resume
-    guard catches a changed scenario set between runs."""
-    joined = "\n".join(e["key"] for e in entries)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
+def run_phase2_and_score(
+    version: str,
+    profile: str,
+    annotator_profile: str,
+    annotator_mode: str,
+    prompt_version: str,
+    context_window: int,
+    scenarios: list,
+    exchanges: dict,
+    with_screenshots: bool = False,
+) -> dict:
+    """Phase 2 (annotate -> decompose -> structure) + Phase 3 (score).
 
-def save_json(data, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, default=str)
+    Single annotator pass per scenario, then in-memory decompose + structure,
+    then action-F1 + outcome-rate against situation_label_agg.
+
+    Returns the summary dict saved to scores/{profile}.json.
+    """
+    from .core.annotator_bridge import (
+        prepare_bulk_entries, execute_and_parse_bulk,
+        decompose_bulk, structure_bulk,
+    )
+    from .core.score import score_scenarios
+
+    # --- Annotate ---
+    entries, all_detections, _ = prepare_bulk_entries(
+        scenarios=scenarios,
+        exchanges=exchanges,
+        annotator_style=None,
+        prompt_version=prompt_version,
+        context_window=context_window,
+        with_screenshots=with_screenshots,
+    )
+    logger.info("Phase 2: %d annotation entries across %d scenarios",
+                len(entries), len(all_detections))
+
+    if not entries:
+        empty = {"scaffolding": {"tp":0,"fp":0,"fn":0,"precision":0.0,"recall":0.0,"f1":0.0},
+                 "rigor":       {"tp":0,"fp":0,"fn":0,"precision":0.0,"recall":0.0,"f1":0.0},
+                 "outcome_pos_rate": 0.0,
+                 "n_scenarios": 0, "n_scored_for_f1": 0,
+                 "profile": profile}
+        save_benchmark_result(version, "scores", f"{profile}.json", data=empty)
+        return empty
+
+    per_scenario_results = execute_and_parse_bulk(
+        entries=entries,
+        all_detections=all_detections,
+        annotator_profile=annotator_profile,
+        mode=annotator_mode,
+        existing_batch_id=None,
+        on_batch_created=lambda *_a, **_k: None,
+    )
+    logger.info("Phase 2: parsed %d scenario results", len(per_scenario_results))
+
+    per_scenario_results = decompose_bulk(per_scenario_results, annotator_profile, mode=annotator_mode)
+    logger.info("Phase 2: decomposed")
+    per_scenario_results = structure_bulk(per_scenario_results, annotator_profile, mode=annotator_mode)
+    logger.info("Phase 2: structured")
+
+    # Save per-scenario annotations (flat, no styles subdir).
+    for scenario_id, results in per_scenario_results.items():
+        save_benchmark_result(version, "annotations", profile,
+                              f"{scenario_id}.json", data=results)
+
+    # --- Phase 3: score ---
+    scenario_dicts = [s.to_dict() for s in scenarios]
+    annotation_dicts = []
+    for s in scenarios:
+        results = per_scenario_results.get(s.scenario_id, {})
+        ann = results.get(s.scenario_id, {})
+        annotation_dicts.append(ann)
+
+    summary = score_scenarios(scenario_dicts, annotation_dicts)
+    summary["profile"] = profile
+    save_benchmark_result(version, "scores", f"{profile}.json", data=summary)
+    logger.info("[%s] scaffolding F1=%.3f rigor F1=%.3f outcome_pos_rate=%.3f n=%d",
+                profile,
+                summary["scaffolding"]["f1"],
+                summary["rigor"]["f1"],
+                summary["outcome_pos_rate"],
+                summary["n_scenarios"])
+    return summary
 
 
 def run_benchmark(version: str, config: dict):
@@ -130,12 +192,10 @@ def run_benchmark(version: str, config: dict):
     tutor_profiles = config["tutor_profiles"]
     exchange_cfg = config["exchange"]
     annotator_cfg = config["annotator"]
-    agg_cfg = config.get("aggregation", {})
     ann_mode = annotator_cfg["mode"]
     annotator_profile = annotator_cfg["profile"]
-    prompt_version_base = annotator_cfg["prompt_version"]
+    prompt_version = annotator_cfg["prompt_version"]
     context_window = annotator_cfg["context_window"]
-    styles = annotator_cfg["styles"]
 
     student_profile = config["student"]["profile"]
     student_mode = config["student"].get("mode")
@@ -277,170 +337,20 @@ def run_benchmark(version: str, config: dict):
         logger.info("Exchanges ready: %d/%d", len(exchanges), len(scenarios))
 
         # ---------------------------------------------------------------
-        # Phase 2: Annotate all exchanges (batch per style)
+        # Phase 2 + 3: Annotate (annotate -> decompose -> structure) + score
         # ---------------------------------------------------------------
-        logger.info("=== Phase 2: Annotate (%s mode, %d styles) ===", ann_mode, len(styles))
-
-        all_style_results = {}
-
-        def _load_cached_annotations(style):
-            """Return {scenario_id: labeled_data} for shards already on disk."""
-            cached = {}
-            for fname in list_benchmark_result_files(version, "annotations", profile, style):
-                if not fname.endswith(".json"):
-                    continue
-                sid = fname[:-5]
-                data = load_benchmark_result(version, "annotations", profile, style, fname)
-                if data is not None:
-                    cached[sid] = data
-            return cached
-
-        for style in styles:
-            if prompt_version_base == "profiles":
-                prompt_version = f"profiles/{style}"
-            else:
-                prompt_version = prompt_version_base
-
-            cached = _load_cached_annotations(style)
-            missing = [s for s in scenarios if s.scenario_id not in cached]
-            logger.info("[%s] %d cached, %d to annotate (prompts: %s)",
-                        style, len(cached), len(missing), prompt_version)
-
-            if not missing:
-                all_style_results[style] = cached
-                continue
-
-            entries, all_detections, _ = prepare_bulk_entries(
-                scenarios=missing,
-                exchanges=exchanges,
-                annotator_style=style,
-                prompt_version=prompt_version,
-                context_window=context_window,
-                with_screenshots=with_screenshots,
-            )
-            logger.info("[%s] %d annotation entries across %d scenarios",
-                        style, len(entries), len(all_detections))
-
-            if not entries:
-                all_style_results[style] = cached
-                continue
-
-            sidecar = load_benchmark_inflight_batch(version, profile, style)
-            existing_batch_id = None
-            if sidecar:
-                expected = sidecar.get("entry_keys_hash")
-                actual = _entries_keys_hash(entries)
-                if expected == actual:
-                    existing_batch_id = sidecar["batch_id"]
-                    logger.info("[%s] resuming in-flight batch %s (submitted %s)",
-                                style, existing_batch_id, sidecar.get("submitted_at", "?"))
-                else:
-                    logger.error(
-                        "[%s] in-flight sidecar exists but entry-keys hash differs "
-                        "(sidecar=%s, current=%s). Scenario set changed between runs. "
-                        "Delete results/benchmark/%s/in_flight/%s_%s.json to start fresh.",
-                        style, expected, actual, version, profile, style,
-                    )
-                    raise RuntimeError("entry-keys mismatch on benchmark in-flight resume")
-
-            def _record(batch_id, _profile=profile, _style=style):
-                save_benchmark_inflight_batch(version, _profile, _style, {
-                    "provider": "unknown",
-                    "model": annotator_cfg.get("model", ""),
-                    "batch_id": batch_id,
-                    "n_entries": len(entries),
-                    "entry_keys_hash": _entries_keys_hash(entries),
-                    "display_name": "benchmark_annotate",
-                    "submitted_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                })
-
-            per_scenario_results = execute_and_parse_bulk(
-                entries=entries,
-                all_detections=all_detections,
-                annotator_profile=annotator_profile,
-                mode=ann_mode,
-                existing_batch_id=existing_batch_id,
-                on_batch_created=_record,
-            )
-            logger.info("[%s] parsed %d scenario results", style, len(per_scenario_results))
-
-            annotate_cfg_full = get_phase_config("annotate", annotator_profile)
-            per_scenario_labeled = label_bulk(
-                per_scenario_results=per_scenario_results,
-                annotator_style=style,
-                annotator_profile=annotator_profile,
-                annotator_model=annotate_cfg_full["model"],
-                mode=ann_mode,
-            )
-            logger.info("[%s] labeled %d scenarios", style, len(per_scenario_labeled))
-
-            for scenario_id, labeled_data in per_scenario_labeled.items():
-                save_benchmark_result(version, "annotations", profile, style,
-                                      f"{scenario_id}.json", data=labeled_data)
-
-            clear_benchmark_inflight_batch(version, profile, style)
-
-            merged = dict(cached)
-            merged.update(per_scenario_labeled)
-            all_style_results[style] = merged
-
-        # ---------------------------------------------------------------
-        # Phase 3: Per-style scores (no composite aggregation)
-        # ---------------------------------------------------------------
-        logger.info("--- Phase 3: Per-Style Scores ---")
-        label_weights = agg_cfg.get("label_weights", DEFAULT_LABEL_WEIGHTS)
-
-        for style in styles:
-            style_results = all_style_results.get(style, {})
-            style_scenario_scores = []
-
-            for scenario in scenarios:
-                sid = scenario.scenario_id
-                if sid not in exchanges or sid not in style_results:
-                    continue
-
-                type_labels = extract_effectiveness_by_type(style_results[sid])
-                if not type_labels:
-                    continue
-
-                type_scores = {
-                    ann_type: label_to_score(label, label_weights)
-                    for ann_type, label in type_labels.items()
-                }
-                mean_score = sum(type_scores.values()) / len(type_scores) if type_scores else 0.0
-
-                style_scenario_scores.append({
-                    "scenario_id": sid,
-                    "tutor_model": profile,
-                    "mode": scenario.mode,
-                    "labels": type_labels,
-                    "scores": type_scores,
-                    "mean_score": mean_score,
-                })
-
-            n = len(style_scenario_scores)
-            overall_mean = sum(s["mean_score"] for s in style_scenario_scores) / n if n else 0.0
-
-            # Per-type means
-            type_means = {}
-            for ann_type in get_annotation_types():
-                vals = [s["scores"][ann_type] for s in style_scenario_scores if ann_type in s["scores"]]
-                type_means[ann_type] = sum(vals) / len(vals) if vals else 0.0
-
-            style_summary = {
-                "profile": profile,
-                "style": style,
-                "n_scenarios": n,
-                "mean_score": round(overall_mean, 4),
-                "by_type": {k: round(v, 4) for k, v in type_means.items()},
-                "scenario_scores": style_scenario_scores,
-            }
-
-            save_benchmark_result(version, "scores", f"{profile}_{style}.json",
-                                  data=style_summary)
-            logger.info("[%s] mean=%.3f n=%d scaffolding=%.3f rapport=%.3f",
-                        style, overall_mean, n,
-                        type_means.get('scaffolding', 0), type_means.get('rapport', 0))
+        annotator_mode = annotator_cfg["mode"]
+        run_phase2_and_score(
+            version=version,
+            profile=profile,
+            annotator_profile=annotator_profile,
+            annotator_mode=annotator_mode,
+            prompt_version=prompt_version,
+            context_window=context_window,
+            scenarios=scenarios,
+            exchanges=exchanges,
+            with_screenshots=with_screenshots,
+        )
 
     logger.info("Results saved (version: %s)", version)
     save_benchmark_result(version, "_complete.json", data={

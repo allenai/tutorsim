@@ -16,7 +16,6 @@ import argparse
 import html
 import json
 
-from annotator.core.config import get_valid_styles
 from annotator.core.storage import (
     load_transcript, load_benchmark_result,
     list_benchmark_result_files, get_benchmark_result_path,
@@ -41,25 +40,19 @@ def load_data(version: str, profile: str):
         if data:
             exchanges[fname.replace(".json", "")] = data
 
-    # Annotations -- support any style dir present (v12, generous, balanced, demanding, ...).
-    style_annotations: dict[str, dict] = {}
+    # Annotations are flat per-scenario: annotations/{profile}/{scenario_id}.json
+    # (No per-style subdir in the new pipeline.)
+    annotations_by_scenario: dict[str, dict] = {}
     try:
         ann_root = get_benchmark_result_path(version, "annotations", profile)
-        candidate_styles = []
         if ann_root and ann_root.exists():
-            candidate_styles = [p.name for p in ann_root.iterdir() if p.is_dir()]
+            for entry in ann_root.iterdir():
+                if entry.is_file() and entry.name.endswith(".json"):
+                    sid = entry.name[:-5]
+                    with open(entry, "r", encoding="utf-8") as f:
+                        annotations_by_scenario[sid] = json.load(f)
     except Exception:
-        candidate_styles = list(get_valid_styles())
-
-    for style in candidate_styles:
-        files = list_benchmark_result_files(version, "annotations", profile, style)
-        if not files:
-            continue
-        style_annotations[style] = {}
-        for fname in files:
-            data = load_benchmark_result(version, "annotations", profile, style, fname)
-            if data:
-                style_annotations[style][fname.replace(".json", "")] = data
+        annotations_by_scenario = {}
 
     transcripts_cache: dict = {}
     scenarios = []
@@ -100,11 +93,14 @@ def load_data(version: str, profile: str):
                 "kind": "ai_generated",
             })
 
-        per_style: dict[str, list[dict]] = {}
-        for style, style_data in style_annotations.items():
-            scenario_ann = style_data.get(scenario_id) or {}
-            results = scenario_ann.get("results", {}).get(scenario_id, {})
-            per_style[style] = results.get("annotations", []) or []
+        # Annotation file is saved as {scenario_id: {conversation_id, annotations, ...}}
+        # by run_phase2_and_score. Older v12 runs saved {results: {scenario_id: ...}}
+        # so support both shapes.
+        ann_doc = annotations_by_scenario.get(scenario_id) or {}
+        if "results" in ann_doc:
+            anns = ((ann_doc.get("results") or {}).get(scenario_id) or {}).get("annotations", []) or []
+        else:
+            anns = (ann_doc.get(scenario_id) or {}).get("annotations", []) or []
 
         scenarios.append({
             "scenario_id": scenario_id,
@@ -123,7 +119,7 @@ def load_data(version: str, profile: str):
             },
             "original_turns": original_turns,
             "replayed_turns": replayed_turns,
-            "style_annotations": per_style,
+            "annotations": anns,
             "tutor_model": exchange.get("tutor_model", profile),
         })
 
@@ -264,6 +260,23 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 .detection-box .label {{ font-weight: 700; }}
 
 .empty {{ color: #999; font-style: italic; padding: 16px; text-align: center; }}
+
+.facet {{ margin-top: 6px; font-size: 12px; line-height: 1.4; }}
+.facet-text {{ color: #333; }}
+.facet-badge {{
+  display: inline-block; font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 8px; margin-left: 6px;
+  text-transform: uppercase; letter-spacing: 0.3px; vertical-align: middle;
+}}
+.facet-badge.scaffolding {{ background:#e3f2fd; color:#0d47a1; }}
+.facet-badge.rigor {{ background:#fff3e0; color:#e65100; }}
+.facet-badge.neither {{ background:#eceff1; color:#455a64; }}
+.facet-badge.both {{ background:#f3e5f5; color:#6a1b9a; }}
+.facet-badge.pos {{ background:#d4edda; color:#155724; }}
+.facet-badge.neg {{ background:#f8d7da; color:#721c24; }}
+.tag.appropriate-yes {{ background:#d4edda; color:#155724; border:1px solid #b1dfbb; }}
+.tag.appropriate-no {{ background:#f8d7da; color:#721c24; border:1px solid #f1aeb5; }}
+.tag.appropriate-amb {{ background:#e2e3e5; color:#383d41; border:1px solid #c6c8ca; }}
 </style>
 </head>
 <body>
@@ -360,9 +373,20 @@ function renderTurns(turns, cut) {{
   return h || '<div class="empty">No turns.</div>';
 }}
 
+function appropriateClass(agg, actionLabels) {{
+  const informative = (agg === 'scaffolding' || agg === 'rigor');
+  if (!informative) return 'amb';
+  const set = new Set(actionLabels);
+  const pred = (agg === 'scaffolding') ? (set.has('scaffolding') || set.has('both'))
+                                        : (set.has('rigor') || set.has('both'));
+  return pred ? 'yes' : 'no';
+}}
+
 function renderAnnotations(s) {{
   const det = s.detection || {{}};
+  const anns = s.annotations || [];
   let h = '';
+
   if (det.turn_start != null) {{
     h += '<div class="detection-box">' +
          '<div><span class="label">Moment:</span> turns ' + (det.turn_start || '?') + '&ndash;' + (det.turn_end || '?') + '</div>';
@@ -379,46 +403,73 @@ function renderAnnotations(s) {{
     h += '</div>';
   }}
 
-  const styles = Object.keys(s.style_annotations || {{}});
-  if (styles.length === 0) {{
+  // Flatten action labels across all annotations for verdict.
+  const allActionLabels = [];
+  for (const a of anns) {{
+    for (const lbl of (a.action_label || [])) allActionLabels.push(lbl);
+  }}
+  const verdict = appropriateClass(det.situation_label_agg, allActionLabels);
+  const verdictTag = (verdict === 'yes') ? 'appropriate ✓'
+                   : (verdict === 'no') ? 'inappropriate ✗'
+                   : 'ambiguous —';
+
+  h += '<div class="ann-style-section">';
+  h += '<div class="ann-style-title">verdict: ';
+  h += '<span class="tag appropriate-' + verdict + '">' + verdictTag + '</span>';
+  h += '</div>';
+
+  if (anns.length === 0) {{
     h += '<div class="empty">No annotations.</div>';
+    h += '</div>';
     return h;
   }}
 
-  for (const style of styles) {{
-    const anns = s.style_annotations[style] || [];
-    h += '<div class="ann-style-section">';
-    h += '<div class="ann-style-title">' + escapeHtml(style) + ' (' + anns.length + ')</div>';
-    if (anns.length === 0) {{
-      h += '<div class="empty">No annotations for this style.</div>';
-    }} else {{
-      for (const a of anns) {{
-        const type = a.annotation_type || 'scaffolding';
-        const label = a.strategy_label || a.effectiveness || 'unclear';
-        h += '<div class="ann-card">';
-        h += '<div class="ann-header">';
-        h += '<span class="ann-badge ' + type + '">' + escapeHtml(type) + '</span>';
-        h += '<span class="ann-turns">Turns ' + (a.turn_start || '?') + '&ndash;' + (a.turn_end || '?') + '</span>';
-        h += '</div>';
-        h += renderField('Situation', a.situation);
-        h += renderField('Action', a.action);
-        h += renderField('Result', a.result);
-        h += '<span class="effectiveness ' + label + '">' + escapeHtml(label) + '</span>';
+  for (const a of anns) {{
+    h += '<div class="ann-card">';
+    h += '<div class="ann-header">';
+    h += '<span class="ann-badge ' + (a.annotation_type || 'scaffolding') + '">' + escapeHtml(a.annotation_type || 'scaffolding') + '</span>';
+    h += '<span class="ann-turns">turns ' + (a.turn_start || '?') + '&ndash;' + (a.turn_end || '?') + '</span>';
+    h += '</div>';
+
+    if (a.situation) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Situation</div><div class="ann-field-value">' + escapeHtml(a.situation) + '</div></div>';
+    }}
+
+    if (a.action_decomposed && a.action_decomposed.length) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Action facets</div>';
+      const actionLabels = a.action_label || [];
+      for (let i = 0; i < a.action_decomposed.length; i++) {{
+        const lbl = actionLabels[i] || '';
+        h += '<div class="facet"><span class="facet-text">' + escapeHtml(a.action_decomposed[i]) + '</span>';
+        if (lbl) h += '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(lbl) + '</span>';
         h += '</div>';
       }}
+      h += '</div>';
+    }} else if (a.action) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Action</div><div class="ann-field-value">' + escapeHtml(a.action) + '</div></div>';
     }}
+
+    if (a.result_decomposed && a.result_decomposed.length) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Result facets</div>';
+      const resultLabels = a.result_label || [];
+      for (let i = 0; i < a.result_decomposed.length; i++) {{
+        const lbl = resultLabels[i] || '';
+        h += '<div class="facet"><span class="facet-text">' + escapeHtml(a.result_decomposed[i]) + '</span>';
+        if (lbl) h += '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(lbl) + '</span>';
+        h += '</div>';
+      }}
+      h += '</div>';
+    }} else if (a.result) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Result</div><div class="ann-field-value">' + escapeHtml(a.result) + '</div></div>';
+    }}
+
     h += '</div>';
   }}
+  h += '</div>';
   return h;
 }}
 
-function renderField(label, value) {{
-  if (!value) return '';
-  return '<div class="ann-field">' +
-         '<div class="ann-field-label">' + escapeHtml(label) + '</div>' +
-         '<div class="ann-field-value">' + escapeHtml(value) + '</div>' +
-         '</div>';
-}}
+
 </script>
 </body>
 </html>

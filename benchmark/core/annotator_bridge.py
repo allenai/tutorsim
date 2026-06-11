@@ -10,7 +10,9 @@ from annotator.core.annotate import (
 from annotator.core.client import (
     ModelClient, run_sync_entries, run_batch,
 )
+from annotator.core.decompose import run_decompose
 from annotator.core.label import run_label
+from annotator.core.structure import run_structure_label
 from annotator.core.config import get_phase_config
 from annotator.core.screenshots import load_anchored_screenshots
 
@@ -287,3 +289,100 @@ def label_bulk(
             per_scenario_labeled[scenario_id] = scenario_labeled
 
     return per_scenario_labeled
+
+
+def decompose_bulk(
+    per_scenario_results: dict[str, dict],
+    annotator_profile: str,
+    mode: str = "batch",
+) -> dict[str, dict]:
+    """Run decompose on all scenarios' annotations in one in-memory pass.
+
+    Input shape: {scenario_id: {scenario_id: {annotations: [...]}}}
+    Returns same shape with action_decomposed / result_decomposed populated.
+
+    The split filter inside run_decompose is bypassed for in-memory calls
+    (decompose.py skips filtering when annotations_data is provided directly).
+    """
+    if not per_scenario_results:
+        return {}
+
+    merged_results = {}
+    for sid, results in per_scenario_results.items():
+        merged_results.update(results)
+
+    annotations_data = {
+        "version": "benchmark",
+        "source": "benchmark_exchange",
+        "results": merged_results,
+    }
+
+    phase_cfg = get_phase_config("annotate", annotator_profile)
+    enriched = run_decompose(
+        version="benchmark",
+        model=phase_cfg["model"],
+        mode=mode,
+        phase_cfg=phase_cfg,
+        annotations_data=annotations_data,
+        profile=annotator_profile,
+    )
+    if not enriched:
+        return per_scenario_results
+
+    out: dict[str, dict] = {}
+    enriched_results = enriched.get("results", {})
+    for sid in per_scenario_results:
+        if sid in enriched_results:
+            out[sid] = {sid: enriched_results[sid]}
+        else:
+            out[sid] = per_scenario_results[sid]
+    return out
+
+
+def structure_bulk(
+    per_scenario_results: dict[str, dict],
+    annotator_profile: str,
+    mode: str = "batch",
+) -> dict[str, dict]:
+    """Run structure labelling on all scenarios in one in-memory pass.
+
+    Input requires action_decomposed / result_decomposed populated (from
+    decompose_bulk). Returns same shape with action_label / result_label added.
+
+    The split filter inside run_structure_label is bypassed for in-memory
+    calls (structure.py skips filtering when annotations_data is provided).
+    """
+    if not per_scenario_results:
+        return {}
+
+    merged_results = {}
+    for sid, results in per_scenario_results.items():
+        merged_results.update(results)
+
+    annotations_data = {
+        "version": "benchmark",
+        "source": "benchmark_exchange",
+        "results": merged_results,
+    }
+
+    phase_cfg = get_phase_config("annotate", annotator_profile)
+    enriched = run_structure_label(
+        version="benchmark",
+        model=phase_cfg["model"],
+        mode=mode,
+        phase_cfg=phase_cfg,
+        annotations_data=annotations_data,
+        profile=annotator_profile,
+        target="scaffolding",
+    )
+    if not enriched:
+        return per_scenario_results
+
+    out: dict[str, dict] = {}
+    enriched_results = enriched.get("results", {})
+    for sid in per_scenario_results:
+        if sid in enriched_results:
+            out[sid] = {sid: enriched_results[sid]}
+        else:
+            out[sid] = per_scenario_results[sid]
+    return out
