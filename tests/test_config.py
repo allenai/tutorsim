@@ -14,10 +14,12 @@ def clear_config_cache():
 
 class TestGetPhaseConfig:
     def test_returns_model(self):
+        # Asserts the phase resolves to the profile's model. Kept version-agnostic
+        # so model bumps (e.g. opus-4-6 -> opus-4-8) don't break this test.
         from annotator.core.config import get_phase_config
         cfg = get_phase_config("detect", "anthropic")
         assert "model" in cfg
-        assert cfg["model"] == "claude-opus-4-6"
+        assert cfg["model"].startswith("claude-opus-")
 
     def test_phase_overrides_merge(self):
         from annotator.core.config import get_phase_config

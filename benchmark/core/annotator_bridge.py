@@ -75,12 +75,15 @@ def build_synthetic_detections(scenario: Scenario, exchange: Exchange) -> dict:
             f"Detected moment + AI tutor continuation: "
             f"{scenario.detection.get('situation', scenario.mode)}"
         )
-        # Use the detection's annotation type (scaffolding or rapport)
+        # Use the detection's annotation type (scaffolding or rapport).
+        # Propagate situation_label_agg so the new (v11/v12) annotator prompts
+        # can render the correct teacher-consensus suggestion.
         detections = [
             {
                 "turn_start": first_turn, "turn_end": last_gen,
                 "annotation_type": ann_type,
                 "situation": description,
+                "situation_label_agg": scenario.detection.get("situation_label_agg"),
             },
         ]
     else:

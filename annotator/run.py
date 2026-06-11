@@ -1,7 +1,7 @@
 """
-Unified pipeline runner: detect -> annotate -> label.
+Unified pipeline runner: detect -> annotate -> label -> decompose -> structure.
 
-Runs all three passes in sequence with a single command.
+Runs all passes in sequence with a single command.
 Supports per-phase model selection via profiles (e.g., openai_claude
 uses gpt-5.4 for detection and claude-opus-4-6 for annotation).
 
@@ -23,13 +23,15 @@ from .core.config import get_phase_config, get_valid_styles, get_annotation_type
 from .core.detect import run_detect
 from .core.annotate import run_annotate
 from .core.label import run_label
+from .core.decompose import run_decompose
+from .core.structure import run_structure_label
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts" / "annotator"
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description="Run full annotation pipeline")
 
     parser.add_argument("--version", default=None,
@@ -54,6 +56,8 @@ def main():
                         help="Skip detection; use existing detections.json")
     parser.add_argument("--skip-annotate", action="store_true",
                         help="Skip annotation; use existing annotations.json")
+    parser.add_argument("--skip-decompose", action="store_true",
+                        help="Stop after labeling; skip decompose + structure passes")
     parser.add_argument("--gold", action="store_true",
                         help="Use gold truth moments (skips detect automatically)")
 
@@ -64,7 +68,15 @@ def main():
                         help="Context window for annotation excerpts")
     parser.add_argument("--split", choices=["train", "test"], default="train",
                         help="Which split to run on (default: train)")
-    args = parser.parse_args()
+    parser.add_argument("--rerun", action="store_true",
+                        help="Reprocess from scratch: ignore existing detect/annotate "
+                             "shards and overwrite them instead of resuming. "
+                             "(Label/decompose/structure already overwrite every run.)")
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
 
     from .core.config import resolve_run_params
     params = resolve_run_params(
@@ -108,6 +120,7 @@ def main():
             test=args.test,
             dialogue_only=args.dialogue_only,
             split=args.split,
+            rerun=args.rerun,
         )
         detections_data = detect_output["results"]
 
@@ -132,6 +145,7 @@ def main():
             detections_by_conv=detections_data,
             profile=profile,
             split=args.split,
+            rerun=args.rerun,
         )
         if annotations_data is None:
             logger.error("Annotation failed. Aborting.")
@@ -140,7 +154,7 @@ def main():
     # --- Pass 3: Label ---
     logger.info("=== PASS 3: Labeling ===")
     label_cfg = get_phase_config("label", profile)
-    run_label(
+    labels_data = run_label(
         version=version,
         model=args.model or label_cfg["model"],
         mode=args.mode or label_cfg.get("mode", "batch"),
@@ -152,6 +166,50 @@ def main():
         targets=args.target,
         split=args.split,
     )
+    if labels_data is None:
+        logger.error("Labeling failed (nothing labeled/saved). Aborting.")
+        return
+
+    # --- Pass 4 + 5: Decompose -> Structure (per target) ---
+    # Both passes reuse the "label" phase config and operate on a single
+    # target, reading their inputs from disk (written by the prior pass).
+    # A None return means the prior pass wrote no input for this target -- a
+    # silent no-op we surface instead of marching on to the next phase.
+    if not args.skip_decompose:
+        decompose_model = args.model or label_cfg["model"]
+        decompose_mode = args.mode or label_cfg.get("mode", "batch")
+        for target in args.target:
+            logger.info("=== PASS 4: Decompose (%s) ===", target)
+            decomposed = run_decompose(
+                version=version,
+                model=decompose_model,
+                mode=decompose_mode,
+                phase_cfg=label_cfg,
+                gold=args.gold,
+                annotator_style=style,
+                profile=profile,
+                target=target,
+                split=args.split,
+            )
+            if decomposed is None:
+                logger.error("Decompose failed for target '%s'. Aborting.", target)
+                return
+
+            logger.info("=== PASS 5: Structure (%s) ===", target)
+            structured = run_structure_label(
+                version=version,
+                model=decompose_model,
+                mode=decompose_mode,
+                phase_cfg=label_cfg,
+                gold=args.gold,
+                annotator_style=style,
+                profile=profile,
+                target=target,
+                split=args.split,
+            )
+            if structured is None:
+                logger.error("Structure labeling failed for target '%s'. Aborting.", target)
+                return
 
     logger.info("=== Pipeline complete ===")
     style_flag = f" --annotator-style {style}" if style else ""

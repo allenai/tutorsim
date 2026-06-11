@@ -10,7 +10,7 @@ For transparency, code that reproduces the numbers in this README.md can be foun
 
 Deidentified tutoring session transcripts from StepUp. Each line is one session.
 
-**21,445 tutoring sessions across 4 batches** (`2025-10-16`, `2026-02-13`, `2026-03-24`, `2026-04-27`).
+**31,449 tutoring sessions across 5 batches** (`2025-10-16`, `2026-02-13`, `2026-03-24`, `2026-04-27`, `2026-05-29`).
 
 ### Top-level fields
 
@@ -35,9 +35,9 @@ Deidentified tutoring session transcripts from StepUp. Each line is one session.
 | `role` | string | `"Tutor"` or `"Student"` |
 | `text` | string | Transcribed speech |
 
-**Conversation length:** mean 349 turns, min 5, max 1,789 turns per session.
+**Conversation length:** mean 325 turns, min 3, max 1,789 turns per session.
 
-**Turn length (whitespace tokens):** mean 10.8, min 0, max 3,256 tokens per turn (across 7,492,218 turns total).
+**Turn length (whitespace tokens):** mean 11.5, min 0, max 4,058 tokens per turn (across 10,232,059 turns total).
 
 ### `session` fields
 
@@ -69,9 +69,9 @@ Non-speech events (pauses, screen interactions, etc.) that occurred between or b
 
 Human annotations on Step Up tutoring sessions, produced through a structured annotation interface. Each line is one **annotator session** — one annotator's work on one tutoring session, identified by `(annotator_id, transcript_id)`. Each annotator session contains a list of **key moments** (`turn_annotations`): spans `(turn_number_start, turn_number_end)` the annotator flagged, each with SAR fields.
 
-**1,354 annotator sessions** — all from batch `2025-10-16`. Three annotation types: `caption` (79), `scaffolding` (474), `rapport` (801).
+**1,564 annotator sessions** — all from batch `2025-10-16`. Three annotation types: `caption` (79), `scaffolding` (684), `rapport` (801).
 
-**Note:** 0.5% of rapport and scaffolding key moments have `null` for both `turn_number_start` and `turn_number_end`. These have substantive SAR content but were not anchored to specific turns. `build_ground_truth.py` skips these.
+**Note:** 0.5% of rapport and 0.8% of scaffolding key moments have `null` for both `turn_number_start` and `turn_number_end`. These have substantive SAR content but were not anchored to specific turns. `build_ground_truth.py` skips these.
 
 ### Top-level fields (all types)
 
@@ -123,32 +123,32 @@ Structured SAR (Situation–Action–Result) annotations on specific moments in 
 | `result` | string | How effective the move was and what the outcome was |
 | `cut_turn` | int | *(some records)* Turn number the annotator chose as the benchmark cut point |
 | `cut_turn_reason` | string | *(some records)* Annotator's rationale for the cut point (often empty) |
-| `moment_id` | string | *(some key moments)* Canonical identifier for this moment, assigned by the annotation interface. Only present on a subset of key moments: 1,489 / 3,121 scaffolding (47.7%) and 4,696 / 5,653 rapport (83.1%). Each `moment_id` maps to exactly one `(transcript_id, turn_number_start, turn_number_end)`, but a given coordinate triple can have multiple `moment_id`s (when two annotators independently identified the same span). |
+| `moment_id` | string | *(some key moments)* Canonical identifier for this moment, assigned by the annotation interface. Only present on a subset of key moments: 3,877 / 5,508 scaffolding (70.4%) and 4,696 / 5,653 rapport (83.1%). Each `moment_id` maps to exactly one `(transcript_id, turn_number_start, turn_number_end)`, but a given coordinate triple can have multiple `moment_id`s (when two annotators independently identified the same span). |
 | `annotator_id` | string | *(some records)* Annotator identifier at the turn level (duplicates top-level field) |
 
 **Cut point coverage:**
 
 | | scaffolding | rapport |
 |---|---|---|
-| Annotator sessions `(annotator_id, transcript_id)` with any cut_turn | 295 / 474 | 692 / 801 |
-| Key moments `(annotator_id, transcript_id, turn_start, turn_end)` with cut_turn | 2,000 / 3,121 | 5,034 / 5,653 |
-| Unique spans `(transcript_id, turn_start, turn_end)` with cut_turn | 1,023 / 1,536 (66.6%) | 928 / 928 (100%) |
+| Annotator sessions `(annotator_id, transcript_id)` with any cut_turn | 506 / 684 | 692 / 801 |
+| Key moments `(annotator_id, transcript_id, turn_start, turn_end)` with cut_turn | 4,388 / 5,508 | 5,034 / 5,653 |
+| Unique spans `(transcript_id, turn_start, turn_end)` with cut_turn | 1,536 / 1,536 (100.0%) | 928 / 928 (100%) |
 
 Caption annotator sessions never have cut points.
 
-**SAR field lengths (whitespace tokens, across all 8,774 scaffolding + rapport key moments):**
+**SAR field lengths (whitespace tokens, across all 11,161 scaffolding + rapport key moments):**
 
 | Field | Mean | Min | Max |
 |---|---|---|---|
-| `situation` | 24.1 | 1 | 256 |
-| `action` | 20.2 | 1 | 342 |
-| `result` | 32.7 | 1 | 308 |
+| `situation` | 24.4 | 1 | 256 |
+| `action` | 19.6 | 1 | 342 |
+| `result` | 29.3 | 1 | 308 |
 
 ---
 
 ## ground_truth_hybrid/
 
-One JSON file per conversation. Built from `step_up_annotations.jsonl` by `build_ground_truth.py` using the hybrid labeller. Moments labelled `unclear` are excluded. **207 conversations, 8,724 key moments** (3,106 scaffolding, 5,618 rapport).
+One JSON file per conversation. Built from `step_up_annotations.jsonl` by `build_ground_truth.py` using the hybrid labeller. Moments labelled `unclear` are excluded. **207 conversations, 10,403 key moments** (5,096 scaffolding, 5,307 rapport).
 
 ### Key moment fields
 
@@ -167,15 +167,15 @@ One JSON file per conversation. Built from `step_up_annotations.jsonl` by `build
 
 ### Decomposed facet prevalence (scaffolding moments only)
 
-**Tutor actions** (`action_decomposed`): 88.2% of scaffolding moments have at least one action facet; avg **1.72 facets/moment** (max 12).
+**Tutor actions** (`action_decomposed`): 91.6% of scaffolding moments have at least one action facet; avg **1.84 facets/moment** (max 12).
 
-**Student indicators** (`result_decomposed`): 55.3% of scaffolding moments have at least one result facet; avg **0.83 facets/moment** (max 6).
+**Student indicators** (`result_decomposed`): 60.0% of scaffolding moments have at least one result facet; avg **0.92 facets/moment** (max 6).
 
 | Split | Moments | Actions ≥1 | Avg actions | Indicators ≥1 | Avg indicators |
 |---|---|---|---|---|---|
-| All | 3,106 | 88.2% | 1.72 | 55.3% | 0.83 |
-| Train | 1,628 | 90.0% | 1.77 | 57.5% | 0.88 |
-| Test | 1,478 | 86.3% | 1.66 | 52.9% | 0.78 |
+| All | 5,096 | 91.6% | 1.84 | 60.0% | 0.92 |
+| Train | 2,696 | 92.0% | 1.85 | 61.1% | 0.95 |
+| Test | 2,400 | 91.2% | 1.83 | 58.9% | 0.88 |
 
 ---
 
@@ -183,34 +183,34 @@ One JSON file per conversation. Built from `step_up_annotations.jsonl` by `build
 
 Train/test split of the 207 conversations in `ground_truth_hybrid/`, generated by `split_ground_truth.py`. The split is anchored to `original_train_test.json` (which records which transcripts were seen during v4 prompt iteration vs. held out), with 2 IDs excluded because they had no ground truth file and 17 new ground truth conversations (added in later batches) shuffled equally into each set (seed=42).
 
-### Train (102 conversations, 4,615 moments)
+### Train (102 conversations, 5,543 moments)
 
-| | scaffolding (1,628) | rapport (2,987) |
+| | scaffolding (2,696) | rapport (2,847) |
 |---|---|---|
-| effective | 653 (40.1%) | 1,451 (48.6%) |
-| partial | 299 (18.4%) | 693 (23.2%) |
-| ineffective | 671 (41.2%) | 789 (26.4%) |
+| effective | 1,180 (43.8%) | 1,433 (50.3%) |
+| partial | 525 (19.5%) | 670 (23.5%) |
+| ineffective | 988 (36.6%) | 691 (24.3%) |
 
 Span coverage (unique locations vs. annotated moments per location):
 
 | | scaffolding | rapport |
 |---|---|---|
 | Unique spans `(conv_id, turn_start, turn_end)` | 866 | 468 |
-| Annotated moments (one per annotator/span) | 1,628 (1.9/span) | 2,987 (6.4/span) |
-| Annotated moments with a cross-annotator span match | 1,207 / 1,628 (74.1%) | 2,987 / 2,987 (100%) |
+| Annotated moments (one per annotator/span) | 2,696 (3.1/span) | 2,847 (6.1/span) |
+| Annotated moments with a cross-annotator span match | 2,664 / 2,696 (98.8%) | 2,840 / 2,847 (99.8%) |
 
-### Test (105 conversations, 4,109 moments)
+### Test (105 conversations, 4,860 moments)
 
-| | scaffolding (1,478) | rapport (2,631) |
+| | scaffolding (2,400) | rapport (2,460) |
 |---|---|---|
-| effective | 575 (38.9%) | 1,227 (46.6%) |
-| partial | 278 (18.8%) | 627 (23.8%) |
-| ineffective | 606 (41.0%) | 749 (28.5%) |
+| effective | 1,047 (43.6%) | 1,214 (49.3%) |
+| partial | 439 (18.3%) | 606 (24.6%) |
+| ineffective | 909 (37.9%) | 612 (24.9%) |
 
 Span coverage (unique locations vs. annotated moments per location):
 
 | | scaffolding | rapport |
 |---|---|---|
 | Unique spans `(conv_id, turn_start, turn_end)` | 670 | 459 |
-| Annotated moments (one per annotator/span) | 1,478 (2.2/span) | 2,631 (5.7/span) |
-| Annotated moments with a cross-annotator span match | 1,154 / 1,478 (78.1%) | 2,631 / 2,631 (100%) |
+| Annotated moments (one per annotator/span) | 2,400 (3.6/span) | 2,460 (5.4/span) |
+| Annotated moments with a cross-annotator span match | 2,375 / 2,400 (99.0%) | 2,460 / 2,460 (100%) |

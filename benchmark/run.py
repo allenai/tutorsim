@@ -93,7 +93,7 @@ def run_benchmark(version: str, config: dict):
                     ", ".join(sorted(set(resolved_models.values()))))
 
     transcripts_for_screenshots = None
-    if with_screenshots:
+    if with_screenshots or config.get("tutor", {}).get("mode"):
         from annotator.core.storage import load_all_transcripts
         transcripts_for_screenshots = load_all_transcripts()
 
@@ -141,6 +141,14 @@ def run_benchmark(version: str, config: dict):
     student_mode = config["student"].get("mode")
     student_cfg = get_phase_config("tutor", student_profile)
     student_client = ModelClient(student_cfg["model"])
+
+    trait_client = None
+    trait_model = None
+    if student_mode == "trait":
+        trait_client = student_client
+        trait_model = student_cfg["model"]
+
+    tutor_mode = config.get("tutor", {}).get("mode")
 
     for profile in tutor_profiles:
         tutor_cfg = get_phase_config("tutor", profile)
@@ -214,7 +222,7 @@ def run_benchmark(version: str, config: dict):
                     scenarios=missing,
                     tutor_client=tutor_client,
                     student_client=student_client,
-                    num_turns=exchange_cfg["num_turns"],
+                    max_turns=exchange_cfg["max_turns"],
                     tutor_max_tokens=tutor_cfg["max_tokens"],
                     student_max_tokens=student_cfg["max_tokens"],
                     poll_interval=exchange_cfg["poll_interval"],
@@ -222,6 +230,10 @@ def run_benchmark(version: str, config: dict):
                     prompt_version=exchange_prompt_version,
                     images_by_scenario=images_by_scenario,
                     student_mode=student_mode,
+                    trait_client=trait_client,
+                    trait_model=trait_model,
+                    tutor_mode=tutor_mode,
+                    transcripts=transcripts_for_screenshots,
                 )
             else:
                 new_exchanges = {}
@@ -231,12 +243,16 @@ def run_benchmark(version: str, config: dict):
                             scenario=scenario,
                             tutor_client=tutor_client,
                             student_client=student_client,
-                            num_turns=exchange_cfg["num_turns"],
+                            max_turns=exchange_cfg["max_turns"],
                             tutor_max_tokens=tutor_cfg["max_tokens"],
                             student_max_tokens=student_cfg["max_tokens"],
                             prompt_version=exchange_prompt_version,
                             images=(images_by_scenario or {}).get(scenario.scenario_id),
                             student_mode=student_mode,
+                            trait_client=trait_client,
+                            trait_model=trait_model,
+                            tutor_mode=tutor_mode,
+                            transcripts=transcripts_for_screenshots,
                         )
                         new_exchanges[scenario.scenario_id] = exchange
                         logger.debug("[%d/%d] %s -> %d turns",
@@ -465,7 +481,7 @@ def main():
                         help="Benchmark version (default: auto-generated from tutor profile + date)")
     parser.add_argument("--tutor-profile",
                         help="Single tutor profile (e.g. gemini, openai, anthropic)")
-    parser.add_argument("--scenario-mode", choices=["detected", "random", "both"],
+    parser.add_argument("--scenario-mode", choices=["detected", "random", "both", "human"],
                         help="Override scenario extraction mode")
     parser.add_argument("--max-scenarios", type=int, help="Limit number of scenarios")
     parser.add_argument("--max-per-conv", type=int,

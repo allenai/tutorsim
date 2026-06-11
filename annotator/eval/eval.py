@@ -58,7 +58,7 @@ import krippendorff
 from ..core.config import get_valid_styles, get_annotation_types
 from ..core.utils import (
     compute_iou, merge_overlapping_ranges, load_ground_truth, load_split_ids,
-    EXAMPLE_CONV_IDS,
+    validate_ground_truth, EXAMPLE_CONV_IDS,
 )
 from ..core.storage import (
     load_annotator_result, save_annotator_result, annotator_result_exists,
@@ -68,7 +68,7 @@ from ..core.storage import (
 EFFECTIVENESS_LABELS = ["effective", "partial", "ineffective"]
 BINARY_LABELS = ["right", "wrong"]
 ANNOTATION_TYPES = ["scaffolding", "rapport"]
-DEFAULT_CONSENSUS_THRESHOLD = 0.4
+DEFAULT_CONSENSUS_THRESHOLD = 0.5
 
 
 def compute_consensus_label(labels):
@@ -106,6 +106,37 @@ def compute_mean_consensus_label(labels, threshold=DEFAULT_CONSENSUS_THRESHOLD):
 
 
 _ORDINAL_CODE = {"effective": 0, "partial": 1, "ineffective": 2}
+
+# action_direction_agg (gold) and action_label (LM structure labels) are both
+# collapsed via structure._YES_NO_TO_ACTION_LABEL from two independent yes/no
+# judgments -- "does this moment involve scaffolding?" and "...rigor?" (see
+# classify_action.md). This is the inverse mapping: it decomposes a collapsed
+# verdict back into its (scaffolding, rigor) yes/no pair so the two dimensions
+# can be scored independently rather than as one 4-way label (which would
+# count a gold "both" vs LLM "scaffolding" -- agreement on the scaffolding
+# dimension, disagreement on rigor -- as a complete miss on both sides).
+#
+# "unclear" (parse-failure fallback, both sides) and "unknown" (gold-only --
+# cluster had no action facets to classify) are non-substantive sentinels that
+# don't carry a verdict on either dimension, so they're absent from this map
+# and excluded from the per-dimension comparison wherever they appear.
+_ACTION_LABEL_TO_DIMENSIONS = {
+    "both": ("yes", "yes"),
+    "scaffolding": ("yes", "no"),
+    "rigor": ("no", "yes"),
+    "neither": ("no", "no"),
+}
+
+YES_NO_LABELS = ["yes", "no"]
+
+# student_outcome_agg (gold) and result_label (LM structure labels) share this
+# label space -- a mutually-exclusive choice between trending toward
+# demonstrated understanding ("pos") and misconceptions
+# predominantly remaining ("neg"). "no_evidence" means the cluster/
+# annotation had no result facets to classify (structure.DEFAULT_RESULT_LABEL);
+# "unclear" is a parse-failure fallback (structure._parse_result_label) -- both
+# are listed last so they sort to the bottom whenever they appear.
+STUDENT_OUTCOME_LABELS = ["pos", "neg", "no_evidence", "unclear"]
 
 
 ALPHA_THRESHOLDS = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
@@ -222,6 +253,171 @@ def compute_krippendorff_alpha(all_matches, consensus_label="unknown"):
     }
 
 
+def _per_class_f1(pairs, label_order):
+    """One-vs-rest precision/recall/F1 for each label appearing in (gold, pred) pairs.
+
+    Returns (f1_by_label, macro_f1). f1_by_label is ordered per label_order and
+    includes only labels that occur in gold and/or predicted values -- this keeps
+    parse-failure fallback labels (e.g. "unclear") out of the report unless they
+    actually show up, which would itself be a signal worth noticing.
+    """
+    if not pairs:
+        return {}, None
+
+    seen_labels = {g for g, _ in pairs} | {p for _, p in pairs}
+    labels = [l for l in label_order if l in seen_labels]
+
+    f1_by_label = {}
+    for label in labels:
+        tp = sum(1 for g, p in pairs if g == label and p == label)
+        fp = sum(1 for g, p in pairs if g != label and p == label)
+        fn = sum(1 for g, p in pairs if g == label and p != label)
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        recall = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        f1_by_label[label] = {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "support": tp + fn,
+        }
+
+    macro_f1 = round(sum(s["f1"] for s in f1_by_label.values()) / len(f1_by_label), 4)
+    return f1_by_label, macro_f1
+
+
+def compute_action_direction_f1(ground_truth, structure_labels_by_conv, eval_conv_ids):
+    """Per-dimension binary F1 ("yes" as positive class) between gold
+    action_direction_agg and LM action_label, scored independently on the
+    scaffolding and rigor dimensions.
+
+    Scaffolding only. Each unique gold span (turn_start, turn_end) contributes one
+    unit per dimension -- structure_labels_gold is produced 1:1 from deduplicated
+    gold-truth spans (see annotate.load_gold_moments), so a direct span lookup is
+    correct here, the same way match_gold_direct matches gold spans to LM
+    annotations.
+
+    classify_action.md asks the model to judge "scaffolding" and "rigor" as two
+    independent yes/no dimensions, and both gold and LLM verdicts are collapsed
+    into a single 4-way label via the same structure._YES_NO_TO_ACTION_LABEL
+    mapping. Decomposing back to (scaffolding, rigor) via _ACTION_LABEL_TO_DIMENSIONS
+    and scoring each dimension independently avoids the case where a partial
+    agreement (e.g. gold "both" vs LLM "scaffolding" -- they agree scaffolding=yes,
+    disagree only on rigor) gets counted as a complete miss on both sides under a
+    single 4-way comparison.
+
+    Excludes any unit where either side's collapsed label is a non-substantive
+    sentinel ("unclear"/"unknown") -- these don't decompose to a per-dimension
+    yes/no verdict (see _ACTION_LABEL_TO_DIMENSIONS).
+
+    Returns {"scaffolding": {...}, "rigor": {...}}, each shaped like
+    compute_student_outcome_f1's report (one-vs-rest precision/recall/F1 for
+    "yes", plus macro_f1/n_units/confusion over YES_NO_LABELS).
+    """
+    llm_by_span = {}
+    for conv_id in eval_conv_ids:
+        for a in structure_labels_by_conv.get(conv_id, []):
+            if a.get("annotation_type") != "scaffolding":
+                continue
+            llm_by_span[(conv_id, a["turn_start"], a["turn_end"])] = a.get("action_label")
+
+    dim_pairs = {"scaffolding": [], "rigor": []}
+    seen_spans = set()
+    for conv_id in eval_conv_ids:
+        for m in ground_truth["conversations"].get(conv_id, {}).get("key_moments", []):
+            if m.get("annotation_type") != "scaffolding":
+                continue
+            gold_label = m.get("action_direction_agg")
+            if gold_label is None:
+                continue
+            span = (conv_id, m["turn_start"], m["turn_end"])
+            if span in seen_spans:
+                continue
+            seen_spans.add(span)
+            llm_label = llm_by_span.get(span)
+            if llm_label is None:
+                continue
+
+            gold_dims = _ACTION_LABEL_TO_DIMENSIONS.get(gold_label)
+            llm_dims = _ACTION_LABEL_TO_DIMENSIONS.get(llm_label)
+            if gold_dims is None or llm_dims is None:
+                continue
+            for i, dim in enumerate(("scaffolding", "rigor")):
+                dim_pairs[dim].append((gold_dims[i], llm_dims[i]))
+
+    result = {}
+    for dim, pairs in dim_pairs.items():
+        if not pairs:
+            result[dim] = {"f1": {}, "macro_f1": None, "n_units": 0, "confusion": {}}
+            continue
+        f1_by_label, macro_f1 = _per_class_f1(pairs, ["yes"])
+        result[dim] = {
+            "f1": f1_by_label,
+            "macro_f1": macro_f1,
+            "n_units": len(pairs),
+            "confusion": build_confusion(pairs, YES_NO_LABELS),
+        }
+
+    return result
+
+
+def compute_student_outcome_f1(ground_truth, structure_labels_by_conv, eval_conv_ids):
+    """Binary F1 ("pos" as the positive class) between gold student_outcome_agg
+    and LM result_label.
+
+    Scaffolding only. Each unique gold span (turn_start, turn_end) contributes one
+    unit -- structure_labels_gold is produced 1:1 from deduplicated gold-truth spans
+    (see annotate.load_gold_moments), so a direct span lookup is correct here, the
+    same way compute_action_direction_f1 matches gold spans to LM annotations.
+
+    Restricted to gold spans where student_outcome_agg is "pos" or "neg" --
+    i.e. the cluster's result facets actually resolved to a substantive
+    trending-toward-understanding/misconceptions-remain verdict. Gold
+    "no_evidence" (structure.DEFAULT_RESULT_LABEL, no result facets to classify)
+    and "unclear" (structure._parse_result_label parse-failure fallback) spans
+    carry no pos/neg signal to score against, so they're excluded rather than
+    counted as substantive disagreements when the LLM calls them differently.
+
+    Reports one-vs-rest precision/recall/F1 for "pos" -- LM predictions of
+    "neg"/"no_evidence"/"unclear" all count toward the negative class.
+    """
+    llm_by_span = {}
+    for conv_id in eval_conv_ids:
+        for a in structure_labels_by_conv.get(conv_id, []):
+            if a.get("annotation_type") != "scaffolding":
+                continue
+            llm_by_span[(conv_id, a["turn_start"], a["turn_end"])] = a.get("result_label")
+
+    pairs = []
+    seen_spans = set()
+    for conv_id in eval_conv_ids:
+        for m in ground_truth["conversations"].get(conv_id, {}).get("key_moments", []):
+            if m.get("annotation_type") != "scaffolding":
+                continue
+            gold_label = m.get("student_outcome_agg")
+            if gold_label not in ("pos", "neg"):
+                continue
+            span = (conv_id, m["turn_start"], m["turn_end"])
+            if span in seen_spans:
+                continue
+            seen_spans.add(span)
+            llm_label = llm_by_span.get(span)
+            if llm_label is not None:
+                pairs.append((gold_label, llm_label))
+
+    if not pairs:
+        return {"f1": {}, "macro_f1": None, "n_units": 0, "confusion": {}}
+
+    f1_by_label, macro_f1 = _per_class_f1(pairs, ["pos"])
+
+    return {
+        "f1": f1_by_label,
+        "macro_f1": macro_f1,
+        "n_units": len(pairs),
+        "confusion": build_confusion(pairs, STUDENT_OUTCOME_LABELS),
+    }
+
+
 def map_to_binary(label):
     """effective -> 'right', partial/ineffective -> 'wrong'."""
     if label == "effective":
@@ -260,6 +456,16 @@ def build_confusion(pairs, categories):
         if h in matrix and l in matrix[h]:
             matrix[h][l] += 1
     return matrix
+
+
+def print_f1_table(f1_by_label, indent="    "):
+    """Print a per-class precision/recall/F1/support table from _per_class_f1 output."""
+    print(f"{indent}{'label':>12s}  {'precision':>9s}  {'recall':>9s}  "
+          f"{'f1':>6s}  {'support':>7s}")
+    for label, scores in f1_by_label.items():
+        print(f"{indent}{label:>12s}  {scores['precision']:>9.4f}  "
+              f"{scores['recall']:>9.4f}  {scores['f1']:>6.4f}  "
+              f"{scores['support']:>7d}")
 
 
 def filter_moments_by_type(moments_by_conv, ann_type):
@@ -907,6 +1113,54 @@ def load_annotations_for_eval(version: str, mode: str,
     return annotations_by_conv, is_gold, filename
 
 
+def ground_truth_has_action_direction_agg(ground_truth: dict) -> bool:
+    """Whether any scaffolding moment in the ground truth carries action_direction_agg.
+
+    This field is only present once data/build_ground_truth.py has run its
+    action-direction aggregation pass; older ground truth snapshots lack it.
+    """
+    for conv_data in ground_truth.get("conversations", {}).values():
+        for m in conv_data.get("key_moments", []):
+            if m.get("annotation_type") == "scaffolding" and "action_direction_agg" in m:
+                return True
+    return False
+
+
+def ground_truth_has_student_outcome_agg(ground_truth: dict) -> bool:
+    """Whether any scaffolding moment in the ground truth carries student_outcome_agg."""
+    for conv_data in ground_truth.get("conversations", {}).values():
+        for m in conv_data.get("key_moments", []):
+            if m.get("annotation_type") == "scaffolding" and "student_outcome_agg" in m:
+                return True
+    return False
+
+
+def load_structure_labels_gold(version: str, profile: str | None = None,
+                               annotator_style: str | None = None,
+                               split: str = "train",
+                               target: str = "scaffolding") -> tuple[dict, str] | tuple[None, None]:
+    """Load structure_labels_gold_{target}.json (output of structure.py --gold).
+
+    Filename must match exactly -- mirrors the suffix construction in
+    structure.run_structure_label for the given version/profile/style/split.
+    Returns ({conv_id: [annotation dicts]}, filename) or (None, None).
+    """
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    filename = f"structure_labels_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+
+    data = load_annotator_result(version, filename)
+    if data is None:
+        return None, None
+
+    by_conv = {}
+    for conv_id, conv_data in data["results"].items():
+        transcript_id = conv_id.rsplit("_", 1)[-1]
+        by_conv[transcript_id] = conv_data.get("annotations", [])
+    return by_conv, filename
+
+
 def load_annotations(version: str, filename: str) -> tuple[dict[str, list[dict]], bool] | tuple[None, None]:
     """Load annotations and return ({conv_id: [annotation dicts]}, is_gold).
 
@@ -1079,6 +1333,42 @@ def print_scorecard(output):
                 print(f"  Human-Human α:      {t_ceil['alpha']:.4f}  "
                       f"(ceiling, {t_ceil.get('n_units', 0)} units, "
                       f"{t_ceil.get('n_raters', 0)} raters)")
+
+            t_action = td.get("action_direction_f1")
+            if t_action:
+                for dim in ("scaffolding", "rigor"):
+                    d = t_action.get(dim, {})
+                    if not d.get("f1"):
+                        continue
+                    print(f"  Action-Direction F1 ({dim}): {d['macro_f1']:.4f}  "
+                          f"(gold action_direction_agg vs LLM action_label, "
+                          f"{dim} dimension, {d.get('n_units', 0)} units)")
+                    print_f1_table(d["f1"])
+                    cm = d.get("confusion", {})
+                    if cm:
+                        print(f"    Confusion (rows=gold, cols=LLM):")
+                        print("    " + " " * 11
+                              + "".join(f"{l:>10s}" for l in YES_NO_LABELS))
+                        for h in YES_NO_LABELS:
+                            row = cm.get(h, {})
+                            print(f"    {h:>11s}"
+                                  + "".join(f"{row.get(l, 0):>10d}" for l in YES_NO_LABELS))
+
+            t_outcome = td.get("student_outcome_f1")
+            if t_outcome and t_outcome.get("f1"):
+                print(f"  Student-Outcome F1: macro={t_outcome['macro_f1']:.4f}  "
+                      f"(gold student_outcome_agg vs LLM result_label, "
+                      f"{t_outcome.get('n_units', 0)} units)")
+                print_f1_table(t_outcome["f1"])
+                cm = t_outcome.get("confusion", {})
+                if cm:
+                    print(f"    Confusion (rows=gold, cols=LLM):")
+                    print("    " + " " * 15
+                          + "".join(f"{l:>15s}" for l in STUDENT_OUTCOME_LABELS))
+                    for h in STUDENT_OUTCOME_LABELS:
+                        row = cm.get(h, {})
+                        print(f"    {h:>15s}"
+                              + "".join(f"{row.get(l, 0):>15d}" for l in STUDENT_OUTCOME_LABELS))
 
             if t_guard.get("total_annotations", 0) > 0:
                 print(f"  Effective Rate:     {t_guard.get('effective_rate', 0):.1%}  |  "
@@ -1312,6 +1602,16 @@ def main():
     }
     print(f"Restricted ground truth to {args.split} split: {len(ground_truth['conversations'])} conversations")
 
+    # Precondition: eval reads strategy_label (consensus/kappa) on every moment
+    # and the scaffolding-only aggregates action_direction_agg / student_outcome_agg
+    # / situation_label_agg for the structure-label comparisons. Require them up
+    # front instead of silently skipping metrics on a key-by-key basis.
+    validate_ground_truth(
+        ground_truth,
+        all_moments=("strategy_label",),
+        scaffolding_only=("situation_label_agg", "action_direction_agg", "student_outcome_agg"),
+    )
+
     if style:
         print(f"Filtered ground truth to '{style}' annotators")
         print(f"  Conversations with matching annotations: "
@@ -1324,6 +1624,47 @@ def main():
         print("    --mode annotations_old (labeling quality, majority-vote consensus, Cohen's kappa)")
         print("    --mode annotations     (labeling quality, mean-score consensus, Krippendorff alpha)")
         return
+
+    # --- Gold structure-label comparisons (scaffolding only) ---
+    # action_direction_agg / student_outcome_agg are gold aggregates that pair 1:1
+    # with structure_labels_gold's action_label / result_label -- both are derived
+    # from the same deduplicated gold spans (annotate.load_gold_moments). Independent
+    # of --mode: runs whenever the gold ground truth carries the relevant field AND
+    # the matching structure_labels_gold output exists for these exact input flags
+    # (--version/--profile/--style/--split). The two fields are checked and loaded
+    # together since they live in the same gold/structure-label files.
+    has_action_direction = ground_truth_has_action_direction_agg(ground_truth)
+    has_student_outcome = ground_truth_has_student_outcome_agg(ground_truth)
+
+    action_direction_f1 = None
+    student_outcome_f1 = None
+    if has_action_direction or has_student_outcome:
+        structure_labels_by_conv, structure_filename = load_structure_labels_gold(
+            version, profile=args.profile, annotator_style=style, split=args.split)
+        if structure_labels_by_conv is not None:
+            struct_eval_ids = (
+                set(ground_truth["conversations"].keys())
+                & set(structure_labels_by_conv.keys())
+            ) - EXAMPLE_CONV_IDS
+            print(f"Loaded structure labels for gold comparison: {structure_filename} "
+                  f"({len(struct_eval_ids)} conversations)")
+
+            if has_action_direction:
+                action_direction_f1 = compute_action_direction_f1(
+                    ground_truth, structure_labels_by_conv, struct_eval_ids)
+                for dim in ("scaffolding", "rigor"):
+                    d = action_direction_f1[dim]
+                    print(f"  Action-direction ({dim}) agreement: {d['n_units']} matched spans, "
+                          f"f1={d['macro_f1']}")
+
+            if has_student_outcome:
+                student_outcome_f1 = compute_student_outcome_f1(
+                    ground_truth, structure_labels_by_conv, struct_eval_ids)
+                print(f"  Student-outcome agreement: {student_outcome_f1['n_units']} matched spans, "
+                      f"macro_f1={student_outcome_f1['macro_f1']}")
+        else:
+            print("Structure labels: gold has action_direction_agg/student_outcome_agg but no "
+                  "matching structure_labels_gold output found for these input flags -- skipping")
 
     # --- Load LLM data based on mode ---
     llm_moments_by_conv = {}
@@ -1419,6 +1760,12 @@ def main():
     for ann_type in ANNOTATION_TYPES:
         type_result = {}
         h_filtered = filter_moments_by_type(human_moments_by_conv, ann_type)
+
+        if ann_type == "scaffolding" and action_direction_f1 is not None:
+            type_result["action_direction_f1"] = action_direction_f1
+
+        if ann_type == "scaffolding" and student_outcome_f1 is not None:
+            type_result["student_outcome_f1"] = student_outcome_f1
 
         if detection:
             l_filtered = filter_moments_by_type(llm_moments_by_conv, ann_type)

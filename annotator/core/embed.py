@@ -98,10 +98,22 @@ def run_embed_ground_truth(labeller: str = "hybrid") -> None:
 
     logger.info("Loading ground truth from %s (%d files)", gt_dir, len(conv_files))
 
-    # Load all conversations
+    # Load all conversations, validating required structural keys up front.
+    # A missing key here means the ground-truth file is corrupt -- fail loudly
+    # rather than silently embedding zero facets and writing a file that looks
+    # successful.
     convs = {}
     for f in conv_files:
         data = json.loads(f.read_text(encoding="utf-8"))
+        if "key_moments" not in data:
+            raise ValueError(f"Ground truth file {f.name} is missing required key 'key_moments'")
+        for m_idx, moment in enumerate(data["key_moments"]):
+            for field in ("action_decomposed", "result_decomposed"):
+                if field not in moment:
+                    raise ValueError(
+                        f"Ground truth file {f.name} moment {m_idx} is missing "
+                        f"required key '{field}' (was it decomposed?)"
+                    )
         convs[f.stem] = data
 
     # Collect all facets in order so we can do one encode() call
@@ -110,9 +122,9 @@ def run_embed_ground_truth(labeller: str = "hybrid") -> None:
     locations: list[tuple[str, int, str, int]] = []
 
     for conv_id, data in convs.items():
-        for m_idx, moment in enumerate(data.get("key_moments", [])):
+        for m_idx, moment in enumerate(data["key_moments"]):
             for field in ("action_decomposed", "result_decomposed"):
-                for f_idx, facet in enumerate(moment.get(field) or []):
+                for f_idx, facet in enumerate(moment[field] or []):
                     flat_facets.append(facet)
                     locations.append((conv_id, m_idx, field, f_idx))
 
@@ -132,7 +144,7 @@ def run_embed_ground_truth(labeller: str = "hybrid") -> None:
     output: dict[str, dict] = {}
     for conv_id, data in convs.items():
         moments = []
-        for m_idx, moment in enumerate(data.get("key_moments", [])):
+        for m_idx, moment in enumerate(data["key_moments"]):
             m = dict(moment)
             m["action_embeddings"] = embed_map.get((conv_id, m_idx, "action_decomposed"), [])
             m["result_embeddings"] = embed_map.get((conv_id, m_idx, "result_decomposed"), [])
@@ -204,7 +216,8 @@ def run_embed_decomposed(
             ann["result_embeddings"] = embed_map.get((conv_id, ann_idx, "result_decomposed"), [])
 
     output = {**data, "results": results, "embedded": True}
-    output_filename = f"embedded{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+    embedded_prefix = "embedded_gold" if gold else "embedded"
+    output_filename = f"{embedded_prefix}{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
     save_annotator_result(version, output_filename, output)
     logger.info(
         "Saved embeddings for %d conversations (%d facets) → %s",

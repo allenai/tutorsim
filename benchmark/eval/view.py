@@ -216,12 +216,14 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 .turn .role {{ font-weight: 600; min-width: 70px; font-size: 13px; padding-top: 2px; }}
 .turn .role.tutor {{ color: #2c5282; }}
 .turn .role.student {{ color: #276749; }}
+.turn .role.system {{ color: #6c757d; font-style: italic; }}
 .turn .text {{ flex: 1; }}
 
 .turn.original {{ background: transparent; }}
 .turn.generated {{
   background: #f3e5f5; border-left: 3px solid #9c27b0;
 }}
+.turn.system {{ background: #f0f0f3; border-left: 3px solid #9e9e9e; color: #555; font-style: italic; }}
 .turn.highlighted {{ background: #fff3cd !important; box-shadow: inset 0 0 0 2px #ffc107; }}
 
 .ann-card {{
@@ -338,9 +340,10 @@ function renderTranscript(s) {{
       html += '<div class="cut-marker">AI-GENERATED TURNS BELOW (cut at turn ' + s.cut_turn + ')</div>';
     }}
 
-    const bgClass = isGen ? 'generated' : 'original';
+    let bgClass = isGen ? 'generated' : 'original';
     const role = turn.role.toLowerCase();
-    const roleClass = role === 'tutor' ? 'tutor' : 'student';
+    const roleClass = role === 'tutor' ? 'tutor' : (role === 'system' ? 'system' : 'student');
+    if (role === 'system') bgClass = 'system';
 
     html += '<div class="turn ' + bgClass + '" id="turn-' + n + '">';
     html += '<span class="turn-num">' + n + '</span>';

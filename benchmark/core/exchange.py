@@ -9,6 +9,7 @@ Supports multi-message turns (split by [NEXT] delimiter) to match
 real transcript patterns where the same speaker sends consecutive messages.
 """
 
+import math
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -24,6 +25,39 @@ logger = logging.getLogger(__name__)
 PROMPTS_BASE = Path(__file__).parent.parent.parent / "prompts" / "benchmark"
 
 NEXT_DELIMITER = "[NEXT]"
+NEW_MESSAGE_DELIMITER = "[NEW_MESSAGE]"
+
+END_TOKEN = "[END]"
+
+
+def _check_end_token(text: str) -> tuple[str, bool]:
+    """Strip [END] token from text and report whether it was present.
+
+    The token usually appears at the end of the message but may appear
+    anywhere; either way the scenario should end. Trailing whitespace
+    after the strip is removed.
+    """
+    if END_TOKEN not in text:
+        return text, False
+    cleaned = text.replace(END_TOKEN, "").rstrip()
+    return cleaned, True
+
+
+NEXT_PROBLEM_TOKEN = "[NEXT_PROBLEM]"
+
+
+def _parse_tutor_tokens(text: str) -> tuple[str, bool, bool]:
+    """Strip tutor control tokens and report which were present.
+
+    Returns (cleaned_text, ended, next_problem).
+    END takes precedence: if both tokens appear, ended=True, next_problem=False.
+    """
+    has_end = END_TOKEN in text
+    has_next = NEXT_PROBLEM_TOKEN in text
+    cleaned = text.replace(END_TOKEN, "").replace(NEXT_PROBLEM_TOKEN, "").rstrip()
+    if has_end:
+        return cleaned, True, False
+    return cleaned, False, has_next
 
 
 @dataclass
@@ -38,6 +72,7 @@ class Exchange:
         "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
     })
     completed: bool = False
+    ended_via: str = ""                                   # "END" | "NEXT_PROBLEM" | "MAX_TURNS" | ""
 
     def to_dict(self):
         return asdict(self)
@@ -50,19 +85,37 @@ def _load_prompt(prompt_version: str, filename: str) -> str:
 
 
 def _build_role_prompt(
-    role: str, transcript_so_far: str, student_context: str,
+    role: str,
+    transcript_prefix: str,
+    extra: str,
+    student_context: str,
     prompt_version: str = "v1",
     student_mode: str | None = None,
-) -> str:
-    """Build a prompt for either tutor or student.
+    scenario=None,
+    trait_client=None,
+    trait_model: str | None = None,
+    tutor_mode: str | None = None,
+    reference_transcript: str | None = None,
+) -> tuple[str, str]:
+    """Build (cacheable_head, tail) for either tutor or student.
 
-    When role == "STUDENT" and student_mode is set, loads
-    students/{student_mode}.txt under the prompt version. Otherwise falls
-    back to the legacy single-file student_system.txt so older versions
-    (v1) keep working without a students/ subfolder.
+    head = system_prompt (with substitutions) + "Here is the conversation so far:\\n" + transcript_prefix
+    tail = extra + "\\n\\n" + role_instruction
+
+    The head is byte-identical across all rounds of one scenario, so it hits
+    the prompt cache (Anthropic explicit / OpenAI automatic) on round 2+.
+
+    Tutor mode: when tutor_mode is set and role=="TUTOR", loads
+    tutors/{tutor_mode}.txt instead of tutor_system.txt and substitutes
+    {reference_transcript} (which must be supplied).
+
+    Student trait mode: see existing docstring.
     """
     if role == "TUTOR":
-        system_prompt = _load_prompt(prompt_version, "tutor_system.txt")
+        if tutor_mode:
+            system_prompt = _load_prompt(prompt_version, f"tutors/{tutor_mode}.txt")
+        else:
+            system_prompt = _load_prompt(prompt_version, "tutor_system.txt")
         role_instruction = "Respond as the TUTOR. Give only your response, no labels or prefixes."
     else:
         if student_mode:
@@ -74,18 +127,40 @@ def _build_role_prompt(
 
     system_prompt = system_prompt.replace("{student_context}", student_context)
 
-    return f"""{system_prompt}
+    if role == "TUTOR" and tutor_mode:
+        if reference_transcript is None:
+            raise ValueError(
+                f"_build_role_prompt: tutor_mode={tutor_mode!r} requires "
+                "reference_transcript"
+            )
+        system_prompt = system_prompt.replace("{reference_transcript}", reference_transcript)
 
-Here is the conversation so far:
+    if role == "STUDENT" and student_mode == "trait":
+        if scenario is None or trait_client is None or trait_model is None:
+            raise ValueError(
+                "_build_role_prompt: student_mode='trait' requires scenario, "
+                "trait_client, and trait_model"
+            )
+        from benchmark.core.traits import get_or_generate_trait
+        persona = get_or_generate_trait(
+            scenario, prompt_version, trait_client, trait_model,
+        )
+        system_prompt = system_prompt.replace("{trait_persona}", persona)
 
-{transcript_so_far}
-
-{role_instruction}"""
+    head = f"{system_prompt}\n\nHere is the conversation so far:\n\n{transcript_prefix}"
+    tail = f"{extra}\n\n{role_instruction}"
+    return head, tail
 
 
 def _split_messages(text: str) -> list[str]:
-    """Split LLM output into multiple messages on [NEXT] delimiter."""
-    parts = text.split(NEXT_DELIMITER)
+    """Split LLM output into multiple messages on either delimiter.
+
+    Recognizes [NEXT] (v1-v4) and [NEW_MESSAGE] (v5+). Either token splits
+    the text into separate chat messages.
+    """
+    # Normalize both delimiters to one before splitting.
+    normalized = text.replace(NEW_MESSAGE_DELIMITER, NEXT_DELIMITER)
+    parts = normalized.split(NEXT_DELIMITER)
     messages = [p.strip() for p in parts]
     return [m for m in messages if m]
 
@@ -112,6 +187,46 @@ def _append_turns(
     return running_transcript, next_turn_num
 
 
+def _append_turns_to_extra(
+    exchange: Exchange,
+    messages: list[str],
+    role: str,
+    extra: str,
+    next_turn_num: int,
+) -> tuple[str, int]:
+    """Append messages as turns and grow the `extra` suffix.
+
+    Used by the cache-aware exchange loop. transcript_prefix stays fixed;
+    this only mutates the per-round growing portion.
+    """
+    for msg in messages:
+        turn = {"turn_number": next_turn_num, "role": role, "text": msg}
+        exchange.generated_turns.append(turn)
+        extra += f"\nTurn {next_turn_num}. {role}: {msg}"
+        next_turn_num += 1
+    return extra, next_turn_num
+
+
+def _build_reference_transcript(conversation: dict, cut_turn: int) -> str:
+    """Format the post-cut real human turns from a full conversation.
+
+    Returns a newline-joined string of `Turn N. ROLE: text` lines for every
+    turn whose turn_number > cut_turn. Empty string if no post-cut turns.
+
+    Used by oracle tutor mode -- the reference shown to the AI so it can
+    mimic the real tutor's continuation.
+    """
+    lines = []
+    for turn in conversation.get("turns", []):
+        n = turn.get("turn_number")
+        if n is None or n <= cut_turn:
+            continue
+        role = turn.get("role", "")
+        text = turn.get("text", "")
+        lines.append(f"Turn {n}. {role}: {text}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Sync mode: one scenario at a time
 # ---------------------------------------------------------------------------
@@ -120,57 +235,105 @@ def run_exchange(
     scenario: Scenario,
     tutor_client: ModelClient,
     student_client: ModelClient,
-    num_turns: int,
+    max_turns: int,
     tutor_max_tokens: int,
     student_max_tokens: int,
     prompt_version: str,
     images: list[str] | None = None,
     student_mode: str | None = None,
+    trait_client: ModelClient | None = None,
+    trait_model: str | None = None,
+    tutor_mode: str | None = None,
+    transcripts: dict[str, dict] | None = None,
 ) -> Exchange:
-    """Run a multi-turn exchange for a single scenario (sync mode).
+    """Sync mode multi-turn exchange.
 
-    When images is provided, every tutor and student call receives them.
-    The image set is fixed for the duration of the exchange (no new
-    screenshots emerge from synthetic dialogue).
+    Both [END] and [NEXT_PROBLEM] terminate; recorded on Exchange.ended_via.
+    Each tutor/student call passes scenario.transcript_prefix's head as
+    cacheable_prefix so the static head hits the prompt cache on round 2+.
+
+    When tutor_mode is set, transcripts must include scenario.conv_id; the
+    post-cut reference is computed once and substituted into the tutor prompt.
     """
     exchange = Exchange(
         scenario_id=scenario.scenario_id,
         tutor_model=tutor_client.model,
     )
 
-    running_transcript = scenario.transcript_prefix
+    extra = ""
     next_turn_num = scenario.cut_turn + 1
+    ended_via = ""
 
-    for i in range(num_turns):
-        # Tutor turn(s)
-        prompt = _build_role_prompt("TUTOR", running_transcript, scenario.student_context, prompt_version)
+    # Compute reference once per scenario when oracle (or any tutor_mode) is on.
+    reference_transcript = None
+    if tutor_mode:
+        if not transcripts:
+            raise ValueError(
+                f"run_exchange: tutor_mode={tutor_mode!r} requires transcripts"
+            )
+        conv = transcripts.get(scenario.conv_id)
+        if conv is None:
+            raise ValueError(
+                f"run_exchange: tutor_mode={tutor_mode!r} but no transcript "
+                f"loaded for conv_id={scenario.conv_id!r}"
+            )
+        reference_transcript = _build_reference_transcript(conv, scenario.cut_turn)
+
+    while len(exchange.generated_turns) < max_turns:
+        # --- Tutor turn ---
+        head, tail = _build_role_prompt(
+            "TUTOR", scenario.transcript_prefix, extra, scenario.student_context,
+            prompt_version,
+            tutor_mode=tutor_mode,
+            reference_transcript=reference_transcript,
+        )
         response = tutor_client.generate(
-            prompt, json_mode=False, max_tokens=tutor_max_tokens,
-            images=images,
+            tail, json_mode=False, max_tokens=tutor_max_tokens,
+            images=images, cacheable_prefix=head,
         )
         _add_usage(exchange.tutor_usage, response.usage)
 
+        text, ended, next_problem = _parse_tutor_tokens(response.text)
+        messages = _split_messages(text)
+        if not messages and not (ended or next_problem):
+            messages = ["..."]
+        if messages:
+            extra, next_turn_num = _append_turns_to_extra(
+                exchange, messages, "TUTOR", extra, next_turn_num,
+            )
+
+        if ended:
+            ended_via = "END"
+            break
+        if next_problem:
+            ended_via = "NEXT_PROBLEM"
+            break
+        if len(exchange.generated_turns) >= max_turns:
+            ended_via = "MAX_TURNS"
+            break
+
+        # --- Student turn ---
+        head, tail = _build_role_prompt(
+            "STUDENT", scenario.transcript_prefix, extra, scenario.student_context,
+            prompt_version, student_mode=student_mode,
+            scenario=scenario, trait_client=trait_client, trait_model=trait_model,
+        )
+        response = student_client.generate(
+            tail, json_mode=False, max_tokens=student_max_tokens,
+            images=images, cacheable_prefix=head,
+        )
+        _add_usage(exchange.student_usage, response.usage)
+
         messages = _split_messages(response.text) or ["..."]
-        running_transcript, next_turn_num = _append_turns(
-            exchange, messages, "TUTOR", running_transcript, next_turn_num,
+        extra, next_turn_num = _append_turns_to_extra(
+            exchange, messages, "STUDENT", extra, next_turn_num,
         )
 
-        # Student turn(s) — skip on last round
-        if i < num_turns - 1:
-            prompt = _build_role_prompt("STUDENT", running_transcript, scenario.student_context,
-                                        prompt_version, student_mode=student_mode)
-            response = student_client.generate(
-                prompt, json_mode=False, max_tokens=student_max_tokens,
-                images=images,
-            )
-            _add_usage(exchange.student_usage, response.usage)
-
-            messages = _split_messages(response.text) or ["..."]
-            running_transcript, next_turn_num = _append_turns(
-                exchange, messages, "STUDENT", running_transcript, next_turn_num,
-            )
+    if not ended_via:
+        ended_via = "MAX_TURNS"
 
     exchange.completed = True
+    exchange.ended_via = ended_via
     return exchange
 
 
@@ -182,7 +345,7 @@ def run_exchanges_batch(
     scenarios: list[Scenario],
     tutor_client: ModelClient,
     student_client: ModelClient,
-    num_turns: int,
+    max_turns: int,
     tutor_max_tokens: int,
     student_max_tokens: int,
     poll_interval: int,
@@ -190,47 +353,70 @@ def run_exchanges_batch(
     prompt_version: str = "v1",
     images_by_scenario: dict[str, list[str]] | None = None,
     student_mode: str | None = None,
+    trait_client: ModelClient | None = None,
+    trait_model: str | None = None,
+    tutor_mode: str | None = None,
+    transcripts: dict[str, dict] | None = None,
 ) -> dict[str, Exchange]:
-    """Run multi-turn exchanges for all scenarios using batch API.
+    """Batch mode multi-turn exchanges.
 
-    For each round, submits one batch of tutor prompts (all scenarios),
-    waits for results, then one batch of student prompts. Repeats for
-    num_turns rounds.
+    Per-scenario state tracks `extra` (growing suffix) separate from the
+    static scenario.transcript_prefix; the head is passed as cacheable_prefix
+    on every per-scenario batch entry.
 
-    Args:
-        save_callback: Optional function(scenario_id, exchange) called after
-            each round to save progress incrementally. If provided, exchanges
-            are saved after every tutor+student pair completes.
-
-    Returns: {scenario_id: Exchange}
+    When tutor_mode is set, transcripts must include every scenario's conv_id;
+    the post-cut reference is computed once per scenario and reused across
+    rounds.
     """
-    # Initialize state per scenario
     exchanges = {}
-    transcripts = {}
+    extras: dict[str, str] = {}
     next_turns = {}
+    ended_via: dict[str, str] = {}
+    refs: dict[str, str] = {}
 
     for scenario in scenarios:
         exchanges[scenario.scenario_id] = Exchange(
             scenario_id=scenario.scenario_id,
             tutor_model=tutor_client.model,
         )
-        transcripts[scenario.scenario_id] = scenario.transcript_prefix
+        extras[scenario.scenario_id] = ""
         next_turns[scenario.scenario_id] = scenario.cut_turn + 1
+        if tutor_mode:
+            if not transcripts:
+                raise ValueError(
+                    f"run_exchanges_batch: tutor_mode={tutor_mode!r} requires transcripts"
+                )
+            conv = transcripts.get(scenario.conv_id)
+            if conv is None:
+                raise ValueError(
+                    f"run_exchanges_batch: tutor_mode={tutor_mode!r} but no transcript "
+                    f"loaded for conv_id={scenario.conv_id!r}"
+                )
+            refs[scenario.scenario_id] = _build_reference_transcript(conv, scenario.cut_turn)
 
     scenario_map = {s.scenario_id: s for s in scenarios}
     active_ids = list(scenario_map.keys())
 
-    for round_num in range(num_turns):
+    for round_num in range(math.ceil(max_turns / 2)):
+        if not active_ids:
+            break
+
         # --- Tutor batch ---
-        logger.info("Round %d/%d - tutor batch (%d scenarios)", round_num + 1, num_turns, len(active_ids))
+        logger.info("Round %d - tutor batch (%d scenarios)",
+                    round_num + 1, len(active_ids))
         tutor_entries = []
         for sid in active_ids:
             scenario = scenario_map[sid]
-            prompt = _build_role_prompt("TUTOR", transcripts[sid], scenario.student_context, prompt_version)
+            head, tail = _build_role_prompt(
+                "TUTOR", scenario.transcript_prefix, extras[sid], scenario.student_context,
+                prompt_version,
+                tutor_mode=tutor_mode,
+                reference_transcript=refs.get(sid),
+            )
             scenario_images = (images_by_scenario or {}).get(sid)
             tutor_entries.append(
-                build_batch_entry(sid, prompt, json_mode=False, max_tokens=tutor_max_tokens,
-                                  images=scenario_images)
+                build_batch_entry(sid, tail, json_mode=False, max_tokens=tutor_max_tokens,
+                                  images=scenario_images, cacheable_prefix=head)
             )
 
         tutor_raw = run_batch(
@@ -239,8 +425,8 @@ def run_exchanges_batch(
             poll_interval=poll_interval,
         )
 
-        # Process tutor results
         failed = []
+        ended_this_round = []
         for sid in active_ids:
             result = tutor_raw.get(sid, {})
             if "error" in result or not result.get("text"):
@@ -252,64 +438,99 @@ def run_exchanges_batch(
             if result.get("usage"):
                 _add_usage(exchange.tutor_usage, result["usage"])
 
-            messages = _split_messages(result["text"]) or ["..."]
-            transcripts[sid], next_turns[sid] = _append_turns(
-                exchange, messages, "TUTOR", transcripts[sid], next_turns[sid],
-            )
+            text, ended, next_problem = _parse_tutor_tokens(result["text"])
+            messages = _split_messages(text)
+            if not messages and not (ended or next_problem):
+                messages = ["..."]
+            if messages:
+                extras[sid], next_turns[sid] = _append_turns_to_extra(
+                    exchange, messages, "TUTOR", extras[sid], next_turns[sid],
+                )
 
-        # Remove failed scenarios
+            if ended:
+                ended_via[sid] = "END"
+                ended_this_round.append(sid)
+                continue
+            if next_problem:
+                ended_via[sid] = "NEXT_PROBLEM"
+                ended_this_round.append(sid)
+                continue
+            if len(exchange.generated_turns) >= max_turns:
+                ended_via[sid] = "MAX_TURNS"
+                ended_this_round.append(sid)
+
         for sid in failed:
-            active_ids.remove(sid)
-
-        # --- Student batch (skip on last round) ---
-        if round_num < num_turns - 1 and active_ids:
-            logger.info("Round %d/%d - student batch (%d scenarios)", round_num + 1, num_turns, len(active_ids))
-            student_entries = []
-            for sid in active_ids:
-                scenario = scenario_map[sid]
-                prompt = _build_role_prompt("STUDENT", transcripts[sid], scenario.student_context,
-                                            prompt_version, student_mode=student_mode)
-                scenario_images = (images_by_scenario or {}).get(sid)
-                student_entries.append(
-                    build_batch_entry(sid, prompt, json_mode=False, max_tokens=student_max_tokens,
-                                      images=scenario_images)
-                )
-
-            student_raw = run_batch(
-                student_client, student_entries, json_mode=False,
-                display_name=f"student_round_{round_num + 1}",
-                poll_interval=poll_interval,
-            )
-
-            # Process student results
-            failed = []
-            for sid in active_ids:
-                result = student_raw.get(sid, {})
-                if "error" in result or not result.get("text"):
-                    logger.warning("student failed for %s", sid[:50])
-                    failed.append(sid)
-                    continue
-
-                exchange = exchanges[sid]
-                if result.get("usage"):
-                    _add_usage(exchange.student_usage, result["usage"])
-
-                messages = _split_messages(result["text"]) or ["..."]
-                transcripts[sid], next_turns[sid] = _append_turns(
-                    exchange, messages, "STUDENT", transcripts[sid], next_turns[sid],
-                )
-
-            for sid in failed:
+            if sid in active_ids:
+                active_ids.remove(sid)
+        for sid in ended_this_round:
+            if sid in active_ids:
                 active_ids.remove(sid)
 
-        # Save progress after each round
+        # --- Student batch ---
+        if not active_ids:
+            if save_callback:
+                for sid in scenario_map:
+                    save_callback(sid, exchanges[sid])
+            continue
+
+        logger.info("Round %d - student batch (%d scenarios)",
+                    round_num + 1, len(active_ids))
+        student_entries = []
+        for sid in active_ids:
+            scenario = scenario_map[sid]
+            head, tail = _build_role_prompt(
+                "STUDENT", scenario.transcript_prefix, extras[sid], scenario.student_context,
+                prompt_version, student_mode=student_mode,
+                scenario=scenario, trait_client=trait_client, trait_model=trait_model,
+            )
+            scenario_images = (images_by_scenario or {}).get(sid)
+            student_entries.append(
+                build_batch_entry(sid, tail, json_mode=False, max_tokens=student_max_tokens,
+                                  images=scenario_images, cacheable_prefix=head)
+            )
+
+        student_raw = run_batch(
+            student_client, student_entries, json_mode=False,
+            display_name=f"student_round_{round_num + 1}",
+            poll_interval=poll_interval,
+        )
+
+        failed = []
+        ended_this_round = []
+        for sid in active_ids:
+            result = student_raw.get(sid, {})
+            if "error" in result or not result.get("text"):
+                logger.warning("student failed for %s", sid[:50])
+                failed.append(sid)
+                continue
+
+            exchange = exchanges[sid]
+            if result.get("usage"):
+                _add_usage(exchange.student_usage, result["usage"])
+
+            messages = _split_messages(result["text"]) or ["..."]
+            extras[sid], next_turns[sid] = _append_turns_to_extra(
+                exchange, messages, "STUDENT", extras[sid], next_turns[sid],
+            )
+
+            if len(exchange.generated_turns) >= max_turns:
+                ended_via[sid] = "MAX_TURNS"
+                ended_this_round.append(sid)
+
+        for sid in failed:
+            if sid in active_ids:
+                active_ids.remove(sid)
+        for sid in ended_this_round:
+            if sid in active_ids:
+                active_ids.remove(sid)
+
         if save_callback:
-            for sid in active_ids:
+            for sid in scenario_map:
                 save_callback(sid, exchanges[sid])
 
-    # Mark surviving scenarios as completed
-    for sid in active_ids:
+    for sid in scenario_map:
         exchanges[sid].completed = True
+        exchanges[sid].ended_via = ended_via.get(sid, "MAX_TURNS")
 
-    logger.info("Exchanges complete: %d/%d succeeded", len(active_ids), len(scenarios))
+    logger.info("Exchanges complete: %d scenarios", len(scenario_map))
     return exchanges

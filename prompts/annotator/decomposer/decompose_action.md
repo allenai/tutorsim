@@ -1,6 +1,6 @@
 You are restructuring a teaching coach's analysis of a tutoring moment.
 
-Given a description of a tutor's actions in a tutoring interaction, decompose it into short, standalone, atomic facets. Focus ONLY on extracting actions the tutor actually did. Exclude events and actions that are hypothetical (e.g. things the description says should have occurred) and exclude events/actions that did *not* occur.  
+Given a description of a tutor's actions in a tutoring interaction, decompose it into short, standalone, atomic facets. Focus ONLY on extracting actions the tutor did or did not do. Exclude events and actions that are hypothetical (e.g. things the description says should have occurred).  
 
 # Examples
 
@@ -27,7 +27,7 @@ OUTPUT
 INPUT
 The tutor didn't push the student. They should've asked probing questions. 
 OUTPUT
-[]
+["The tutor didn't push the student."]
 
 INPUT
 The tutor told the student to compare this to an input output table. If the tutor had told the student to skip count instead of input-output, it would've been more effective.

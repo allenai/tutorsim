@@ -203,15 +203,17 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
                test: int = 0, dialogue_only: bool = False,
                profile: str | None = None,
                annotator_style: str | None = None,
-               split: str = "train", with_screenshots: bool = False) -> dict:
+               split: str = "train", with_screenshots: bool = False,
+               rerun: bool = False) -> dict:
     """Run detection pass. Returns the full output dict (with 'results' key).
 
     Resumable: per-conv results are written to shards under
     results/annotator/{version}/shards/{shard_namespace}/{conv_id}.json as they parse,
     where shard_namespace matches the output filename prefix (e.g. detections_anthropic_test).
     A re-run with the same flags skips conv_ids that already have a shard
-    and only sends the remainder to the model. Delete the version directory
-    to force a clean re-run.
+    and only sends the remainder to the model. Pass rerun=True to ignore
+    existing shards and reprocess (overwriting) all conv_ids; alternatively,
+    delete the version directory for a clean re-run.
     """
     output_dir = get_annotator_result_path(version)
 
@@ -226,9 +228,13 @@ def run_detect(version: str, model: str, mode: str, prompt_version: str,
     logger.info("Loaded %d conversations", len(conversations))
     logger.info("Model: %s | Mode: %s | Targets: %s", model, mode, targets)
 
-    existing_ids = set(list_annotator_shard_ids(version, shard_namespace))
+    on_disk_ids = set(list_annotator_shard_ids(version, shard_namespace))
+    existing_ids = set() if rerun else on_disk_ids
     to_process = [c for c in conversations if c["conversation_id"] not in existing_ids]
-    if existing_ids:
+    if rerun and on_disk_ids:
+        logger.info("Rerun mode: ignoring %d existing shards, reprocessing all %d conversations",
+                    len(on_disk_ids), len(to_process))
+    elif existing_ids:
         logger.info("Resuming version %s: %d shards already on disk, %d to process",
                     version, len(existing_ids), len(to_process))
 

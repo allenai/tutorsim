@@ -3,6 +3,7 @@
 import json
 import logging
 import random
+from collections import Counter
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -11,6 +12,53 @@ logger = logging.getLogger(__name__)
 from annotator.core.utils import (
     load_transcripts, format_transcript, EXAMPLE_CONV_IDS,
 )
+from annotator.core.storage import load_all_ground_truth_files, _conv_id_to_uuid
+
+_SCAFF_AGGS = {"scaffolding", "rigor"}
+
+
+def _pick_modal_cut(votes: list[int]) -> "int | None":
+    """Return the most-voted cut. On tie, return the smallest.
+
+    Returns None when votes is empty.
+    """
+    if not votes:
+        return None
+    counts = Counter(votes)
+    max_count = max(counts.values())
+    winners = [c for c, n in counts.items() if n == max_count]
+    return min(winners)
+
+
+def _role_adjust_cut(cut_turn: int, conversation: dict) -> "int | None":
+    """Adjust cut_turn based on the role of the turn at cut_turn.
+
+    - STUDENT: cut stays as-is (prefix includes the student turn).
+    - TUTOR: cut_turn -= 1 (prefix excludes the human tutor turn; AI replaces it).
+    - turn not found OR adjustment falls below 1: returns None (caller drops the cluster).
+    """
+    turns_by_n = {t["turn_number"]: t for t in conversation.get("turns", [])}
+    turn = turns_by_n.get(cut_turn)
+    if turn is None:
+        return None
+    if turn.get("role") == "TUTOR":
+        adjusted = cut_turn - 1
+        if adjusted < 1:
+            return None
+        return adjusted
+    return cut_turn
+
+
+def _pick_representative_member(members: list[dict], chosen_cut: int) -> dict:
+    """Return the member to use for the scenario's detection payload.
+
+    Preference: members whose own cut_turn equals the chosen (modal) cut,
+    smallest annotator_id (lexicographic) on tie. Falls back to smallest
+    annotator_id overall if none of the members voted the chosen cut.
+    """
+    matching = [m for m in members if m.get("cut_turn") == chosen_cut]
+    pool = matching if matching else members
+    return min(pool, key=lambda m: (m.get("annotator_id") or ""))
 
 
 @dataclass
@@ -21,8 +69,8 @@ class Scenario:
     transcript_prefix: str        # formatted transcript up to cut_turn
     student_context: str          # grade, subject from conversation metadata
     last_student_message: str     # student's last utterance before cut
-    mode: str                     # "detected" | "random"
-    detection: dict | None        # the detection dict (turn_start, turn_end, annotation_type, etc.)
+    mode: str                     # "detected" | "random" | "human"
+    detection: "dict | None"      # the detection dict (turn_start, turn_end, annotation_type, etc.)
 
     def to_dict(self):
         d = asdict(self)
@@ -30,6 +78,38 @@ class Scenario:
         d["transcript_prefix_length"] = len(self.transcript_prefix)
         del d["transcript_prefix"]
         return d
+
+
+def _resolve_cluster(members: list[dict], conversation: dict,
+                     turn_start: int, turn_end: int) -> "dict | None":
+    """Return resolved cluster data, or None if the cluster should be dropped.
+
+    Applies vote filtering (cut in [ts, te]), modal selection, role adjustment,
+    and representative-member pick. Identical logic to extract_human_scenarios'
+    inner loop -- factored helper kept for clarity.
+    """
+    votes: list[int] = []
+    for m in members:
+        cut = m.get("cut_turn")
+        if not isinstance(cut, int):
+            continue
+        if cut < turn_start or cut > turn_end:
+            continue
+        votes.append(cut)
+    chosen = _pick_modal_cut(votes)
+    if chosen is None:
+        return None
+    adjusted = _role_adjust_cut(chosen, conversation)
+    if adjusted is None:
+        return None
+    rep = _pick_representative_member(members, chosen)
+    return {
+        "cut_turn": adjusted,
+        "chosen_cut_turn": chosen,
+        "cut_votes": dict(Counter(votes)),
+        "cluster_size": len(members),
+        "representative": rep,
+    }
 
 
 def _format_prefix(conversation: dict, cut_turn: int) -> str:
@@ -162,6 +242,74 @@ def extract_random_scenarios(
     return scenarios
 
 
+def extract_human_scenarios(transcripts: dict[str, dict]) -> list[Scenario]:
+    """Build one scenario per moment cluster (modal cut + role adjustment).
+
+    See docs/plans/specs/2026-06-09-modal-cut-selection-design.md.
+    """
+    uuid_to_conv = {_conv_id_to_uuid(cid): cid for cid in transcripts}
+
+    # First pass: group all kept moments per conversation by (ts, te).
+    clusters_by_conv: dict[str, dict[tuple, list[dict]]] = {}
+    for gt in load_all_ground_truth_files():
+        gt_uuid = gt.get("conversation_id")
+        full_conv_id = uuid_to_conv.get(_conv_id_to_uuid(gt_uuid or ""))
+        if not full_conv_id or full_conv_id in EXAMPLE_CONV_IDS:
+            continue
+        for m in gt.get("key_moments", []):
+            if m.get("situation_label_agg") not in _SCAFF_AGGS:
+                continue
+            ts = m.get("turn_start")
+            te = m.get("turn_end")
+            if ts is None or te is None:
+                continue
+            clusters_by_conv.setdefault(full_conv_id, {}).setdefault((ts, te), []).append(m)
+
+    scenarios: list[Scenario] = []
+    for full_conv_id, clusters in clusters_by_conv.items():
+        conversation = transcripts[full_conv_id]
+        # Resolve every cluster once, in turn order.
+        resolved: list[tuple] = []  # (ts, te, resolved_dict)
+        for (ts, te) in sorted(clusters.keys()):
+            r = _resolve_cluster(clusters[(ts, te)], conversation, ts, te)
+            if r is not None:
+                resolved.append((ts, te, r))
+
+        for (ts, te, r) in resolved:
+            prefix = _format_prefix(conversation, r["cut_turn"])
+            if not prefix:
+                continue
+
+            rep = r["representative"]
+            detection = {
+                "turn_start": ts,
+                "turn_end": te,
+                # situation_label_agg only set on annotation_type=="scaffolding"
+                # records, so all selected moments are scaffolding.
+                "annotation_type": "scaffolding",
+                "situation": rep.get("situation", ""),
+                "situation_label_agg": rep.get("situation_label_agg"),
+                "moment_id": rep.get("moment_id"),
+                "annotator_id": rep.get("annotator_id"),
+                "chosen_cut_turn": r["chosen_cut_turn"],
+                "cut_votes": r["cut_votes"],
+                "cluster_size": r["cluster_size"],
+            }
+
+            scenarios.append(Scenario(
+                scenario_id=f"{full_conv_id}__hum_{ts}_{te}",
+                conv_id=full_conv_id,
+                cut_turn=r["cut_turn"],
+                transcript_prefix=prefix,
+                student_context=_get_student_context(conversation),
+                last_student_message=_last_student_msg(conversation, r["cut_turn"]),
+                mode="human",
+                detection=detection,
+            ))
+
+    return scenarios
+
+
 def _sample_per_conversation(
     scenarios: list[Scenario],
     max_per_conv: int,
@@ -190,7 +338,10 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
         config: Scenario config from config.yaml.
         detections_by_conv: Detection results from run_detect(). If provided,
             scenarios are extracted from detections. If None and mode is
-            'detected', raises an error.
+            'detected', raises an error. Not required for mode='human' or
+            mode='random'.
+
+    Valid modes: "detected", "random", "both", "human".
     """
     transcripts = load_transcripts()
     logger.info("Loaded %d transcripts", len(transcripts))
@@ -223,6 +374,11 @@ def load_scenarios(config: dict, detections_by_conv: dict | None = None) -> list
         rnd_scenarios = extract_random_scenarios(transcripts, count, seed, min_turn)
         logger.info("Random scenarios: %d", len(rnd_scenarios))
         scenarios.extend(rnd_scenarios)
+
+    if mode == "human":
+        hum_scenarios = extract_human_scenarios(transcripts)
+        logger.info("Human scenarios: %d", len(hum_scenarios))
+        scenarios.extend(hum_scenarios)
 
     if max_per_conv > 0:
         before = len(scenarios)

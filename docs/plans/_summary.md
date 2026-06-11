@@ -4,6 +4,12 @@ Index of planned work and change log for the project. Plans live in this directo
 
 ## Plans
 
+### 2026-06-10 — build_ground_truth.py `--scaffolding-only`
+
+**Goal**: Allow refreshing only scaffolding ground truth without re-running rapport, while iterating on the scaffolding-specific labels.
+**Status**: Shipped.
+**Result**: Added `--scaffolding-only` flag. Restricts `load_from_jsonl` to scaffolding records (skips rapport entirely — no strategy classification or decomposition for rapport, and conversations with no scaffolding records are left untouched). On write, merges into existing GT files so rapport moments already on disk are preserved (`_merge_scaffolding_only`) and `num_turns` is recomputed across the merged set. Per-moment/cluster caches reused normally. Tests in `tests/test_ground_truth_scaffolding_only.py`.
+
 ### 2026-06-01 — [Benchmark student modes](specs/2026-06-01-benchmark-student-modes-design.md)
 
 **Goal**: Replace the benchmark's single hardcoded synthetic student prompt with selectable student "modes" ported from Alexis's synth-students repo, making `imitate_example` (her strongest realism mode) the shipping default.

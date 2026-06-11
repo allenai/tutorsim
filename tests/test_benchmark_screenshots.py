@@ -112,11 +112,11 @@ def test_run_exchange_attaches_images_to_tutor_call():
     run_exchange(
         scenario=scenario,
         tutor_client=tutor_client, student_client=student_client,
-        num_turns=1, tutor_max_tokens=100, student_max_tokens=100,
+        max_turns=1, tutor_max_tokens=100, student_max_tokens=100,
         prompt_version="v1", images=images,
     )
 
-    # With num_turns=1, exactly one tutor call (no student turn on the last round)
+    # With max_turns=1, exactly one tutor call (no student turn before the cap is hit)
     assert tutor_client.generate.called
     for call in tutor_client.generate.call_args_list:
         assert call.kwargs.get("images") == images
@@ -145,7 +145,7 @@ def test_run_exchange_default_no_images():
     run_exchange(
         scenario=scenario,
         tutor_client=tutor_client, student_client=student_client,
-        num_turns=1, tutor_max_tokens=100, student_max_tokens=100,
+        max_turns=1, tutor_max_tokens=100, student_max_tokens=100,
         prompt_version="v1",
     )
     for call in tutor_client.generate.call_args_list:

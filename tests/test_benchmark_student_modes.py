@@ -15,16 +15,20 @@ CTX = "Grade 5, fractions"
 
 def test_student_mode_none_falls_back_to_student_system_v1():
     """No mode -> legacy student_system.txt under v1."""
-    out = _build_role_prompt("STUDENT", TRANSCRIPT, CTX, prompt_version="v1",
+    head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
+                             student_context=CTX, prompt_version="v1",
                              student_mode=None)
+    out = head + tail
     assert "role-playing as a K-12 student" in out          # v1 student_system.txt
     assert CTX in out
     assert TRANSCRIPT in out
 
 
 def test_student_mode_imitate_example_loads_v2_students_folder():
-    out = _build_role_prompt("STUDENT", TRANSCRIPT, CTX, prompt_version="v2",
+    head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
+                             student_context=CTX, prompt_version="v2",
                              student_mode="imitate_example")
+    out = head + tail
     assert "imitate a human K-12 student" in out
     assert "indistinguishable" in out
     assert CTX in out
@@ -32,30 +36,38 @@ def test_student_mode_imitate_example_loads_v2_students_folder():
 
 
 def test_student_mode_simple_loads_v2_students_folder():
-    out = _build_role_prompt("STUDENT", TRANSCRIPT, CTX, prompt_version="v2",
+    head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
+                             student_context=CTX, prompt_version="v2",
                              student_mode="simple")
+    out = head + tail
     assert "Respond like a K-12 student would" in out
     assert "imitate" not in out.lower()                      # not the imitate prompt
     assert CTX in out
 
 
 def test_student_mode_expert_loads_v2_students_folder():
-    out = _build_role_prompt("STUDENT", TRANSCRIPT, CTX, prompt_version="v2",
+    head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
+                             student_context=CTX, prompt_version="v2",
                              student_mode="expert")
+    out = head + tail
     assert "very strong" in out
     assert "no mistakes" in out
 
 
 def test_student_mode_paraphrase_loads_v2_students_folder():
-    out = _build_role_prompt("STUDENT", TRANSCRIPT, CTX, prompt_version="v2",
+    head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
+                             student_context=CTX, prompt_version="v2",
                              student_mode="paraphrase_with_example")
+    out = head + tail
     assert "paraphrase" in out.lower()
     assert TRANSCRIPT in out
 
 
 def test_student_mode_does_not_affect_tutor_role():
     """student_mode is ignored when role == TUTOR."""
-    out = _build_role_prompt("TUTOR", TRANSCRIPT, CTX, prompt_version="v2",
+    head, tail = _build_role_prompt("TUTOR", transcript_prefix=TRANSCRIPT, extra="",
+                             student_context=CTX, prompt_version="v2",
                              student_mode="imitate_example")
+    out = head + tail
     assert "online tutor" in out
     assert "imitate" not in out.lower()

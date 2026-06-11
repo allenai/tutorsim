@@ -38,7 +38,7 @@ archetype_annotators:
 
 # Annotator pipeline defaults (override any of these with CLI flags)
 annotator:
-  prompt_version: v11          # prompt version for detection + annotation
+  prompt_version: v13          # prompt version for detection + annotation
   # Labeller routes per annotation_type. Each value names a file in
   # prompts/annotator/labeller/ (without .txt). Scaffolding and rapport humans
   # rate the partial cell differently; this routing was validated on the
@@ -65,7 +65,7 @@ profiles:
     thinking: true
     thinking_budget: 16384
     annotate:
-      context_window: 20
+      context_window: 50
     advisor:
       timeout: 300
 
@@ -77,7 +77,7 @@ profiles:
     thinking: true
     thinking_budget: 16384
     annotate:
-      context_window: 20
+      context_window: 50
     advisor:
       timeout: 300
 
@@ -89,7 +89,7 @@ profiles:
     thinking: true
     thinking_budget: 16384
     annotate:
-      context_window: 20
+      context_window: 50
     advisor:
       timeout: 300
 
@@ -104,18 +104,36 @@ profiles:
     tutor:
       max_tokens: 65536
     annotate:
-      context_window: 20
+      context_window: 50
     advisor:
       timeout: 300
 
   anthropic:
-    model: claude-opus-4-6
+    model: claude-opus-4-8
+    max_tokens: 128000
+    mode: batch
+    poll_interval: 60
+    # opus-4-8 uses adaptive thinking: the client sends {type: adaptive} and the
+    # model controls depth. There is no budget/effort knob -- thinking_budget and
+    # reasoning_effort are intentionally absent (the Anthropic client ignores both
+    # on 4.8). See _anthropic_thinking_param in annotator/core/client.py.
+    thinking: true
+    tutor:
+      max_tokens: 65536
+    annotate:
+      context_window: 20
+    advisor:
+      timeout: 300
+
+  anthropic46:
+    model: claude-opus-4-6           # default for student / detect / annotate / label / advisor
     max_tokens: 128000
     mode: batch
     poll_interval: 60
     thinking: true
     thinking_budget: 16384
     tutor:
+      model: claude-opus-4-8         # tutor on latest; all other phases on 4-6
       max_tokens: 65536
     annotate:
       context_window: 20
@@ -133,8 +151,8 @@ profiles:
     tutor:
       max_tokens: 65536
     annotate:
-      model: claude-opus-4-6         # annotation uses Claude
-      context_window: 20
+      model: claude-opus-4-6         # annotation uses Claude (4-6, matches anthropic profile)
+      context_window: 50
     label:
       model: claude-opus-4-6
     advisor:
@@ -158,16 +176,16 @@ batch:
 benchmark:
   version: null                # null = auto-generate as {tutor_profile}_{date}
   scenarios:
-    mode: detected                # detected | random | both
+    mode: human                   # detected | random | both | human
     max_scenarios: 0
     random_count: 50
     random_seed: 42
     min_turn: 10
 
   exchange:
-    num_turns: 2
+    max_turns: 100               # was: num_turns: 2 — tutor decides end via [END]/[NEXT_PROBLEM]; this is a hard cap on generated turns
     poll_interval: 60
-    prompt_version: v2           # tutor/student system prompt version
+    prompt_version: v5           # v5 = rewritten tutor prompt, [NEW_MESSAGE] delimiter, [NEXT_PROBLEM] only
 
   tutor_profiles:
     - anthropic
@@ -183,6 +201,9 @@ benchmark:
     # Set to null to fall back to {prompt_version}/student_system.txt (v1 behavior).
     mode: imitate_example
 
+  tutor:
+    mode: null         # null = default v5 tutor; "oracle" = mimic real tutor (sees post-cut)
+
   detect:
     profile: anthropic
     prompt_version: v5
@@ -194,7 +215,7 @@ benchmark:
       - generous
       - balanced
       - demanding
-    context_window: 20
+    context_window: 50
     mode: batch
     poll_interval: 60
 

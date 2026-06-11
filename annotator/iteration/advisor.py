@@ -5,8 +5,15 @@ Two entry points:
   # Gemini advisor -- sends error examples + current prompt for analysis
   python -m annotator.iteration.advisor --pass detection --version v2 --type scaffolding
   python -m annotator.iteration.advisor --pass annotation --version v2 --type rapport
+  python -m annotator.iteration.advisor --pass annotation_compare --version v2 --type rapport
+  python -m annotator.iteration.advisor --pass annotation_excerpt --version v2 --type rapport
   python -m annotator.iteration.advisor --pass annotation_draft --version v2 --type rapport
   python -m annotator.iteration.advisor --pass detection_draft --version v2 --type scaffolding
+
+  # annotation vs annotation_compare vs annotation_excerpt:
+  #   annotation         -- includes tutoring transcript excerpts alongside SAR descriptions
+  #   annotation_compare -- omits excerpts; shows full (untruncated) SAR descriptions only
+  #   annotation_excerpt -- shows only transcript excerpts + labels; omits SAR descriptions entirely
 
   # Detection disagreement analysis -- detailed error breakdown
   python -m annotator.iteration.advisor analyze --version v1
@@ -245,6 +252,7 @@ def collect_teacher_examples(ann_type: str, transcripts: dict,
                 "moments": span_moments,
             })
 
+    random.shuffle(all_units)
     total = len(all_units)
     n_batches = max(1, (total + batch_size - 1) // batch_size)
     start = batch_idx * batch_size
@@ -275,24 +283,36 @@ def collect_teacher_examples(ann_type: str, transcripts: dict,
     return "".join(lines), batch_info, n_batches
 
 
-def _format_human_annotators(annotators: list[dict]) -> str:
+def _format_human_annotators(annotators: list[dict], truncate: bool = True) -> str:
     """Format up to 5 sampled human annotators' SAR text for display."""
     lines = []
     for j, ann in enumerate(annotators):
+        s = ann['situation'][:300] if truncate else ann['situation']
+        a = ann['action'][:300] if truncate else ann['action']
+        r = ann['result'][:300] if truncate else ann['result']
         lines.append(f"    Annotator {j+1} [{ann['label']}]:\n"
-                     f"      S: {ann['situation'][:300]}\n"
-                     f"      A: {ann['action'][:300]}\n"
-                     f"      R: {ann['result'][:300]}\n")
+                     f"      S: {s}\n"
+                     f"      A: {a}\n"
+                     f"      R: {r}\n")
     return "".join(lines)
 
 
 def collect_annotation_errors(version, ann_type, transcripts, limit=10,
                                ground_truth=None, annotator_style=None,
-                               profile=None):
+                               profile=None, show_excerpts=True, show_sar=True):
     """Collect annotation disagreements and agreements for comprehensive analysis.
 
     If ground_truth is provided, uses it directly (allows archetype filtering).
     Otherwise loads from data/ground_truth.json.
+
+    When show_excerpts=False, transcript excerpts are omitted and SAR text is
+    shown in full (untruncated) — useful for side-by-side annotation comparison.
+
+    When show_sar=False, situation/action/result text is omitted entirely for
+    both human annotators and the LLM -- only the human consensus label, the
+    LLM label, and (if show_excerpts is True) transcript excerpts are shown
+    (no per-annotator labels). Useful for judging moments from the transcript
+    alone, without anchoring on existing SAR descriptions.
     """
     from ..eval.eval import (
         EFFECTIVENESS_LABELS, match_gold_direct, map_to_binary,
@@ -407,44 +427,66 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
     examples.append(f"=== AGREEMENTS ({len(agreements)} total, showing {min(limit, len(agreements))}) ===")
     examples.append("These are cases where human and LLM annotations produced the same label. Study what makes these work.\n")
     for i, d in enumerate(agreements[:limit]):
-        excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
-        human_block = _format_human_annotators(d["human_annotators"])
-        examples.append(
-            f"Agreement {i+1}: turns {d['turn_start']}-{d['turn_end']} (both={d['human_label']})\n"
-            f"  Transcript:\n{excerpt}\n"
-            f"  HUMAN ({len(d['human_annotators'])} annotator(s) sampled):\n{human_block}"
-            f"  LLM:\n"
-            f"    S: {d['llm_situation'][:300]}\n"
-            f"    A: {d['llm_action'][:300]}\n"
-            f"    R: {d['llm_result'][:300]}\n"
-        )
+        block = f"Agreement {i+1}: turns {d['turn_start']}-{d['turn_end']} (both={d['human_label']})\n"
+        if show_excerpts:
+            excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
+            block += f"  Transcript:\n{excerpt}\n"
+        if show_sar:
+            human_block = _format_human_annotators(d["human_annotators"], truncate=show_excerpts)
+            llm_s = d['llm_situation'][:300] if show_excerpts else d['llm_situation']
+            llm_a = d['llm_action'][:300] if show_excerpts else d['llm_action']
+            llm_r = d['llm_result'][:300] if show_excerpts else d['llm_result']
+            block += (
+                f"  HUMAN ({len(d['human_annotators'])} annotator(s) sampled):\n{human_block}"
+                f"  LLM:\n"
+                f"    S: {llm_s}\n"
+                f"    A: {llm_a}\n"
+                f"    R: {llm_r}\n"
+            )
+        examples.append(block)
 
     # Then disagreements grouped by confusion type
     by_confusion = defaultdict(list)
     for d in disagreements:
         by_confusion[f"{d['human_label']}_vs_{d['llm_label']}"].append(d)
 
+    total_disagreements = sum(len(c) for c in by_confusion.values())
+    total_budget = len(by_confusion) * limit
     total_shown = 0
     for confusion_type, cases in sorted(by_confusion.items(), key=lambda x: -len(x[1])):
         dense = [d for d in cases if d["n_annotators"] >= 3]
         pool = dense if dense else cases
         source_note = "" if dense else " (no >=3-annotator cases; using full pool)"
-        examples.append(f"\n=== {confusion_type.upper()} ({len(cases)} total, showing {min(limit, len(pool))}{source_note}) ===\n")
+        type_limit = max(1, round(total_budget * len(cases) / total_disagreements)) if total_disagreements else limit
+        examples.append(f"\n=== {confusion_type.upper()} ({len(cases)} total, showing {min(type_limit, len(pool))}{source_note}) ===\n")
 
-        for i, d in enumerate(pool[:limit]):
-            excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
-            human_block = _format_human_annotators(d["human_annotators"])
-            examples.append(
+        for i, d in enumerate(pool[:type_limit]):
+            block = (
                 f"Disagreement {total_shown + i + 1}: turns {d['turn_start']}-{d['turn_end']}\n"
-                f"  Transcript:\n{excerpt}\n"
-                f"  HUMAN consensus={d['human_label']} ({len(d['human_annotators'])} annotator(s) sampled):\n"
-                f"{human_block}"
-                f"  LLM ({d['llm_label']}):\n"
-                f"    S: {d['llm_situation'][:300]}\n"
-                f"    A: {d['llm_action'][:300]}\n"
-                f"    R: {d['llm_result'][:300]}\n"
             )
-        total_shown += min(limit, len(cases))
+            if show_excerpts:
+                excerpt = get_excerpt(transcripts, d["conv_id"], d["turn_start"], d["turn_end"])
+                block += f"  Transcript:\n{excerpt}\n"
+            if show_sar:
+                human_block = _format_human_annotators(d["human_annotators"], truncate=show_excerpts)
+                llm_s = d['llm_situation'][:300] if show_excerpts else d['llm_situation']
+                llm_a = d['llm_action'][:300] if show_excerpts else d['llm_action']
+                llm_r = d['llm_result'][:300] if show_excerpts else d['llm_result']
+                block += (
+                    f"  HUMAN consensus={d['human_label']} ({len(d['human_annotators'])} annotator(s) sampled):\n"
+                    f"{human_block}"
+                    f"  LLM ({d['llm_label']}):\n"
+                    f"    S: {llm_s}\n"
+                    f"    A: {llm_a}\n"
+                    f"    R: {llm_r}\n"
+                )
+            else:
+                block += (
+                    f"  Human consensus: {d['human_label']}\n"
+                    f"  LLM label: {d['llm_label']}\n"
+                )
+            examples.append(block)
+        total_shown += min(type_limit, len(pool))
 
     stats = {
         "total_pairs": sum(confusion_counts.values()),
@@ -561,7 +603,8 @@ def main():
         description="Single-shot Gemini advisor for prompt iteration"
     )
     parser.add_argument("--pass", dest="pass_type", required=True,
-                        choices=["detection", "annotation", "annotation_draft", "detection_draft"],
+                        choices=["detection", "annotation", "annotation_compare",
+                                 "annotation_excerpt", "annotation_draft", "detection_draft"],
                         help="Which pass to iterate on")
     parser.add_argument("--version", required=True,
                         help="Results version to analyze (e.g. v2)")
@@ -572,8 +615,8 @@ def main():
                         help="Model name (overrides config)")
     parser.add_argument("--profile", default=None,
                         help="Config profile to use (overrides config.yaml default)")
-    parser.add_argument("--limit", type=int, default=20,
-                        help="Max examples per error category (default: 20)")
+    parser.add_argument("--limit", type=int, default=10,
+                        help="Max examples per error category (default: 10)")
     parser.add_argument("--prompt-version", default=None,
                         help="Prompt version to load (default: same as --version)")
     parser.add_argument("--iou-threshold", type=float, default=0.5,
@@ -689,9 +732,10 @@ def main():
             ground_truth=filtered_gt, annotator_style=args.annotator_style,
             max_annotators=max_annotators,
         )
-        print(f"{mode_label}: {n_batches} batch(es) of {args.batch_size} moments each")
+        max_batches = min(5, n_batches)
+        print(f"{mode_label}: {n_batches} batch(es) of {args.batch_size} moments each (capped at {max_batches})")
 
-        for batch_idx in range(n_batches):
+        for batch_idx in range(max_batches):
             teacher_examples, batch_info, _ = collect_teacher_examples(
                 ann_type=args.type, transcripts=transcripts,
                 batch_size=args.batch_size, batch_idx=batch_idx,
@@ -747,11 +791,18 @@ def main():
         # Strip the {annotator_style} placeholder (no style injection)
         current_prompt = current_prompt.replace("{annotator_style}", "")
 
+        # annotation_compare: omit transcript excerpts, show full SAR text
+        # annotation_excerpt: show transcript excerpts only, omit SAR text entirely
+        show_excerpts = args.pass_type != "annotation_compare"
+        show_sar = args.pass_type != "annotation_excerpt"
+
         error_examples, stats = collect_annotation_errors(
             args.version, args.type, transcripts, limit=args.limit,
             ground_truth=filtered_gt,
             annotator_style=args.annotator_style,
             profile=profile_name,
+            show_excerpts=show_excerpts,
+            show_sar=show_sar,
         )
         confusion_summary = ", ".join(f"{k}: {v}" for k, v in stats["confusion_counts"].items())
 
@@ -767,10 +818,14 @@ def main():
             print(f"Eval metrics: binary_kappa={eval_metrics.get('binary_kappa', 0):.4f}, "
                   f"3way_kappa={eval_metrics.get('three_way_kappa', 0):.4f}")
 
-        # Always use the regular annotation meta-prompt.
-        # When --annotator-style is set, the only difference is that
-        # error examples come from the archetype-filtered ground truth.
-        advisor_prompt_path = ANNOTATOR_PROMPTS_DIR / "advisor_annotation.md"
+        # annotation_excerpt uses its own meta-prompt (tuned for excerpt-only,
+        # label-only examples); annotation and annotation_compare share the
+        # regular annotation meta-prompt. When --annotator-style is set, the
+        # only further difference is that error examples come from the
+        # archetype-filtered ground truth.
+        meta_prompt_filename = ("advisor_annotation_excerpt.md" if args.pass_type == "annotation_excerpt"
+                                else "advisor_annotation.md")
+        advisor_prompt_path = ANNOTATOR_PROMPTS_DIR / meta_prompt_filename
         with open(advisor_prompt_path, "r", encoding="utf-8") as f:
             meta_template = f.read()
         meta_prompt = meta_template.format(
@@ -813,9 +868,14 @@ def main():
         advice = {"raw_text": response.text}
 
     # Save to results directory
+    # annotation_compare and annotation_excerpt use the same advisor logic as
+    # annotation; name them accordingly with a variant suffix.
+    variant_suffixes = {"annotation_compare": "_compare", "annotation_excerpt": "_excerpt"}
+    variant_suffix = variant_suffixes.get(args.pass_type, "")
+    pass_label = "annotation" if variant_suffix else args.pass_type
     profile_suffix = f"_{profile_name}" if profile_name else ""
     style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
-    filename = f"advisor_{args.pass_type}_{args.type}{profile_suffix}{style_suffix}.json"
+    filename = f"advisor_{pass_label}_{args.type}{variant_suffix}{profile_suffix}{style_suffix}.json"
     save_annotator_result(args.version, filename, advice)
     print(f"\nSaved: {filename} (version: {args.version})")
 

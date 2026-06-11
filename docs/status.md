@@ -1,6 +1,67 @@
 # Project Status
 
-*Last updated: 2026-06-01*
+*Last updated: 2026-06-10*
+
+## Recently Shipped: Oracle Tutor Mode + Prompt Caching + Trait Students (2026-06-10)
+
+Three benchmark features shipped today:
+
+1. **Oracle tutor mode** (`benchmark.tutor.mode: oracle`) -- new prompt
+   `prompts/benchmark/v5/tutors/oracle.txt` that gives the AI tutor the
+   post-cut real human turns and instructs it to mimic the real tutor's
+   style / pedagogy. Tutor-side ceiling cell for the experimental matrix.
+2. **Trait-generated student** (`benchmark.student.mode: trait`) -- per-
+   scenario LLM-generated persona (prefix-only, oracle-safe), cached at
+   `results/benchmark/_trait_cache/<conv_id>__<cut_turn>.json`.
+3. **Prompt caching** -- `ModelClient.generate(cacheable_prefix=...)` puts
+   the static head (system + transcript_prefix [+ reference / persona]) into
+   Anthropic's `cache_control: ephemeral` block. Cuts Phase 1 input-token
+   cost ~85% on multi-round exchanges. OpenAI auto-caches via byte-identical
+   concatenation. Gemini stub for future.
+
+Plus: model split -- tutor uses `claude-opus-4-8`; all other phases (student,
+detect, annotate, label, advisor, trait generator) use `claude-opus-4-6`.
+
+Specs / plans under `docs/plans/specs/2026-06-10-*.md` and `docs/plans/2026-06-10-*.md`.
+
+---
+
+## Previously Shipped: Modal Cut Selection (2026-06-09)
+
+Benchmark human-mode scenario extraction now clusters moments by exact turn-range
+and picks the modal teacher cut (smallest on tie) per cluster. Role-adjusts the
+chosen cut so the AI tutor always speaks first (TUTOR cut -> cut - 1).
+
+- New helpers in `benchmark/core/scenarios.py`: `_pick_modal_cut`, `_role_adjust_cut`,
+  `_pick_representative_member`.
+- `scenario_id` format: `{conv_id}__hum_{turn_start}_{turn_end}` (range-based, stable).
+- `Scenario.detection` gains `chosen_cut_turn`, `cut_votes`, `cluster_size`.
+- Scope: **926 scenarios** across 115 conversations (down from 2,975 raw moments;
+  ~3.2x dedup). 7.6% are role-adjusted off a TUTOR cut.
+
+Spec: [plans/specs/2026-06-09-modal-cut-selection-design.md](plans/specs/2026-06-09-modal-cut-selection-design.md)
+Plan: [plans/2026-06-09-modal-cut-selection.md](plans/2026-06-09-modal-cut-selection.md)
+
+---
+
+## Previously Shipped: Human Key Moments as Benchmark Source (2026-06-08)
+
+The benchmark default scenario source is now human-annotated key moments from
+`data/ground_truth_hybrid/`, filtered to `situation_label_agg in {scaffolding, rigor}`
+and presence of an annotator-chosen `cut_turn`. Synthetic-detection mode (`detected`)
+remains available for reproducing prior runs.
+
+- New `extract_human_scenarios()` in `benchmark/core/scenarios.py`; `Scenario.detection`
+  is shape-compatible with the existing detected-mode path so nothing downstream changes.
+- Default `scenarios.mode: human` in `config.yaml`.
+- IoU clustering threshold in `data/build_ground_truth.py` tightened 0.7 -> 1.0 so only
+  exact turn-range matches cluster across annotators.
+- Current scope post-resync: 2,975 scaffolding/rigor scenarios across 115 conversations.
+
+Spec: [plans/specs/2026-06-08-human-key-moments-benchmark-design.md](plans/specs/2026-06-08-human-key-moments-benchmark-design.md)
+Plan: [plans/2026-06-08-human-key-moments-benchmark.md](plans/2026-06-08-human-key-moments-benchmark.md)
+
+---
 
 ## Recently Shipped: Benchmark Student Modes (2026-06-01)
 

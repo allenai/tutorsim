@@ -23,14 +23,16 @@ Output format — one JSON file per conversation:
         "situation": "<str>",
         "action": "<str>",
         "result": "<str>",
-        "strategy_label": "effective" | "partial" | "ineffective",
+        "strategy_label": "effective" | "partial" | "ineffective" | "unclear",  # "unclear" = junk text or unparseable model response
         "situation_label": {      # scaffolding moments only
           "scaffolding": "yes" | "no" | "unclear" | "no_mention",
           "rigor": "yes" | "no" | "unclear" | "no_mention"
         },
-        "situation_label_agg": "both" | "scaffolding" | "rigor" | "neither" | "mixed" | "unknown",  # scaffolding only; majority-voted across overlapping annotators (IoU >= 0.7), no_mention/unclear → no; "mixed" = tie, "unknown" = no annotator gave signal
+        "situation_label_agg": "both" | "scaffolding" | "rigor" | "neither" | "mixed" | "unknown",  # scaffolding only; majority-voted across overlapping annotators (IoU == 1.0, i.e. exact turn-range match), no_mention/unclear → no; "mixed" = tie, "unknown" = no annotator gave signal
         "action_decomposed": ["<str>", ...],  # atomic facets of the action field
         "result_decomposed": ["<str>", ...],  # atomic facets of the result field
+        "action_direction_agg": "scaffolding" | "rigor" | "neither" | "both" | "unclear" | "unknown",  # scaffolding only; classify_action.md run once on the union of action_decomposed facets across an IoU>=1.0 cluster (one contribution per annotator); same label written to every moment in the cluster; "unclear" = unparseable model response; "unknown" = cluster had no action facets to classify (no annotator contributed an action_decomposed facet)
+        "student_outcome_agg": "pos" | "neg" | "no_evidence" | "unclear",  # scaffolding only; classify_student_result.md run once on the union of result_decomposed facets across an IoU>=1.0 cluster (one contribution per annotator); same label written to every moment in the cluster; mutually-exclusive choice between trending toward demonstrated understanding ("pos") and misconceptions predominantly remaining ("neg"); "no_evidence" = cluster had no result facets to classify; "unclear" = unparseable model response
         "cut_turn": <int>,          # optional — annotator-chosen benchmark cut point
         "moment_id": "<str>"        # optional — links cut point to its parent moment
       },
@@ -67,6 +69,15 @@ from annotator.core.decompose import (
     _load_prompt as _load_decompose_prompt,
     _parse_decomposed,
 )
+from annotator.core.structure import (
+    ACTION_PROMPT_PATH,
+    RESULT_PROMPT_PATH,
+    DEFAULT_RESULT_LABEL,
+    _load_prompt as _load_structure_prompt,
+    _format_facet_list,
+    _parse_action_label,
+    _parse_result_label,
+)
 from annotator.core.utils import compute_iou
 
 ANNOTATIONS_JSONL = DATA_DIR / "teacher_annotations" / "step_up_annotations.jsonl"
@@ -75,15 +86,18 @@ GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts" / "annotator" / "labeller"
 
 
-def load_from_jsonl(path):
+def load_from_jsonl(path, annotation_types=("scaffolding", "rapport")):
     """Load annotations from a step_up_annotations.jsonl file.
 
     Returns list of (conv_id, conv_data) sorted by conv_id, where conv_data is:
       {"annotations": [...], "num_turns": <int>}
 
-    Caption records are skipped. turn_number_start/end are mapped to turn_start/end.
-    annotator_id and annotation_type are promoted from the record level to each moment.
-    num_turns is the max turn_end seen across all moments for that conversation.
+    Only records whose annotation_type is in `annotation_types` are kept (caption
+    records are always skipped). Pass annotation_types=("scaffolding",) for a
+    scaffolding-only build; conversations left with no matching records are omitted
+    entirely. turn_number_start/end are mapped to turn_start/end. annotator_id and
+    annotation_type are promoted from the record level to each moment. num_turns is
+    the max turn_end seen across all kept moments for that conversation.
     """
     from collections import defaultdict
 
@@ -94,7 +108,7 @@ def load_from_jsonl(path):
             if not line:
                 continue
             record = json.loads(line)
-            if record.get("annotation_type") not in ("scaffolding", "rapport"):
+            if record.get("annotation_type") not in annotation_types:
                 continue
             conv_id = record["transcript_id"]
             annotator_id = record.get("annotator_id", "")
@@ -232,6 +246,99 @@ def load_existing_decompositions():
     return existing
 
 
+def load_existing_action_result_agg():
+    """Return {conv_id: {cluster_signature: cached_entry}} for cache reuse, where
+    cached_entry is {"unified_action", "unified_result", "action_direction_agg",
+    "student_outcome_agg"} and cluster_signature = frozenset(moment_key(m) for m
+    in the cluster).
+
+    Re-derives clusters from each existing ground truth file's scaffolding moments
+    via _scaffolding_clusters — clustering is a pure function of turn ranges and
+    annotator_id, so it reproduces identically run-to-run when the underlying
+    moments are unchanged. Reconstructing the unified facet lists this way (rather
+    than storing a hash) lets us detect drift: if re-decomposition changed a
+    moment's action_decomposed/result_decomposed, the freshly unified list will
+    differ from the cached one and the cluster gets reclassified.
+    """
+    existing = {}
+    if not GROUND_TRUTH_DIR.exists():
+        return existing
+    for f in GROUND_TRUTH_DIR.glob("*.json"):
+        with open(f, "r", encoding="utf-8") as fp:
+            d = json.load(fp)
+        cache = {}
+        for cluster_indices, cluster_moments in _scaffolding_clusters(d.get("key_moments", [])):
+            agg_a = next((m["action_direction_agg"] for m in cluster_moments
+                          if "action_direction_agg" in m), None)
+            agg_r = next((m["student_outcome_agg"] for m in cluster_moments
+                          if "student_outcome_agg" in m), None)
+            if agg_a is None and agg_r is None:
+                continue
+            unified_action, unified_result = _unify_facets(cluster_moments)
+            sig = frozenset(moment_key(m) for m in cluster_moments)
+            cache[sig] = {
+                "unified_action": unified_action,
+                "unified_result": unified_result,
+                "action_direction_agg": agg_a,
+                "student_outcome_agg": agg_r,
+            }
+        if cache:
+            existing[f.stem] = cache
+    return existing
+
+
+def _invalidate_agg_cache(cache, field):
+    """Return a copy of the agg cache with the targeted agg label(s) cleared so
+    plan_action_result_agg reclassifies them while still reusing the other field.
+
+    field:
+      - "action": clear action_direction_agg (reclassify action, reuse result)
+      - "result": clear student_outcome_agg (reclassify result, reuse action)
+      - "both":   drop the whole cache (reclassify both, the original
+                  --refresh-agg behavior)
+
+    Clearing means setting the cached label to None, which makes
+    plan_action_result_agg's `... is not None` reuse predicate fail for that
+    field. The untouched field's cached label and unified-facet list remain, so
+    it reuses normally when its facets are unchanged. The input cache is not
+    mutated.
+    """
+    if field == "both":
+        return {}
+    key = "action_direction_agg" if field == "action" else "student_outcome_agg"
+    return {
+        conv_id: {sig: {**entry, key: None} for sig, entry in clusters.items()}
+        for conv_id, clusters in cache.items()
+    }
+
+
+def _invalidate_decomp_cache(cache, field):
+    """Return a copy of the decomposition cache with the targeted field's cached
+    facets cleared so the main planning loop re-decomposes them instead of reusing.
+
+    The decomp cache keys on a content hash of the action/result text, NOT on the
+    decompose prompt, so editing decompose_action.md / decompose_result.md does not
+    invalidate it on its own. --refresh-decomp forces re-decomposition.
+
+    field:
+      - "action": clear cached action facets (re-decompose action, reuse result)
+      - "result": clear cached result facets (re-decompose result, reuse action)
+      - "both":   drop the whole cache (re-decompose both)
+
+    Re-decomposition cascades to the action/result aggregation automatically: when
+    new facets differ from the cached unified-facet list, plan_action_result_agg
+    already detects the drift and reclassifies; identical facets reuse the agg
+    label. The input cache is not mutated.
+    """
+    if field == "both":
+        return {}
+    clear = "action" if field == "action" else "result"
+    return {
+        conv_id: {**sub, clear: {}}
+        for conv_id, sub in cache.items()
+    }
+
+
 def decompose_batch(items):
     """Batch decompose action and result fields into atomic facets.
 
@@ -291,6 +398,108 @@ def decompose_batch(items):
         results[key] = facets
 
     return results
+
+
+def action_direction_classify_batch(items):
+    """Batch classify unified action facet lists into scaffolding/rigor direction.
+
+    Mirrors structure.py's action classification (same prompt + parser), but runs
+    once per scaffolding cluster on the cluster's unified action_decomposed facets
+    rather than once per individual annotation.
+
+    items: list of {key, facets}. Returns {key: action_label}.
+    """
+    if not items:
+        return {}
+    from annotator.core.client import ModelClient, run_batch, build_batch_entry
+    from annotator.core.config import get_phase_config
+
+    cfg = get_phase_config("label")
+    client = ModelClient(cfg["model"])
+    template = _load_structure_prompt(ACTION_PROMPT_PATH)
+
+    entries = [
+        build_batch_entry(key=it["key"],
+                          prompt_text=template.replace("{action_list}", _format_facet_list(it["facets"])),
+                          json_mode=True)
+        for it in items
+    ]
+
+    print(f"  Submitting {len(entries)} action direction classifications to batch API "
+          f"(model={cfg['model']})...")
+    results = run_batch(
+        client, entries,
+        json_mode=True,
+        display_name="action_direction_agg_classification",
+        poll_interval=cfg.get("poll_interval", 60),
+        thinking=cfg.get("thinking", False),
+        thinking_budget=cfg.get("thinking_budget", 0),
+        reasoning_effort=cfg.get("reasoning_effort", ""),
+    )
+
+    labels = {}
+    for key, result in results.items():
+        if "error" in result or not result.get("text"):
+            print(f"  WARNING: error for {key}: {result.get('error', 'no text')}")
+            labels[key] = "unclear"
+            continue
+        label, had_error = _parse_action_label(result["text"])
+        if had_error:
+            print(f"  WARNING: could not parse action direction label for {key}: {result['text'][:100]!r}")
+        labels[key] = label
+
+    return labels
+
+
+def student_outcome_classify_batch(items):
+    """Batch classify unified result facet lists into a student-outcome verdict.
+
+    Mirrors structure.py's result classification (same prompt + parser), but runs
+    once per scaffolding cluster on the cluster's unified result_decomposed facets
+    rather than once per individual annotation.
+
+    items: list of {key, facets}. Returns {key: result_label str}.
+    """
+    if not items:
+        return {}
+    from annotator.core.client import ModelClient, run_batch, build_batch_entry
+    from annotator.core.config import get_phase_config
+
+    cfg = get_phase_config("label")
+    client = ModelClient(cfg["model"])
+    template = _load_structure_prompt(RESULT_PROMPT_PATH)
+
+    entries = [
+        build_batch_entry(key=it["key"],
+                          prompt_text=template.replace("{student_list}", _format_facet_list(it["facets"])),
+                          json_mode=False)
+        for it in items
+    ]
+
+    print(f"  Submitting {len(entries)} student outcome classifications to batch API "
+          f"(model={cfg['model']})...")
+    results = run_batch(
+        client, entries,
+        json_mode=False,
+        display_name="student_outcome_agg_classification",
+        poll_interval=cfg.get("poll_interval", 60),
+        thinking=cfg.get("thinking", False),
+        thinking_budget=cfg.get("thinking_budget", 0),
+        reasoning_effort=cfg.get("reasoning_effort", ""),
+    )
+
+    labels = {}
+    for key, result in results.items():
+        if "error" in result or not result.get("text"):
+            print(f"  WARNING: error for {key}: {result.get('error', 'no text')}")
+            labels[key] = "unclear"
+            continue
+        result_label, had_error = _parse_result_label(result["text"])
+        if had_error:
+            print(f"  WARNING: could not parse student outcome label for {key}: {result['text'][:100]!r}")
+        labels[key] = result_label
+
+    return labels
 
 
 def situation_classify_batch(items):
@@ -420,7 +629,7 @@ def _normalize_sit(val):
     return val  # "yes", "no", or "no_mention"
 
 
-def _cluster_by_iou(moments, threshold=0.7):
+def _cluster_by_iou(moments, threshold=1.0):
     """Group moment indices into IoU-based connected-component clusters.
 
     Same-annotator pairs are not directly linked (but may be transitively grouped).
@@ -456,6 +665,49 @@ def _cluster_by_iou(moments, threshold=0.7):
     return list(clusters.values())
 
 
+def _scaffolding_clusters(moments, threshold=1.0):
+    """Cluster scaffolding moments in `moments` by IoU >= threshold.
+
+    Shared by situation_label_agg, action_direction_agg/student_outcome_agg
+    computation, and cache reconstruction so all three agree on cluster membership.
+
+    Returns a list of (cluster_indices, cluster_moments), where cluster_indices
+    are indices into `moments` and cluster_moments are the corresponding dicts
+    (in the same order).
+    """
+    scaf_idxs = [i for i, m in enumerate(moments) if m.get("annotation_type") == "scaffolding"]
+    if not scaf_idxs:
+        return []
+    scaf_moments = [moments[i] for i in scaf_idxs]
+    clusters = _cluster_by_iou(scaf_moments, threshold=threshold)
+    return [
+        ([scaf_idxs[ci] for ci in cluster], [scaf_moments[ci] for ci in cluster])
+        for cluster in clusters
+    ]
+
+
+def _unify_facets(cluster_moments):
+    """Concatenate action_decomposed / result_decomposed across a cluster's moments.
+
+    Keeps one contribution per annotator (first occurrence), mirroring the
+    situation_label_agg dedup so an annotator with multiple moments transitively
+    grouped into the same cluster isn't double-counted.
+
+    Returns (unified_action_facets, unified_result_facets).
+    """
+    seen_ann = set()
+    unified_action = []
+    unified_result = []
+    for m in cluster_moments:
+        ann_id = m.get("annotator_id", "")
+        if ann_id in seen_ann:
+            continue
+        seen_ann.add(ann_id)
+        unified_action.extend(m.get("action_decomposed") or [])
+        unified_result.extend(m.get("result_decomposed") or [])
+    return unified_action, unified_result
+
+
 def _majority_vote_tuple(tuples):
     """Return the majority (scaf, rigor) tuple, or None on a tie."""
     if not tuples:
@@ -477,23 +729,16 @@ _TUPLE_TO_AGG = {
 def compute_situation_label_agg(moments):
     """Return {idx: agg_label} for each scaffolding moment in `moments`.
 
-    Groups overlapping scaffolding moments (IoU >= 0.7) into clusters,
+    Groups overlapping scaffolding moments (IoU == 1.0, i.e. exact match) into clusters,
     majority-votes the (scaffolding, rigor) tuple (remapping no_mention/unclear → no),
     and maps the winner to 'both'/'scaffolding'/'rigor'/'neither', 'mixed' for ties,
     or 'unknown' when every annotator in the cluster had both slots as no_mention.
     """
-    scaf_idxs = [i for i, m in enumerate(moments) if m.get("annotation_type") == "scaffolding"]
-    if not scaf_idxs:
-        return {}
-    scaf_moments = [moments[i] for i in scaf_idxs]
-    clusters = _cluster_by_iou(scaf_moments)
-
     result = {}
-    for cluster in clusters:
+    for cluster_indices, cluster_moments in _scaffolding_clusters(moments):
         seen_ann = set()
         vote_tuples = []
-        for ci in cluster:
-            m = scaf_moments[ci]
+        for m in cluster_moments:
             ann_id = m.get("annotator_id", "")
             if ann_id in seen_ann:
                 continue
@@ -511,9 +756,82 @@ def compute_situation_label_agg(moments):
         else:
             winner = _majority_vote_tuple(vote_tuples)
             label = "mixed" if winner is None else _TUPLE_TO_AGG.get(winner, "mixed")
-        for ci in cluster:
-            result[scaf_idxs[ci]] = label
+        for idx in cluster_indices:
+            result[idx] = label
     return result
+
+
+def plan_action_result_agg(conv_id, moments, cached_agg, to_action_direction, to_student_outcome):
+    """Plan action_direction_agg / student_outcome_agg for one conversation's clusters.
+
+    For each cluster of overlapping scaffolding moments (IoU >= 1.0), unifies the
+    cluster's action_decomposed / result_decomposed facets (one contribution per
+    annotator, via _unify_facets) and either:
+      - reuses the cached agg label if `cached_agg` has an entry for this exact
+        cluster (same moment_key set) whose cached unified facet list matches the
+        freshly computed one (i.e. nothing upstream changed), or
+      - queues the unified list for classification (appending to
+        to_action_direction / to_student_outcome), or
+      - short-circuits to the documented default when the unified list is empty
+        ("unknown" / DEFAULT_RESULT_LABEL). "unknown" mirrors situation_label_agg's
+        use of the same value for "no annotator gave signal" -- distinct from
+        "neither" (a substantive scaffolding-vs-rigor verdict the model never had
+        a chance to make) and from "unclear" (a parse-failure fallback meaning the
+        model answered but we couldn't read it); structure.py's analogous no-facets
+        default stays "neither" since that pipeline classifies per-annotation
+        rather than aggregating gold. This is distinct from a cache hit: it fires
+        even on a cold cache, whenever no annotator in the cluster contributed any
+        action/result facets, so it's reported separately from "reuse".
+
+    Returns a list of (cluster_indices, action_item, result_item) where each item
+    is ("reuse", value) | ("default", value) | ("classify", batch_key) — "reuse"
+    and "default" both resolve to `value` directly, "classify" is resolved against
+    the batch results once classify_batch has run.
+    """
+    cached_convo = cached_agg.get(conv_id, {})
+    plan = []
+    for cluster_indices, cluster_moments in _scaffolding_clusters(moments):
+        unified_action, unified_result = _unify_facets(cluster_moments)
+        sig = frozenset(moment_key(m) for m in cluster_moments)
+        cached_entry = cached_convo.get(sig)
+        tag = "_".join(str(i) for i in cluster_indices)
+
+        if (cached_entry and cached_entry["action_direction_agg"] is not None
+                and cached_entry["unified_action"] == unified_action):
+            action_item = ("reuse", cached_entry["action_direction_agg"])
+        elif unified_action:
+            akey = f"{conv_id}__{tag}__action_agg"
+            to_action_direction.append({"key": akey, "facets": unified_action})
+            action_item = ("classify", akey)
+        else:
+            action_item = ("default", "unknown")
+
+        if (cached_entry and cached_entry["student_outcome_agg"] is not None
+                and cached_entry["unified_result"] == unified_result):
+            result_item = ("reuse", cached_entry["student_outcome_agg"])
+        elif unified_result:
+            rkey = f"{conv_id}__{tag}__result_agg"
+            to_student_outcome.append({"key": rkey, "facets": unified_result})
+            result_item = ("classify", rkey)
+        else:
+            result_item = ("default", DEFAULT_RESULT_LABEL)
+
+        plan.append((cluster_indices, action_item, result_item))
+    return plan
+
+
+def _merge_scaffolding_only(new_moments, existing_moments):
+    """Combine freshly built scaffolding moments with non-scaffolding moments
+    preserved from an existing ground truth file.
+
+    Used by --scaffolding-only so a scaffolding-only rebuild doesn't drop rapport
+    moments already on disk: the freshly built scaffolding moments replace ALL
+    existing scaffolding moments (stale ones are dropped), while every existing
+    moment whose annotation_type is not "scaffolding" is carried through unchanged.
+    Returns new_moments followed by the preserved moments.
+    """
+    preserved = [m for m in existing_moments if m.get("annotation_type") != "scaffolding"]
+    return list(new_moments) + preserved
 
 
 def build_moment(ann, label):
@@ -545,6 +863,42 @@ def main():
                              "dir (ground_truth_{labeller}/).")
     parser.add_argument("--input", default=str(ANNOTATIONS_JSONL),
                         help="Path to annotations JSONL file (default: teacher_annotations/step_up_annotations.jsonl)")
+    parser.add_argument("--scaffolding-only", action="store_true",
+                        help="Only build ground truth for scaffolding moments. Rapport "
+                             "records are skipped entirely (no strategy classification, no "
+                             "decomposition). When writing, rapport moments already present "
+                             "in an existing ground truth file are PRESERVED — the freshly "
+                             "built scaffolding moments replace only the scaffolding moments. "
+                             "Conversations with no scaffolding records are left untouched.")
+    parser.add_argument("--refresh-agg", nargs="?", const="both", default=None,
+                        choices=["action", "result", "both"],
+                        help="Bypass the cached aggregation lookup and reclassify every "
+                             "scaffolding cluster from scratch. Bare --refresh-agg (or "
+                             "=both) refreshes both action_direction_agg and "
+                             "student_outcome_agg; =action or =result refreshes only that "
+                             "field while the other is still reused from cache (useful after "
+                             "editing only one of classify_action.md / "
+                             "classify_student_result.md, since cache reuse keys on the "
+                             "unified facets, not the prompt). 'both' is required after "
+                             "changing the IoU clustering threshold: cached entries are keyed "
+                             "by cluster membership, which the new threshold changes, so naive "
+                             "reuse would silently attach a label the LLM computed for a "
+                             "*different* unified-facet set to the new cluster. Per-moment "
+                             "caches (strategy/situation labels, decompositions) are unaffected "
+                             "by clustering and are still reused normally.")
+    parser.add_argument("--refresh-decomp", nargs="?", const="both", default=None,
+                        choices=["action", "result", "both"],
+                        help="Bypass the cached decomposition lookup and re-run "
+                             "decompose_action.md / decompose_result.md from scratch. "
+                             "The decomp cache keys on a content hash of the action/result "
+                             "text, not the prompt, so editing those prompts does NOT "
+                             "invalidate it -- use this flag to pick up prompt changes. "
+                             "Bare --refresh-decomp (or =both) re-decomposes both fields; "
+                             "=action or =result re-decomposes only that one. Re-decomposition "
+                             "cascades to action_direction_agg / student_outcome_agg "
+                             "automatically when the resulting facets change (no separate "
+                             "--refresh-agg needed); unchanged facets keep their agg label. "
+                             "Strategy/situation label caches are unaffected.")
     args = parser.parse_args()
 
     global GROUND_TRUTH_DIR
@@ -556,8 +910,12 @@ def main():
         print(f"ERROR: input file not found: {input_path}")
         return
 
+    annotation_types = ("scaffolding",) if args.scaffolding_only else ("scaffolding", "rapport")
     print(f"Loading annotations from {input_path}...")
-    conversations = load_from_jsonl(input_path)
+    if args.scaffolding_only:
+        print("--scaffolding-only: skipping rapport records; existing rapport moments "
+              "will be preserved on write")
+    conversations = load_from_jsonl(input_path, annotation_types=annotation_types)
     print(f"Loaded {len(conversations)} conversations")
 
     existing_labels = load_existing_labels()
@@ -569,6 +927,21 @@ def main():
     decomp_action_total = sum(len(v.get("action", {})) for v in existing_decompositions.values())
     decomp_result_total = sum(len(v.get("result", {})) for v in existing_decompositions.values())
     print(f"Loaded existing decompositions: {decomp_action_total} action, {decomp_result_total} result")
+    if args.refresh_decomp:
+        existing_decompositions = _invalidate_decomp_cache(existing_decompositions, args.refresh_decomp)
+        decomp_field_desc = {"both": "action and result", "action": "action only",
+                             "result": "result only"}[args.refresh_decomp]
+        print(f"--refresh-decomp={args.refresh_decomp}: re-decomposing {decomp_field_desc}")
+    existing_action_result_agg = load_existing_action_result_agg()
+    if args.refresh_agg:
+        existing_action_result_agg = _invalidate_agg_cache(existing_action_result_agg, args.refresh_agg)
+        field_desc = {"both": "action and result", "action": "action only",
+                      "result": "result only"}[args.refresh_agg]
+        print(f"--refresh-agg={args.refresh_agg}: reclassifying {field_desc} "
+              f"aggregation(s) for scaffolding clusters")
+    else:
+        agg_cache_total = sum(len(v) for v in existing_action_result_agg.values())
+        print(f"Loaded existing action/result aggregations for {len(existing_action_result_agg)} conversations ({agg_cache_total} clusters)")
 
     # First pass: build per-conv plan (reuse vs classify) for both strategy and situation labels
     conv_plans = []
@@ -577,6 +950,7 @@ def main():
     to_decompose = []         # [{key, field, text}]
     situation_plans = {}      # {conv_id: [s_item, ...]} parallel to plan
     decompose_plans = {}      # {conv_id: [(action_item, result_item), ...]} parallel to plan
+    skipped_dup_count = 0
 
     for conv_id, conv_data in conversations:
         annotations = conv_data.get("annotations", [])
@@ -591,6 +965,15 @@ def main():
         s_plan = []
         d_plan = []
         for idx, ann in enumerate(annotations):
+            sit_text = (ann.get("situation") or "").strip()
+            action_text = (ann.get("action") or "").strip()
+            result_text = (ann.get("result") or "").strip()
+            if sit_text and action_text and sit_text == action_text:
+                skipped_dup_count += 1
+                continue
+            if action_text and result_text and action_text == result_text:
+                skipped_dup_count += 1
+                continue
             k = moment_key(ann)
             if k in known:
                 plan.append(("reuse", ann, known[k]))
@@ -648,6 +1031,7 @@ def main():
     decomp_result_reused = sum(1 for dp in decompose_plans.values() for _, r in dp if r[0] == "reuse")
 
     print(f"Plan: {len(conv_plans)} conversations, {total_moments} moments")
+    print(f"  Skipped (situation==action or action==result): {skipped_dup_count}")
     print(f"  Reuse existing strategy labels:   {reused}")
     print(f"  Classify new strategy labels:     {to_class}")
     print(f"  Reuse existing situation labels:  {sit_reused}")
@@ -657,14 +1041,16 @@ def main():
     print(f"  New decompositions (action+result): {len(to_decompose)}")
     print(f"  Brand new conversations:          {new_convs}")
 
+    # Second pass: batch classify strategy labels, situation labels, and decompositions.
+    # Dry runs skip the actual LLM calls; anything that would otherwise be classified
+    # falls back to a placeholder ("unclear" / [] facets) so the action/result
+    # aggregation plan below can still be assembled and previewed.
     if args.dry_run:
-        print("\nDry run — exiting without classifying or writing.")
-        return
-
-    # Second pass: batch classify strategy labels, situation labels, and decompositions
-    new_labels = classify_batch(to_classify, labeller=args.labeller)
-    new_situation_labels = situation_classify_batch(to_situation_classify)
-    new_decompositions = decompose_batch(to_decompose)
+        new_labels, new_situation_labels, new_decompositions = {}, {}, {}
+    else:
+        new_labels = classify_batch(to_classify, labeller=args.labeller)
+        new_situation_labels = situation_classify_batch(to_situation_classify)
+        new_decompositions = decompose_batch(to_decompose)
 
     def _resolve_situation(s_item):
         if s_item is None:
@@ -673,9 +1059,9 @@ def main():
             return s_item[1]
         return new_situation_labels.get(s_item[1], {"scaffolding": "unclear", "rigor": "unclear"})
 
-    # Third pass: write ground truth files
-    GROUND_TRUTH_DIR.mkdir(parents=True, exist_ok=True)
-    gt_written = 0
+    # Third pass: build moments (everything except action_direction_agg / student_outcome_agg,
+    # which require the unified per-cluster facet lists assembled below)
+    conv_moments = {}  # {conv_id: (conv_data, moments)}
     for conv_id, conv_data, plan in conv_plans:
         s_plan = situation_plans[conv_id]
         d_plan = decompose_plans[conv_id]
@@ -698,18 +1084,76 @@ def main():
         agg = compute_situation_label_agg(moments)
         for idx, agg_label in agg.items():
             moments[idx]["situation_label_agg"] = agg_label
+        conv_moments[conv_id] = (conv_data, moments)
+
+    # Fourth pass: plan action_direction_agg / student_outcome_agg per scaffolding
+    # cluster (unify each cluster's action_decomposed/result_decomposed and either
+    # reuse a cached classification or queue the unified list for classification),
+    # then batch-classify whatever wasn't reusable
+    to_action_direction = []  # [{key, facets}]
+    to_student_outcome = []   # [{key, facets}]
+    agg_plans = {
+        conv_id: plan_action_result_agg(conv_id, moments, existing_action_result_agg,
+                                         to_action_direction, to_student_outcome)
+        for conv_id, (_, moments) in conv_moments.items()
+    }
+    n_clusters = sum(len(ap) for ap in agg_plans.values())
+    action_kinds = Counter(a[0] for ap in agg_plans.values() for _, a, _ in ap)
+    result_kinds = Counter(r[0] for ap in agg_plans.values() for _, _, r in ap)
+    print(f"\nAction/result aggregation plan: {n_clusters} scaffolding clusters")
+    print(f"  Reuse cached action direction labels:   {action_kinds['reuse']}")
+    print(f"  Default action direction (no facets):   {action_kinds['default']}")
+    print(f"  Classify new action direction labels:   {action_kinds['classify']}")
+    print(f"  Reuse cached student outcome labels:    {result_kinds['reuse']}")
+    print(f"  Default student outcome (no facets):    {result_kinds['default']}")
+    print(f"  Classify new student outcome labels:    {result_kinds['classify']}")
+    if args.dry_run and to_decompose:
+        print(f"  NOTE: {len(to_decompose)} action/result decompositions are pending — "
+              f"clusters touching them used placeholder (empty) facets above, so their "
+              f"reuse/classify counts are estimates and may change once decomposition runs")
+
+    if args.dry_run:
+        print("\nDry run — exiting without classifying or writing.")
+        return
+
+    new_action_direction_labels = action_direction_classify_batch(to_action_direction)
+    new_student_outcome_labels = student_outcome_classify_batch(to_student_outcome)
+
+    # Fifth pass: assign action_direction_agg / student_outcome_agg to every moment
+    # in each cluster, and write ground truth files
+    GROUND_TRUTH_DIR.mkdir(parents=True, exist_ok=True)
+    gt_written = 0
+    for conv_id, (conv_data, moments) in conv_moments.items():
+        for cluster_indices, action_item, result_item in agg_plans[conv_id]:
+            action_label = (action_item[1] if action_item[0] != "classify"
+                            else new_action_direction_labels.get(action_item[1], "neither"))
+            result_label = (result_item[1] if result_item[0] != "classify"
+                            else new_student_outcome_labels.get(result_item[1], DEFAULT_RESULT_LABEL))
+            for idx in cluster_indices:
+                moments[idx]["action_direction_agg"] = action_label
+                moments[idx]["student_outcome_agg"] = result_label
+
+        gt_path = GROUND_TRUTH_DIR / f"{conv_id}.json"
+        num_turns = conv_data.get("num_turns", 0)
+        if args.scaffolding_only and gt_path.exists():
+            with open(gt_path, "r", encoding="utf-8") as fp:
+                existing = json.load(fp)
+            moments = _merge_scaffolding_only(moments, existing.get("key_moments", []))
+            num_turns = max(
+                [num_turns, existing.get("num_turns", 0)]
+                + [m["turn_end"] for m in moments if m.get("turn_end") is not None]
+            )
 
         out = {
             "conversation_id": conv_id,
-            "num_turns": conv_data.get("num_turns", 0),
+            "num_turns": num_turns,
             "key_moments": moments,
         }
-        gt_path = GROUND_TRUTH_DIR / f"{conv_id}.json"
         with open(gt_path, "w", encoding="utf-8") as fp:
             json.dump(out, fp, indent=2, ensure_ascii=False)
         gt_written += 1
 
-    print(f"\nDone!")
+    print("\nDone!")
     print(f"  Ground truth files written: {gt_written}")
     print(f"  Total ground truth: {len(list(GROUND_TRUTH_DIR.glob('*.json')))}")
 

@@ -107,6 +107,24 @@ def _presigned_url(rel_path: str, expires_seconds: int = 172800) -> str:
     return storage._get_backend().get_presigned_url(rel_path, expires_seconds=expires_seconds)
 
 
+# Models that use the new adaptive thinking API (no budget_tokens, no
+# output_config in the current SDK). Older models still use enabled+budget.
+_ANTHROPIC_ADAPTIVE_THINKING_MODELS = ("claude-opus-4-8",)
+
+
+def _anthropic_thinking_param(model: str, thinking_budget: int) -> dict:
+    """Return the right `thinking` kwarg shape for the given model.
+
+    - Newer models (Opus 4.8+) require {"type": "adaptive"}; legacy
+      enabled+budget_tokens is rejected.
+    - Older models (Opus 4.6 / 4.7) accept the enabled+budget form.
+    """
+    if model and any(model.startswith(prefix) for prefix in _ANTHROPIC_ADAPTIVE_THINKING_MODELS):
+        return {"type": "adaptive"}
+    budget = thinking_budget if thinking_budget > 0 else 16384
+    return {"type": "enabled", "budget_tokens": budget}
+
+
 def _build_image_blocks_anthropic(
     image_paths: list[str], use_url: bool, enable_cache: bool,
 ) -> list[dict]:
@@ -283,7 +301,9 @@ class ModelClient:
                  thinking: bool = False,
                  thinking_budget: int = 0,
                  reasoning_effort: str = "",
-                 enable_cache: bool = False) -> ModelResponse:
+                 enable_cache: bool = False,
+                 *,
+                 cacheable_prefix: str | None = None) -> ModelResponse:
         if max_tokens <= 0:
             max_tokens = MAX_OUTPUT_TOKENS.get(self.provider, 8192)
 
@@ -296,17 +316,21 @@ class ModelClient:
             try:
                 if self.provider == "gemini":
                     return self._generate_gemini(prompt, json_mode, max_tokens, timeout,
-                                                 thinking, thinking_budget, images)
+                                                 thinking, thinking_budget, images,
+                                                 cacheable_prefix=cacheable_prefix)
                 elif self.provider == "openai":
                     return self._generate_openai(prompt, json_mode, max_tokens, timeout,
                                                   thinking, thinking_budget,
                                                   reasoning_effort=reasoning_effort,
-                                                  images=images)
+                                                  images=images,
+                                                  cacheable_prefix=cacheable_prefix)
                 elif self.provider == "anthropic":
                     return self._generate_anthropic(prompt, json_mode, max_tokens, timeout,
                                                      thinking, thinking_budget,
+                                                     reasoning_effort=reasoning_effort,
                                                      images=images,
-                                                     enable_cache=enable_cache)
+                                                     enable_cache=enable_cache,
+                                                     cacheable_prefix=cacheable_prefix)
             except Exception as e:
                 last_error = e
                 delay = base_delay * (2 ** attempt)
@@ -322,7 +346,8 @@ class ModelClient:
         )
 
     def _generate_gemini(self, prompt, json_mode, max_tokens, timeout,
-                         thinking=False, thinking_budget=0, images=None):
+                         thinking=False, thinking_budget=0, images=None,
+                         cacheable_prefix: str | None = None):
         """Gemini API call via google-genai SDK."""
         config = {
             "max_output_tokens": max_tokens,
@@ -334,14 +359,18 @@ class ModelClient:
             budget = thinking_budget if thinking_budget > 0 else 16384
             config["thinking_config"] = {"include_thoughts": True, "thinking_budget": budget}
 
+        # TODO(gemini-cache): wire CachedContent.create/refresh/delete here.
+        # For now concatenate the cacheable head into the prompt so behavior
+        # is semantically correct even without a real cache hit.
+        effective_prompt = (cacheable_prefix or "") + prompt
         if images:
             image_blocks = _build_image_blocks_gemini(images)
             parts = _interleave_text_and_images(
-                prompt, image_blocks, lambda s: {"text": s},
+                effective_prompt, image_blocks, lambda s: {"text": s},
             )
             contents = [{"role": "user", "parts": parts}]
         else:
-            contents = prompt
+            contents = effective_prompt
 
         response = self._client.models.generate_content(
             model=f"models/{self.model}",
@@ -360,17 +389,20 @@ class ModelClient:
 
     def _generate_openai(self, prompt, json_mode, max_tokens, timeout,
                          thinking=False, thinking_budget=0,
-                         reasoning_effort: str = "", images=None):
+                         reasoning_effort: str = "", images=None,
+                         cacheable_prefix: str | None = None):
         """OpenAI API call via openai SDK."""
         if images:
             image_blocks = _build_image_blocks_openai(
                 images, use_url=_should_use_presigned_url(),
             )
+            # Prepend cacheable head so auto-cache sees the same prefix on repeats.
+            head_text = cacheable_prefix or ""
             content = _interleave_text_and_images(
-                prompt, image_blocks, lambda s: {"type": "text", "text": s},
+                head_text + prompt, image_blocks, lambda s: {"type": "text", "text": s},
             )
         else:
-            content = prompt
+            content = (cacheable_prefix or "") + prompt
 
         kwargs = {
             "model": self.model,
@@ -386,16 +418,22 @@ class ModelClient:
         response = self._client.chat.completions.create(**kwargs)
 
         text = response.choices[0].message.content or ""
+        cached = 0
+        details = getattr(response.usage, "prompt_tokens_details", None)
+        if details is not None:
+            cached = getattr(details, "cached_tokens", 0) or 0
         usage = {
             "input_tokens": response.usage.prompt_tokens or 0,
             "output_tokens": response.usage.completion_tokens or 0,
             "total_tokens": response.usage.total_tokens or 0,
+            "cached_tokens": cached,
         }
         return ModelResponse(text=text, usage=usage)
 
     def _generate_anthropic(self, prompt, json_mode, max_tokens, timeout,
                             thinking=False, thinking_budget=0,
-                            images=None, enable_cache=False):
+                            reasoning_effort="", images=None, enable_cache=False,
+                            cacheable_prefix: str | None = None):
         """Anthropic API call via anthropic SDK."""
         system_parts = []
         if json_mode:
@@ -412,6 +450,18 @@ class ModelClient:
             content = _interleave_text_and_images(
                 prompt, image_blocks, lambda s: {"type": "text", "text": s},
             )
+            if cacheable_prefix is not None:
+                # Prepend the cacheable head as its own text block.
+                content = [
+                    {"type": "text", "text": cacheable_prefix,
+                     "cache_control": {"type": "ephemeral"}},
+                ] + content
+        elif cacheable_prefix is not None:
+            content = [
+                {"type": "text", "text": cacheable_prefix,
+                 "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": prompt},
+            ]
         else:
             content = prompt
 
@@ -424,19 +474,17 @@ class ModelClient:
         if system_parts:
             kwargs["system"] = "\n".join(system_parts)
         if thinking:
-            budget = thinking_budget if thinking_budget > 0 else 16384
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-            if kwargs["max_tokens"] < budget + 64:
-                kwargs["max_tokens"] = budget + 64
+            kwargs["thinking"] = _anthropic_thinking_param(self.model, thinking_budget)
+            if kwargs["thinking"].get("type") == "enabled":
+                # Legacy enabled mode needs max_tokens >= budget + headroom.
+                budget = kwargs["thinking"]["budget_tokens"]
+                if kwargs["max_tokens"] < budget + 64:
+                    kwargs["max_tokens"] = budget + 64
 
         response = self._client.messages.create(**kwargs)
 
         # Extract text from content blocks (skip thinking blocks)
-        text = ""
-        for block in response.content:
-            if block.type == "text":
-                text = block.text
-                break
+        text = _extract_anthropic_text(response.content)
         # Strip markdown fences if present
         if json_mode:
             text = _strip_json_fences(text)
@@ -445,11 +493,25 @@ class ModelClient:
             "input_tokens": response.usage.input_tokens or 0,
             "output_tokens": response.usage.output_tokens or 0,
             "total_tokens": (response.usage.input_tokens or 0) + (response.usage.output_tokens or 0),
+            "cache_creation_input_tokens": getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
+            "cache_read_input_tokens": getattr(response.usage, "cache_read_input_tokens", 0) or 0,
         }
         return ModelResponse(text=text, usage=usage)
 
     def __repr__(self):
         return f"ModelClient(model='{self.model}', provider='{self.provider}')"
+
+
+def _extract_anthropic_text(content) -> str:
+    """Concatenate all text blocks from an Anthropic response/message.
+
+    Anthropic returns a list of content blocks; non-text blocks (e.g. thinking)
+    are skipped. There can be more than one text block -- when thinking is
+    enabled, or when output is interleaved -- so all text blocks must be joined.
+    Keeping only the first silently truncates the response (and can produce
+    invalid JSON from a response split mid-string across two blocks).
+    """
+    return "".join(block.text for block in content if block.type == "text")
 
 
 def _strip_json_fences(text: str) -> str:
@@ -483,11 +545,17 @@ def _extract_entry(entry: dict) -> tuple[str, str, bool, int, list[str]]:
 def build_batch_entry(key: str, prompt_text: str,
                       images: list[str] | None = None,
                       json_mode: bool = True,
-                      max_tokens: int = 65536) -> dict:
+                      max_tokens: int = 65536,
+                      cacheable_prefix: str | None = None) -> dict:
     """Build a single batch entry from a key and prompt text.
 
     Uses a provider-neutral internal format. run_batch() and run_sync_entries()
     both consume these entries.
+
+    cacheable_prefix: when set, the Anthropic batch path will emit the
+    two-block structured content (prefix with cache_control + prompt text).
+    For Gemini and OpenAI batch, the prefix is concatenated into the prompt
+    text (auto-cache handles it; Gemini has no explicit batch cache API yet).
     """
     gen_config = {"max_output_tokens": max_tokens}
     if json_mode:
@@ -501,7 +569,10 @@ def build_batch_entry(key: str, prompt_text: str,
     }
     if images:
         request["images"] = list(images)
-    return {"key": key, "request": request}
+    entry = {"key": key, "request": request}
+    if cacheable_prefix is not None:
+        entry["cacheable_prefix"] = cacheable_prefix
+    return entry
 
 
 def write_jsonl(entries: list[dict], jsonl_path: str) -> int:
@@ -591,7 +662,8 @@ def run_batch(client: 'ModelClient', entries: list[dict],
                                  on_batch_created=on_batch_created)
     elif provider == "anthropic":
         return _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
-                                    thinking, thinking_budget, enable_cache=enable_cache,
+                                    thinking, thinking_budget, reasoning_effort,
+                                    enable_cache=enable_cache,
                                     existing_batch_id=existing_batch_id,
                                     on_batch_created=on_batch_created)
     else:
@@ -621,13 +693,16 @@ def _run_batch_gemini(client, entries, json_mode, display_name, poll_interval,
                                           encoding="utf-8") as f:
             for entry in entries:
                 key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(entry)
+                # Gemini has no explicit batch cache API; concatenate prefix (auto-cache).
+                cacheable_prefix = entry.get("cacheable_prefix")
+                effective_prompt = (cacheable_prefix or "") + prompt_text
                 if images:
                     image_blocks = _build_image_blocks_gemini(images)
                     parts = _interleave_text_and_images(
-                        prompt_text, image_blocks, lambda s: {"text": s},
+                        effective_prompt, image_blocks, lambda s: {"text": s},
                     )
                 else:
-                    parts = [{"text": prompt_text}]
+                    parts = [{"text": effective_prompt}]
                 gem_entry = {
                     "key": key,
                     "request": {
@@ -750,15 +825,20 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
                 if not entry_max_tokens or entry_max_tokens > max_tokens:
                     entry_max_tokens = max_tokens
 
+                # OpenAI uses automatic prefix caching; concatenate the prefix so the
+                # same static head is always at the front of the message.
+                cacheable_prefix = entry.get("cacheable_prefix")
+                effective_prompt = (cacheable_prefix or "") + prompt_text
+
                 if images:
                     image_blocks = _build_image_blocks_openai(
                         images, use_url=_should_use_presigned_url(),
                     )
                     content = _interleave_text_and_images(
-                        prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
+                        effective_prompt, image_blocks, lambda s: {"type": "text", "text": s},
                     )
                 else:
-                    content = prompt_text
+                    content = effective_prompt
 
                 body = {
                     "model": client.model,
@@ -861,7 +941,8 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
 # ===================================================================
 
 def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
-                         thinking=False, thinking_budget=0, enable_cache=False,
+                         thinking=False, thinking_budget=0, reasoning_effort="",
+                         enable_cache=False,
                          existing_batch_id=None, on_batch_created=None):
     """Anthropic batch: create message batch, poll, stream results.
 
@@ -883,10 +964,13 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
     if existing_batch_id:
         message_batch = anthropic_client.messages.batches.retrieve(existing_batch_id)
     else:
+        thinking_param = (
+            _anthropic_thinking_param(client.model, thinking_budget) if thinking else None
+        )
         thinking_min = 0
-        if thinking:
-            budget = thinking_budget if thinking_budget > 0 else 16384
-            thinking_min = budget + 64  # max_tokens must exceed budget_tokens
+        if thinking_param is not None and thinking_param.get("type") == "enabled":
+            # Legacy enabled mode needs max_tokens >= budget + headroom.
+            thinking_min = thinking_param["budget_tokens"] + 64
 
         requests = []
         for i, entry in enumerate(entries):
@@ -896,6 +980,8 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
             if thinking_min and entry_max_tokens < thinking_min:
                 entry_max_tokens = thinking_min
 
+            cacheable_prefix = entry.get("cacheable_prefix")
+
             if images:
                 image_blocks = _build_image_blocks_anthropic(
                     images, use_url=_should_use_presigned_url(), enable_cache=enable_cache,
@@ -903,6 +989,17 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
                 content = _interleave_text_and_images(
                     prompt_text, image_blocks, lambda s: {"type": "text", "text": s},
                 )
+                if cacheable_prefix is not None:
+                    content = [
+                        {"type": "text", "text": cacheable_prefix,
+                         "cache_control": {"type": "ephemeral"}},
+                    ] + content
+            elif cacheable_prefix is not None:
+                content = [
+                    {"type": "text", "text": cacheable_prefix,
+                     "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": prompt_text},
+                ]
             else:
                 content = prompt_text
 
@@ -917,9 +1014,8 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
                     "Do not include markdown code fences, explanations, or any text "
                     "outside the JSON object."
                 )
-            if thinking:
-                budget = thinking_budget if thinking_budget > 0 else 16384
-                params["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            if thinking_param is not None:
+                params["thinking"] = thinking_param
 
             requests.append(Request(
                 custom_id=f"r{i}",
@@ -968,12 +1064,8 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
 
         if result.result.type == "succeeded":
             message = result.result.message
-            # Skip thinking blocks, extract text blocks
-            text = ""
-            for block in message.content:
-                if block.type == "text":
-                    text = block.text
-                    break
+            # Skip thinking blocks, extract (and concatenate) text blocks
+            text = _extract_anthropic_text(message.content)
             if json_mode:
                 text = _strip_json_fences(text)
             usage = {

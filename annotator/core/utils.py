@@ -11,6 +11,11 @@ from .config import get_iou_threshold
 # Re-export for backwards compatibility with scripts that import from utils
 IOU_THRESHOLD = get_iou_threshold()
 
+# Placeholder/test annotation text that should be skipped rather than sent to
+# the model. Shared by decompose/label/situate (and re-exported by them for
+# data/build_ground_truth.py, which imports the constant from those modules).
+JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
+
 # Conversations used as few-shot examples in prompts.
 # These MUST be excluded from evaluation to prevent data leakage.
 # Each ID corresponds to a verbatim ground-truth annotation used in p2 prompts.
@@ -122,6 +127,47 @@ def load_ground_truth(annotator_style: str | None = None) -> dict:
             }
 
     return {"conversations": conversations}
+
+
+def validate_ground_truth(ground_truth: dict, *,
+                          all_moments: tuple[str, ...] = (),
+                          scaffolding_only: tuple[str, ...] = ()) -> None:
+    """Assert required keys exist on ground-truth moments; raise if any are absent.
+
+    A missing key here means the ground-truth input is corrupt for this run.
+    Enforce it up front so it fails loudly, rather than being silently
+    defaulted (e.g. to an "unknown" suggestion or a skipped metric) deep in the
+    pipeline where it quietly biases results.
+
+    Args:
+        all_moments: keys required on EVERY moment (e.g. strategy_label).
+        scaffolding_only: keys required only on annotation_type == "scaffolding"
+            moments. These are scaffolding-specific aggregates
+            (situation_label_agg / action_direction_agg / student_outcome_agg);
+            rapport moments legitimately lack them.
+
+    Raises:
+        ValueError naming each missing key, how many moments lack it, and an
+        example location.
+    """
+    missing_counts: dict[str, int] = {}
+    examples: dict[str, tuple] = {}
+    for conv_id, conv in ground_truth.get("conversations", {}).items():
+        for m in conv.get("key_moments", []):
+            required = list(all_moments)
+            if m.get("annotation_type") == "scaffolding":
+                required += list(scaffolding_only)
+            for k in required:
+                if k not in m:
+                    missing_counts[k] = missing_counts.get(k, 0) + 1
+                    examples.setdefault(k, (conv_id, m.get("turn_start")))
+    if missing_counts:
+        parts = [
+            f"'{k}' missing on {n} moment(s) "
+            f"(e.g. {examples[k][0]} turn {examples[k][1]})"
+            for k, n in sorted(missing_counts.items())
+        ]
+        raise ValueError("Ground truth input invalid: " + "; ".join(parts))
 
 
 def get_excerpt(transcripts, conv_id, turn_start, turn_end, context=5,

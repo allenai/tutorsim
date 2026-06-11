@@ -20,6 +20,7 @@ import argparse
 import datetime
 import json
 import logging
+import sys
 from pathlib import Path
 
 from common.logging_setup import setup_logging
@@ -31,7 +32,7 @@ from .storage import (
     load_annotator_result, save_annotator_result,
     get_annotator_result_path, _conv_id_to_uuid,
 )
-from .utils import load_split_ids
+from .utils import load_split_ids, JUNK_TEXTS  # JUNK_TEXTS re-exported for data/build_ground_truth.py
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,6 @@ def _load_prompt(name: str) -> str:
 
 VALID_LABELS = {"effective", "partial", "ineffective"}
 VALID_LABELS_BINARY = {"effective", "ineffective"}
-JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 
 
 def load_labeller_templates(labeller_cfg: str | dict) -> dict[str | None, str]:
@@ -136,7 +136,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
     # Filter to the requested split as a safety net (detect/annotate already
     # filter upstream). Annotator conv_ids end in the transcript UUID; benchmark
     # scenario IDs append a `__{type}_{idx}` suffix, so `rsplit("_", 1)` is
-    # unsafe — use the shared helper which scans for the LAST UUID match.
+    # unsafe -- use the shared helper which scans for the LAST UUID match.
     split_ids = load_split_ids(split)
     results = {
         conv_id: conv_data
@@ -235,6 +235,7 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
         "errors": errors,
     }
 
+    saved_any = False
     for target in sorted(effective_targets):
         t_fname = (
             f"annotations_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
@@ -251,8 +252,21 @@ def run_label(version: str, model: str, mode: str, phase_cfg: dict,
         if not any(r["annotations"] for r in target_results.values()):
             continue
         save_annotator_result(version, t_fname, {**data, "results": target_results})
+        saved_any = True
         n = sum(len(r["annotations"]) for r in target_results.values())
         logger.info(f"\nSaved: {t_fname} | {n} annotations")
+
+    # A disk run that wrote no file is a silent no-op -- almost always a wrong
+    # --target / --split / --profile. Return None so the CLI and run.py treat it
+    # as the failure it is rather than reporting success. (in-memory callers,
+    # e.g. the benchmark bridge, manage their own data and don't save here.)
+    if not in_memory and not saved_any:
+        logger.error(
+            "No annotations matched target(s) %s for version %s -- nothing saved. "
+            "Check --target / --split / --profile.",
+            sorted(effective_targets), version,
+        )
+        return None
 
     logger.info(f"\n  Effective:   {by_label['effective']}")
 
@@ -315,6 +329,8 @@ def main():
                        binary=args.binary, annotator_style=style,
                        profile=profile, targets=args.target,
                        split=args.split)
+    if output is None:
+        sys.exit(1)
     if output:
         mode_hint = " --mode annotations" if args.gold else ""
         style_flag = f" --annotator-style {style}" if style else ""

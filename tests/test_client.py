@@ -2,7 +2,23 @@
 import pytest
 from annotator.core.client import (
     infer_provider, _strip_json_fences, _extract_entry, build_batch_entry,
+    _anthropic_thinking_param,
 )
+
+
+class TestAnthropicThinkingParam:
+    def test_opus_4_8_uses_adaptive(self):
+        # Opus 4.8 rejects the legacy enabled+budget shape; must be adaptive.
+        param = _anthropic_thinking_param("claude-opus-4-8", 16384)
+        assert param == {"type": "adaptive"}
+
+    def test_opus_4_6_keeps_enabled_budget(self):
+        param = _anthropic_thinking_param("claude-opus-4-6", 16384)
+        assert param == {"type": "enabled", "budget_tokens": 16384}
+
+    def test_budget_defaults_when_unset(self):
+        param = _anthropic_thinking_param("claude-opus-4-6", 0)
+        assert param == {"type": "enabled", "budget_tokens": 16384}
 
 
 class TestInferProvider:
@@ -237,6 +253,67 @@ class TestGenerateWithImages:
         assert content[0]["type"] == "text"
         assert content[0]["text"] == "hello"
         assert content[1]["type"] == "image"
+
+
+class TestAnthropicMultipleTextBlocks:
+    """Anthropic can return more than one text block (e.g. after a thinking
+    block, or interleaved output). The extractor must concatenate all of them;
+    keeping only the first silently truncates the response."""
+
+    def _block(self, btype, text):
+        return type("Block", (), {"type": btype, "text": text})()
+
+    def _fake_client(self, captured, content):
+        from annotator.core.client import ModelClient
+
+        class FakeResponse:
+            class Usage:
+                input_tokens = 1
+                output_tokens = 1
+            usage = Usage()
+
+        FakeResponse.content = content
+
+        class FakeAnthropic:
+            class messages:
+                @staticmethod
+                def create(**kwargs):
+                    captured.update(kwargs)
+                    return FakeResponse()
+
+        client = ModelClient.__new__(ModelClient)
+        client.model = "claude-opus-4-6"
+        client.provider = "anthropic"
+        client._client = FakeAnthropic()
+        return client
+
+    def test_concatenates_text_blocks_after_thinking(self):
+        content = [
+            self._block("thinking", "internal reasoning, must be skipped"),
+            self._block("text", '{"action": "the tutor '),
+            self._block("text", 'broke the problem into steps"}'),
+        ]
+        client = self._fake_client({}, content)
+        resp = client.generate("hello", json_mode=False)
+        assert resp.text == '{"action": "the tutor broke the problem into steps"}'
+
+    def test_single_text_block_unchanged(self):
+        content = [self._block("text", "ok")]
+        client = self._fake_client({}, content)
+        resp = client.generate("hello", json_mode=False)
+        assert resp.text == "ok"
+
+    def test_helper_joins_text_blocks_and_skips_non_text(self):
+        # Direct unit test of the shared extractor used by both the sync and
+        # batch code paths (the batch path is otherwise hard to drive).
+        from annotator.core.client import _extract_anthropic_text
+        content = [
+            self._block("thinking", "skip me"),
+            self._block("text", "a"),
+            self._block("text", "b"),
+        ]
+        assert _extract_anthropic_text(content) == "ab"
+        assert _extract_anthropic_text([]) == ""
 
 
 class TestBuildBatchEntryWithImages:

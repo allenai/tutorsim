@@ -160,3 +160,25 @@ When a prompt has drifted through iteration, don't patch further. Go back to the
 **How to verify when data lands:** any conv that's in both the local transcript set and S3's `deidentified/screenshots/` will produce non-zero `total_images_sent` in `detections.json`. That's the cleanest single-field signal that real images flowed.
 
 **Latent gap noted but not fixed:** Benchmark annotation shards don't track `images_attached`/`images_seen` because `annotator_bridge.execute_and_parse_bulk` calls `parse_and_merge` directly, skipping the `_stamp_and_shard` step in `annotator/core/annotate.py:343-356` that adds those fields. Worth a follow-up so annotation-side image flow is visible per-shard, not only inferable from API request logs.
+
+---
+
+## 2026-06-10: Opus 4.8 (and 4.7 / Fable 5) reject `thinking.type=enabled`
+
+**What happened:** Switching the `anthropic` profile from `claude-opus-4-6` to `claude-opus-4-8` made every call 400 with: `"thinking.type.enabled" is not supported for this model. Use "thinking.type.adaptive" and "output_config.effort"`. The Anthropic request builders hardcoded `thinking: {type: enabled, budget_tokens: N}`.
+
+**Why:** Opus 4.7, Opus 4.8, and Fable 5 removed manual extended thinking. They require adaptive thinking (`thinking: {type: adaptive}`) with depth controlled by `output_config: {effort: low|medium|high|xhigh|max}`. Opus 4.6 and earlier still accept `budget_tokens`.
+
+**Fix:** Added `_build_anthropic_thinking(model, ...)` in `annotator/core/client.py` — model-aware: adaptive-only models (`opus-4-7`, `opus-4-8`, `fable-5`) get `{thinking: adaptive, output_config: {effort}}`; older models keep `{thinking: enabled, budget_tokens}` + the max_tokens floor. Both sync (`_generate_anthropic`, via `extra_body`) and batch (`_run_batch_anthropic`, merged into params) paths use it. `reasoning_effort` is threaded from config (defaults to `high`). The pinned SDK (0.75.0) has no typed `output_config`/adaptive params, so the sync path sends them via `extra_body`; batch keeps them as extra dict keys (they survive `maybe_transform` serialization). `extra_body` produces byte-identical wire JSON to the old typed `thinking` kwarg, so opus-4-6 runs are unchanged.
+
+**Config:** `reasoning_effort: high` added to the `anthropic` profile (opus-4-8). `thinking_budget` is now ignored by opus-4-8 but kept for the `anthropic46` profile.
+
+---
+
+## 2026-06-10: OpenAI json_object mode can't emit a top-level array — decompose dropped facets
+
+**What happened:** `openai` profile runs logged `annotator.core.decompose | Could not parse result decomposition ... '{ "The student participates." : "The student identifies...", ... }'` and stored empty `result_decomposed` lists. The model returned a JSON *object*, but `_parse_decomposed` only accepted a list, so every facet was dropped (counted as an error).
+
+**Why:** The decomposer prompts ask for a bare JSON array, but the OpenAI path sets `response_format={"type": "json_object"}` (`client.py` sync ~414, batch ~849), which forbids a top-level array. The model is forced to wrap the facets in an object — either under a key (`{"facets": [...]}`) or, with no list to hand, crammed across the object's keys *and* values (`{"facet a": "facet b", ...}`). Gemini (only `response_mime_type`) and Anthropic (soft system rule) honor the array, so this is OpenAI-only.
+
+**Fix:** Added `_coerce_facets()` in `annotator/core/decompose.py` and routed `_parse_decomposed` through it. It accepts a bare array, a `{...: [list]}` wrapper (flattens list values), or the crammed shape (interleaves keys+values). Parser-level fix only — no prompt/client changes, so Gemini/Anthropic outputs are unchanged. Covered by `tests/test_decompose_parse.py`. Tradeoff: a single-key wrapper with a *string* value (e.g. `{"facets": "one facet"}`) would yield `["facets", "one facet"]`, but OpenAI doesn't emit that shape in practice.

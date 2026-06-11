@@ -11,17 +11,18 @@ Adds action_decomposed and result_decomposed (list[str]) to each annotation,
 then saves to decomposed_{target}.json.
 
 Usage:
-    python -m annotator.core.decompose --version v1
-    python -m annotator.core.decompose --version v1 --gold
-    python -m annotator.core.decompose --version v1 --split test
-    python -m annotator.core.decompose --version v1 --target rapport
-    python -m annotator.core.decompose --version v1 --style balanced
+    python -m annotator.core.decompose --version v13
+    python -m annotator.core.decompose --version v13 --gold
+    python -m annotator.core.decompose --version v13 --split test
+    python -m annotator.core.decompose --version v13 --target rapport
+    python -m annotator.core.decompose --version v13 --gold --profile anthropic --target scaffolding --split train
 """
 
 import argparse
 import json
 import logging
 import re
+import sys
 from pathlib import Path
 
 from common.logging_setup import setup_logging
@@ -33,7 +34,7 @@ from .storage import (
     load_annotator_result, save_annotator_result,
     get_annotator_result_path,
 )
-from .utils import load_split_ids
+from .utils import load_split_ids, JUNK_TEXTS  # JUNK_TEXTS re-exported for data/build_ground_truth.py
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,6 @@ PROMPTS_DIR = (
     Path(__file__).resolve().parent.parent.parent
     / "prompts" / "annotator" / "decomposer"
 )
-
-JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 
 
 def _load_prompt(filename: str) -> str:
@@ -52,17 +51,53 @@ def _load_prompt(filename: str) -> str:
         return f.read()
 
 
-def _parse_decomposed(text: str) -> tuple[list[str], bool]:
-    """Parse a JSON array of strings from model output.
+def _coerce_facets(parsed: object) -> list[str] | None:
+    """Coerce a parsed JSON value into a list of facet strings.
 
-    Returns (facets list, had_error). Falls back to regex extraction if
+    Returns the facet list, or None if the value isn't a recognizable facet
+    container (signals a parse failure to the caller).
+
+    Handles two shapes:
+      - a bare array (Gemini/Anthropic honor the prompt's requested format), and
+      - an object, because OpenAI's response_format={"type": "json_object"}
+        cannot emit a top-level array. The model wraps the facets either under a
+        key whose value is the list (e.g. {"facets": [...]}) or, when it has no
+        list to hand, crams them across the object's keys and values
+        (e.g. {"facet a": "facet b", ...}).
+    """
+    if isinstance(parsed, list):
+        return [str(s) for s in parsed]
+
+    if isinstance(parsed, dict):
+        # Prefer any list value (the {"facets": [...]} wrapper shape).
+        list_facets = [
+            str(s) for v in parsed.values() if isinstance(v, list) for s in v
+        ]
+        if list_facets:
+            return list_facets
+        # No list anywhere: facets were crammed across keys and values.
+        # Interleave to preserve each pair's order.
+        facets: list[str] = []
+        for k, v in parsed.items():
+            facets.append(str(k))
+            facets.append(str(v))
+        return facets
+
+    return None
+
+
+def _parse_decomposed(text: str) -> tuple[list[str], bool]:
+    """Parse facet strings from model output.
+
+    Returns (facets list, had_error). Accepts a bare JSON array or an object
+    wrapper (see _coerce_facets), and falls back to regex array extraction if
     json.loads fails.
     """
     # Attempt 1: standard JSON parse
     try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return [str(s) for s in parsed], False
+        facets = _coerce_facets(json.loads(text))
+        if facets is not None:
+            return facets, False
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -174,10 +209,10 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
         print(f"Total API calls: {len(entries)}")
         for label, sample_entries in [("action", action_entries[:2]), ("result", result_entries[:2])]:
             for e in sample_entries:
-                body = e.get("body", e)
-                messages = body.get("messages", [])
-                text = messages[0].get("content", "") if messages else ""
-                print(f"\n  [{label}] {e.get('custom_id', '')}")
+                contents = e.get("request", {}).get("contents", [])
+                parts = contents[0].get("parts", []) if contents else []
+                text = parts[0].get("text", "") if parts else ""
+                print(f"\n  [{label}] {e.get('key', '')}")
                 print(f"  {text[:300]}{'...' if len(text) > 300 else ''}")
         return None
 
@@ -258,7 +293,8 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
         },
     }
 
-    output_filename = f"decomposed{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+    decomposed_prefix = "decomposed_gold" if gold else "decomposed"
+    output_filename = f"{decomposed_prefix}{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
     save_annotator_result(version, output_filename, output)
     logger.info("Saved: %s", output_filename)
 
@@ -315,11 +351,15 @@ def main():
     model = args.model or phase_cfg["model"]
     mode = args.mode or phase_cfg.get("mode", "batch")
 
-    run_decompose(version=version, model=model, mode=mode,
-                  phase_cfg=phase_cfg, gold=args.gold,
-                  annotator_style=style, profile=profile,
-                  target=args.target, split=args.split,
-                  dry_run=args.dry_run)
+    result = run_decompose(version=version, model=model, mode=mode,
+                           phase_cfg=phase_cfg, gold=args.gold,
+                           annotator_style=style, profile=profile,
+                           target=args.target, split=args.split,
+                           dry_run=args.dry_run)
+    # run_decompose returns None on missing input (a real failure) and also on
+    # --dry-run (expected). Only the former should be a non-zero exit.
+    if result is None and not args.dry_run:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ from .storage import (
     load_annotator_result, save_annotator_result,
     get_annotator_result_path,
 )
-from .utils import load_split_ids
+from .utils import load_split_ids, JUNK_TEXTS  # JUNK_TEXTS re-exported for data/build_ground_truth.py
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,6 @@ PROMPT_PATH = (
 )
 
 VALID_SITUATION_LABELS = {"yes", "no", "unclear", "no_mention"}
-JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 
 def _parse_situation_label(text: str) -> tuple[dict, bool]:
     """Parse a situation label from model output text.
@@ -206,7 +205,8 @@ def run_situation_label(version: str, model: str, mode: str, phase_cfg: dict,
         },
     }
 
-    output_filename = f"situation_labels{profile_suffix}{style_suffix}{split_suffix}_scaffolding.json"
+    output_prefix = "situation_labels_gold" if gold else "situation_labels"
+    output_filename = f"{output_prefix}{profile_suffix}{style_suffix}{split_suffix}_scaffolding.json"
     save_annotator_result(version, output_filename, output)
     n_classified = len(locations) + len(skipped)
     logger.info("Saved: %s | %d situations classified", output_filename, n_classified)

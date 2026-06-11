@@ -1,6 +1,6 @@
 You are restructuring a teaching coach's analysis of a tutoring moment.
 
-Given a description of a tutoring interaction, extract short, standalone, atomic facets from the **Result** section that describe the resultant state or actions of the student. Split compound sentences into multiple facets. Focus ONLY on extracting events or actions that actually occurred. Exclude events and actions that are hypothetical (e.g. things the description says should have occurred) and exclude events/actions that did *not* occur. 
+Given a description of a tutoring interaction, extract short, standalone, atomic facets from the **Result** section that describe the resultant state or actions of the student. Split compound sentences into multiple facets. Focus ONLY on extracting student outcomes that resulted from the tutor's action. Exclude student behaviors and actions that occurred earlier in the moment, even if they are mentioned in the result section.
 
 # Examples
 
@@ -41,7 +41,7 @@ OUTPUT
 
 # Your task
 
-Now, look at the following description of a tutoring interaction, and return ONLY a valid JSON array of strings representing standalone facets that correspond to the resultant state and actions of the student. If the description is entirely about hypothetical or non-occurring events/actions, return an empty list. 
+Now, look at the following description of a tutoring interaction, and return ONLY a valid JSON array of strings representing standalone facets that correspond to the **resultant** state, behavior, and actions of the student. If the description does not discuss the student's outcome, return an empty list. 
 
 Situation: {situation}
 Action: {action}

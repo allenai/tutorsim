@@ -36,7 +36,7 @@ from .storage import (
     save_annotator_shard, list_annotator_shard_ids, load_annotator_shards,
     save_inflight_batch, load_inflight_batch, clear_inflight_batch,
 )
-from .utils import format_excerpt, load_ground_truth, load_split_ids
+from .utils import format_excerpt, load_ground_truth, load_split_ids, validate_ground_truth
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,9 @@ def load_gold_moments(targets: list[str],
     so the rest of the pipeline works identically.
     """
     ground_truth = load_ground_truth(annotator_style=annotator_style)
+    # Precondition: scaffolding moments must carry situation_label_agg, which
+    # builds the per-moment suggestion injected into the analysis prompt.
+    validate_ground_truth(ground_truth, scaffolding_only=("situation_label_agg",))
     split_ids = load_split_ids(split)
 
     # Ground truth keys by UUID (transcript_id), but conversations_map keys by
@@ -125,24 +128,29 @@ def load_gold_moments(targets: list[str],
             continue
         conv_id = transcript_id_to_conv_id.get(gt_id, gt_id)
 
-        # Deduplicate by (turn_start, turn_end, annotation_type), keeping
-        # the longest situation text across all annotators who labeled that moment.
+        # Deduplicate by (turn_start, turn_end, annotation_type), keeping first seen.
         best: dict[tuple, dict] = {}
-        for moment in conv_data.get("key_moments", []):
-            ann_type = moment.get("annotation_type", "")
+        for moment in conv_data["key_moments"]:
+            if "annotation_type" not in moment:
+                raise ValueError(
+                    f"Ground truth moment in {conv_id} is missing required key "
+                    f"'annotation_type' (turn_start={moment.get('turn_start')})"
+                )
+            ann_type = moment["annotation_type"]
             if ann_type not in targets:
                 continue
             if moment.get("strategy_label") == "unclear":
                 continue
             key = (moment["turn_start"], moment["turn_end"], ann_type)
-            situation = moment.get("situation", "")
-            if key not in best or len(situation) > len(best[key]["situation"]):
-                best[key] = {
+            if key not in best:
+                entry: dict = {
                     "turn_start": moment["turn_start"],
                     "turn_end": moment["turn_end"],
                     "annotation_type": ann_type,
-                    "situation": situation or "Human-identified moment",
                 }
+                if ann_type == "scaffolding":
+                    entry["situation_label_agg"] = moment.get("situation_label_agg")
+                best[key] = entry
 
         if best:
             detections_by_conv[conv_id] = {
@@ -151,6 +159,22 @@ def load_gold_moments(targets: list[str],
             }
 
     return detections_by_conv
+
+
+_SITUATION_LABEL_AGG_TO_SUGGESTION = {
+    "scaffolding": "A team of teachers believe that this moment is appropriate for scaffolding.",
+    "rigor": "A team of teachers believe that this moment is appropriate for pushing for rigor.",
+    "mixed": "A team of teachers believe that this moment is appropriate for either rigor or scaffolding.",
+    "both": "A team of teachers believe that this moment is appropriate for either rigor or scaffolding.",
+    "neither": "A team of teachers believe that this moment is not appropriate for either rigor or scaffolding.",
+}
+_SUGGESTION_UNKNOWN = "It's unclear to a team of teachers whether this moment is appropriate for rigor or scaffolding."
+
+
+def _suggestion_text(situation_label_agg: str | None) -> str:
+    return _SITUATION_LABEL_AGG_TO_SUGGESTION.get(
+        situation_label_agg or "", _SUGGESTION_UNKNOWN
+    )
 
 
 def load_prompt(version: str, target: str) -> str:
@@ -214,7 +238,6 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
             turn_start = det.get("turn_start", 0)
             turn_end = det.get("turn_end", turn_start)
-            situation = det.get("situation", "") or det.get("brief_description", "")
 
             excerpt_start = max(min_turn, turn_start - context_window)
             excerpt_end = min(max_turn, turn_end + context_window)
@@ -236,7 +259,7 @@ def build_analysis_entries(detections_by_conv: dict, conversations_map: dict,
 
             prompt = prompt_cache[ann_type]
             prompt = prompt.replace("{annotator_style}", "")
-            prompt = prompt.replace("{situation}", situation)
+            prompt = prompt.replace("{suggestion}", _suggestion_text(det.get("situation_label_agg")))
             prompt = prompt.replace("{excerpt}", excerpt)
             prompt = prompt.replace("{turn_start}", str(turn_start))
             prompt = prompt.replace("{turn_end}", str(turn_end))
@@ -301,7 +324,7 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
                     "annotation_type": ann_type,
                     "turn_start": det.get("turn_start"),
                     "turn_end": det.get("turn_end"),
-                    "situation": a.get("situation", "") or det.get("situation", "") or det.get("brief_description", ""),
+                    "situation": a.get("situation", ""),
                     "action": a.get("action", ""),
                     "result": a.get("result", ""),
                 })
@@ -314,7 +337,7 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
                     "annotation_type": ann_type,
                     "turn_start": det.get("turn_start", 0),
                     "turn_end": det.get("turn_end", 0),
-                    "situation": det.get("situation", ""),
+                    "situation": "",
                     "action": "[Analysis unavailable -- batch failed for this moment]",
                     "result": "",
                 })
@@ -335,7 +358,7 @@ def parse_and_merge(raw_entries: dict, detections_by_conv: dict) -> dict[str, di
 
 def run_annotate(version: str, model: str, mode: str, prompt_version: str,
                  targets: list[str], phase_cfg: dict,
-                 dialogue_only: bool = False, context_window: int = 20,
+                 dialogue_only: bool = False, context_window: int = 50,
                  gold: bool = False, annotator_style: str | None = None,
                  detections_by_conv: dict | None = None,
                  dry_run: bool = False,
@@ -622,7 +645,7 @@ def main():
     phase_cfg = get_phase_config("annotate", profile)
     model = args.model or phase_cfg["model"]
     mode = args.mode or phase_cfg.get("mode", "batch")
-    context_window = args.context if args.context is not None else phase_cfg.get("context_window", 20)
+    context_window = args.context if args.context is not None else phase_cfg.get("context_window", 50)
 
     # When style is set, override prompt version to per-style profiles
     if style and not args.prompt_version:

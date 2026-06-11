@@ -8,9 +8,10 @@ Pipeline scripts for LLM-based annotation. Each script is a self-contained pass 
 detect.py → annotate.py → label.py
                         → situate.py
                         → decompose.py → embed.py
+                                       → structure.py
 ```
 
-`label.py`, `situate.py`, and `decompose.py` all read from `annotate.py` output and can be run in any order relative to each other. `embed.py` requires `decompose.py` to have run first.
+`label.py`, `situate.py`, and `decompose.py` all read from `annotate.py` output and can be run in any order relative to each other. `embed.py` and `structure.py` both require `decompose.py` to have run first.
 
 ---
 
@@ -34,7 +35,6 @@ Reads detected moments and writes detailed Situation / Action / Result (SAR) ann
 python -m annotator.core.annotate --version v1
 python -m annotator.core.annotate --version v1 --gold
 python -m annotator.core.annotate --version v1 --split test
-python -m annotator.core.annotate --version v1 --style balanced
 ```
 
 ---
@@ -71,12 +71,27 @@ Reads SAR annotations and breaks each `action` and `result` field into lists of 
 python -m annotator.core.decompose --version v1
 python -m annotator.core.decompose --version v1 --gold
 python -m annotator.core.decompose --version v1 --split test
-python -m annotator.core.decompose --version v1 --style balanced
 ```
 
 ---
 
-### 4. `embed.py` — Facet embedding
+### 4a. `structure.py` — Facet classification
+
+Reads decomposed facets and classifies each:
+- `action_decomposed` facets as `scaffolding` / `rigor` / `neither` / `both`, using `prompts/annotator/action_labeller/classify_action.md`
+- `result_decomposed` facets as a single mutually-exclusive student-outcome verdict — `pos` (statements trend toward demonstrated understanding/realization) or `neg` (misconceptions/misunderstandings predominantly remain), using `prompts/annotator/student_result_classifier/classify_student_result.md`
+
+Adds `action_label` (str) and `result_label` (str) to each annotation. Annotations with no facets in a field are skipped and given the documented default (`"neither"` for actions, `"no_evidence"` for results — no statements means there's nothing to classify). Output is saved as `structure_labels_{target}.json`.
+
+```
+python -m annotator.core.structure --version v1
+python -m annotator.core.structure --version v1 --gold
+python -m annotator.core.structure --version v1 --split test
+```
+
+---
+
+### 4b. `embed.py` — Facet embedding
 
 Reads decomposed facets and encodes them into 384-dim dense vectors using `sentence-transformers/all-MiniLM-L6-v2`. Can also embed ground truth facets directly. Output is saved as `embedded_{target}.json` (or `data/embeddings_{labeller}.json` in ground truth mode).
 

@@ -63,11 +63,25 @@ At each moment, the tutor decides how much support to provide. Too much support 
 ## Your Task
 
 For the flagged moment, provide:
-- **Situation**: First, *evaluate why this is or isn't an appropriate time to push for rigor or scaffold*. Then, describe the student's state (e.g. stuck, confused, succeeding, coasting), and what pedagogical context makes this moment notable for scaffolding or rigor.  
+- **Situation**: First, restate what this moment is appropriate for, and *evaluate why this is or isn't an appropriate time to push for rigor or scaffold*. Then, describe the student's state (e.g. stuck, confused, succeeding, coasting), and what pedagogical context makes this moment notable for scaffolding or rigor.  
 - **Action**: What did the tutor do to push for rigor or scaffold? 
 - **Result**: Was the tutor's strategy effective, ineffective, or partially effective? Was the strategy too much, too little, or just the right amount of support? Why? Describe any changes in the student's learning and understanding, if applicable. 
 
-The following examples demonstrate the format and level of abstraction your output should have. 
+### Situation Guidance
+
+...
+
+### Action Guidance
+
+...
+
+### Result Guidance
+
+...
+
+## Examples
+
+The following examples demonstrate the format and level of detail and abstraction your output should have. 
 
 ### Example 1: 
 {
@@ -85,7 +99,7 @@ The following examples demonstrate the format and level of abstraction your outp
 
 ## Detected Moment
 
-The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context. A teacher has already reviewed this excerpt and noted that this moment is likely an appropriate time to {suggestion}. 
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context. {suggestion}
 
 {excerpt}
 
