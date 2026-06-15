@@ -17,9 +17,79 @@ import html
 import json
 
 from annotator.core.storage import (
-    load_transcript, load_benchmark_result,
+    load_transcript, load_benchmark_result, _get_backend,
     list_benchmark_result_files, get_benchmark_result_path,
 )
+
+
+def _safe_call(fn, *args, **kwargs):
+    """Call fn(...), returning ('', err_str) on exception so the viewer
+    can render best-effort even if prompt reconstruction fails."""
+    try:
+        return fn(*args, **kwargs), None
+    except Exception as e:
+        return "", f"{type(e).__name__}: {e}"
+
+
+def _load_config(version: str) -> dict:
+    """Read config.json saved by varied_smoke / `python -m benchmark`."""
+    data = load_benchmark_result(version, "config.json")
+    return data or {}
+
+
+def _trait_persona_for(conv_id: str, cut_turn: int, trait_mode: str) -> "str | None":
+    """Pull the cached trait persona, if any."""
+    safe_conv = conv_id.replace("/", "_")
+    safe_mode = (trait_mode or "joined-3").replace("/", "_")
+    relpath = f"results/benchmark/_trait_cache/{safe_conv}__{cut_turn}__{safe_mode}.json"
+    try:
+        data = _get_backend().read_json(relpath)
+        if data and isinstance(data, dict):
+            return data.get("persona")
+    except Exception:
+        pass
+    return None
+
+
+def _resolved_trait_mode(student_mode: str) -> str:
+    if student_mode == "trait":
+        return "joined-3"
+    return student_mode
+
+
+def _aggregate_from_annotations(scenarios: list, annotations_by_scenario: dict) -> dict:
+    """Compute per-dimension F1 + outcome rate + label distribution for the viewer header."""
+    from benchmark.core.score import score_scenarios
+
+    # score_scenarios expects (scenarios_dict_list, annotations_dict_list) aligned.
+    scenario_dicts = [
+        {"scenario_id": s["scenario_id"], "detection": s["detection"]}
+        for s in scenarios
+    ]
+    ann_dicts = []
+    for s in scenarios:
+        ann_doc = annotations_by_scenario.get(s["scenario_id"]) or {}
+        if "results" in ann_doc:
+            scen = (ann_doc.get("results") or {}).get(s["scenario_id"]) or {}
+        else:
+            scen = ann_doc.get(s["scenario_id"]) or {}
+        ann_dicts.append({"annotations": scen.get("annotations", []) or []})
+
+    scores = score_scenarios(scenario_dicts, ann_dicts)
+
+    # Action label distribution
+    counts = {"scaffolding": 0, "rigor": 0, "both": 0, "neither": 0, "other": 0}
+    for a in ann_dicts:
+        for ann in a.get("annotations", []) or []:
+            lbl = ann.get("action_label")
+            if isinstance(lbl, list):
+                lbl = lbl[0] if lbl else None
+            if lbl in counts:
+                counts[lbl] += 1
+            elif lbl:
+                counts["other"] += 1
+    scores["action_label_counts"] = counts
+    return scores
 
 
 def _classify_turn(turn_number: int, cut_turn: int) -> str:
@@ -29,9 +99,21 @@ def _classify_turn(turn_number: int, cut_turn: int) -> str:
 
 
 def load_data(version: str, profile: str):
+    """Return (scenarios, run_meta).
+
+    `scenarios` is a list of per-scenario dicts (transcripts + annotations +
+    reconstructed prompts + trait persona + reference transcript + ended_via).
+    `run_meta` carries the config + aggregate scores + label distribution.
+    """
     scenarios_raw = load_benchmark_result(version, "scenarios.json")
     if not scenarios_raw:
         raise FileNotFoundError(f"No scenarios.json found for version {version}")
+
+    cfg = _load_config(version)
+    tutor_mode = cfg.get("tutor_mode")
+    student_mode = cfg.get("student_mode") or "imitate_example"
+    prompt_version = cfg.get("prompt_version") or "v5"
+    resolved_trait_mode = _resolved_trait_mode(student_mode)
 
     # Exchanges
     exchanges = {}
@@ -102,6 +184,45 @@ def load_data(version: str, profile: str):
         else:
             anns = (ann_doc.get(scenario_id) or {}).get("annotations", []) or []
 
+        # --- Reconstruct prompts the models actually saw (best-effort) ---
+        from benchmark.core.tutors import build_tutor_system_prompt
+        from benchmark.core.students import build_student_system_prompt, is_trait_mode
+        from benchmark.core.exchange import _build_reference_transcript
+        from annotator.core.annotate import _suggestion_text
+
+        student_context = s.get("student_context") or ""
+        transcript_prefix_str = "\n".join(
+            f"Turn {t['turn_number']}. {t['role']}: {t['text']}"
+            for t in original_turns if t["turn_number"] <= cut_turn
+        )
+
+        reference_transcript = None
+        if tutor_mode == "oracle" and transcript_data:
+            reference_transcript = _build_reference_transcript(
+                transcript_data, cut_turn,
+            )
+
+        tutor_prompt, tutor_err = _safe_call(
+            build_tutor_system_prompt,
+            tutor_mode,
+            prompt_version=prompt_version,
+            student_context=student_context,
+            reference_transcript=reference_transcript,
+        )
+
+        persona = None
+        if is_trait_mode(student_mode):
+            persona = _trait_persona_for(conv_id, cut_turn, resolved_trait_mode)
+        student_prompt, student_err = _safe_call(
+            build_student_system_prompt,
+            student_mode,
+            student_context=student_context,
+            transcript_prefix=transcript_prefix_str,
+            persona=persona,
+        )
+
+        suggestion_text = _suggestion_text(detection.get("situation_label_agg"))
+
         scenarios.append({
             "scenario_id": scenario_id,
             "conv_id": conv_id,
@@ -121,17 +242,35 @@ def load_data(version: str, profile: str):
             "replayed_turns": replayed_turns,
             "annotations": anns,
             "tutor_model": exchange.get("tutor_model", profile),
+            "ended_via": exchange.get("ended_via", ""),
+            "tutor_system_prompt": tutor_prompt,
+            "tutor_prompt_error": tutor_err,
+            "student_system_prompt": student_prompt,
+            "student_prompt_error": student_err,
+            "trait_persona": persona,
+            "reference_transcript": reference_transcript,
+            "annotator_suggestion": suggestion_text,
         })
 
-    return scenarios
+    run_meta = {
+        "version": version,
+        "profile": profile,
+        "tutor_mode": tutor_mode or "default",
+        "student_mode": student_mode,
+        "prompt_version": prompt_version,
+        "config": cfg,
+        "aggregate": _aggregate_from_annotations(scenarios, annotations_by_scenario),
+    }
+    return scenarios, run_meta
 
 
 def escape(text):
     return html.escape(str(text)) if text else ""
 
 
-def build_html(scenarios: list, version: str, profile: str) -> str:
+def build_html(scenarios: list, version: str, profile: str, run_meta: dict | None = None) -> str:
     data_json = json.dumps(scenarios, ensure_ascii=False)
+    meta_json = json.dumps(run_meta or {}, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -264,9 +403,9 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 .facet {{ margin-top: 6px; font-size: 12px; line-height: 1.4; }}
 .facet-text {{ color: #333; }}
 .facet-badge {{
-  display: inline-block; font-size: 10px; font-weight: 700;
-  padding: 2px 7px; border-radius: 8px; margin-left: 6px;
-  text-transform: uppercase; letter-spacing: 0.3px; vertical-align: middle;
+  display: inline-block; font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 8px; margin-left: 6px;
+  vertical-align: middle; letter-spacing: 0;
 }}
 .facet-badge.scaffolding {{ background:#e3f2fd; color:#0d47a1; }}
 .facet-badge.rigor {{ background:#fff3e0; color:#e65100; }}
@@ -277,9 +416,74 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 .tag.appropriate-yes {{ background:#d4edda; color:#155724; border:1px solid #b1dfbb; }}
 .tag.appropriate-no {{ background:#f8d7da; color:#721c24; border:1px solid #f1aeb5; }}
 .tag.appropriate-amb {{ background:#e2e3e5; color:#383d41; border:1px solid #c6c8ca; }}
+
+/* Run header (top of page) */
+.run-header {{
+  background: #fff; border-bottom: 1px solid #e0e0e0; padding: 14px 24px;
+}}
+.run-header .row {{ display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }}
+.run-header .version-name {{ font-size: 16px; font-weight: 700; color: #222; }}
+.run-header .pill {{
+  display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px;
+  border-radius: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  background: #eef; color: #336; margin-right: 4px;
+}}
+.run-header .pill.oracle {{ background: #fff3e0; color: #b35900; }}
+.run-header .pill.default {{ background: #e3f2fd; color: #1565c0; }}
+.run-header .pill.trait {{ background: #f3e5f5; color: #6a1b9a; }}
+.run-header .scores {{ display: flex; gap: 18px; font-size: 13px; font-weight: 600; }}
+.run-header .score-block .label {{
+  font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px;
+}}
+.run-header .score-block .value {{ font-size: 18px; font-weight: 700; color: #222; }}
+.run-header .label-dist {{ font-size: 12px; color: #666; }}
+.run-header .label-dist .chip {{
+  display: inline-block; padding: 2px 7px; margin-right: 4px;
+  border-radius: 8px; font-weight: 600; font-size: 11px;
+}}
+.run-header .label-dist .chip.scaffolding {{ background: #e3f2fd; color: #0d47a1; }}
+.run-header .label-dist .chip.rigor {{ background: #fff3e0; color: #e65100; }}
+.run-header .label-dist .chip.both {{ background: #f3e5f5; color: #6a1b9a; }}
+.run-header .label-dist .chip.neither {{ background: #eceff1; color: #455a64; }}
+
+/* Collapsible reveals (prompts, persona, reference) */
+details.reveal {{
+  background: #f8f9fb; border: 1px solid #e2e4ea; border-radius: 6px;
+  padding: 6px 10px; margin-bottom: 8px;
+}}
+details.reveal[open] {{ background: #fff; }}
+details.reveal summary {{
+  cursor: pointer; font-size: 12px; font-weight: 700; color: #4a5568;
+  text-transform: uppercase; letter-spacing: 0.5px; outline: none;
+}}
+details.reveal summary .meta {{
+  font-weight: 400; color: #888; text-transform: none; letter-spacing: 0;
+  margin-left: 8px; font-size: 11px;
+}}
+details.reveal pre {{
+  margin-top: 8px; padding: 10px; background: #1e293b; color: #e2e8f0;
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11px;
+  line-height: 1.5; border-radius: 4px; white-space: pre-wrap;
+  max-height: 400px; overflow-y: auto;
+}}
+details.reveal.persona pre {{ background: #4a148c; color: #f3e5f5; }}
+details.reveal.reference pre {{ background: #663300; color: #ffe0b3; }}
+details.reveal.suggestion pre {{ background: #5d4037; color: #ffe0b3; }}
+
+.ended-via-badge {{
+  display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px;
+  border-radius: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  margin-left: 6px;
+}}
+.ended-via-badge.END {{ background: #d4edda; color: #155724; }}
+.ended-via-badge.PROBLEM_CHANGE {{ background: #cfe2ff; color: #084298; }}
+.ended-via-badge.NEXT_PROBLEM {{ background: #cfe2ff; color: #084298; }}  /* legacy v5 */
+.ended-via-badge.MAX_TURNS {{ background: #fff3cd; color: #856404; }}
 </style>
 </head>
 <body>
+<div class="run-header" id="run-header"></div>
+
 <div class="header">
   <h1>Replay Viewer</h1>
   <select id="scenario-select" onchange="selectScenario(this.value)">
@@ -310,16 +514,51 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
 
 <script>
 const DATA = {data_json};
+const META = {meta_json};
 
-const sel = document.getElementById('scenario-select');
-DATA.forEach((s, i) => {{
-  const opt = document.createElement('option');
-  opt.value = i;
-  const label = s.scenario_id.length > 60 ? s.scenario_id.substring(0, 57) + '...' : s.scenario_id;
-  opt.textContent = (i + 1) + '. ' + label;
-  sel.appendChild(opt);
-}});
-if (DATA.length > 0) {{ sel.value = 0; selectScenario(0); }}
+function renderRunHeader() {{
+  const m = META || {{}};
+  const agg = m.aggregate || {{}};
+  const scaf = agg.scaffolding || {{}};
+  const rig = agg.rigor || {{}};
+  const lc = agg.action_label_counts || {{}};
+  const tutorPill = '<span class="pill ' + escapeHtml(m.tutor_mode || 'default') + '">' +
+                    escapeHtml(m.tutor_mode || 'default') + ' tutor</span>';
+  const studentPill = '<span class="pill ' + (String(m.student_mode || '').includes('trait') ? 'trait' : '') + '">' +
+                      escapeHtml(m.student_mode || '') + ' student</span>';
+  const chipLabels = {{
+    'scaffolding': 'scaffolding',
+    'rigor': 'rigor push',
+    'both': 'scaffolding + rigor',
+    'neither': 'neither',
+  }};
+  const chips = ['scaffolding', 'rigor', 'both', 'neither'].map(k =>
+    '<span class="chip ' + k + '">' + chipLabels[k] + ': ' + (lc[k] || 0) + '</span>'
+  ).join('');
+  const html = (
+    '<div class="row">' +
+      '<div class="version-name">' + escapeHtml(m.version || '') + '</div>' +
+      tutorPill + studentPill +
+      '<div style="margin-left:auto;color:#888;font-size:12px;">prompt_version=' + escapeHtml(m.prompt_version || '') +
+        ' · profile=' + escapeHtml(m.profile || '') + '</div>' +
+    '</div>' +
+    '<div class="row" style="margin-top:8px;">' +
+      '<div class="scores">' +
+        '<div class="score-block"><div class="label">scaffolding F1</div><div class="value">' + (scaf.f1 != null ? scaf.f1.toFixed(3) : '—') + '</div></div>' +
+        '<div class="score-block"><div class="label">rigor F1</div><div class="value">' + (rig.f1 != null ? rig.f1.toFixed(3) : '—') + '</div></div>' +
+        '<div class="score-block"><div class="label">outcome+ rate</div><div class="value">' + (agg.outcome_pos_rate != null ? agg.outcome_pos_rate.toFixed(2) : '—') + '</div></div>' +
+        // Show n_scored_for_f1 / n_scenarios ONLY when some scenarios were dropped
+        // (gold or LM produced a non-substantive label). In the normal case
+        // everything scores and the "10/10" block is just noise.
+        ((agg.n_scored_for_f1 != null && agg.n_scenarios != null && agg.n_scored_for_f1 < agg.n_scenarios)
+          ? '<div class="score-block" title="Scenarios excluded from F1 because gold or LM label was mixed/unknown/unclear"><div class="label">scored</div><div class="value">' + agg.n_scored_for_f1 + '/' + agg.n_scenarios + '</div></div>'
+          : '') +
+      '</div>' +
+      '<div class="label-dist" style="margin-left:auto;align-self:center;">action labels: ' + chips + '</div>' +
+    '</div>'
+  );
+  document.getElementById('run-header').innerHTML = html;
+}}
 
 function escapeHtml(s) {{
   const div = document.createElement('div');
@@ -382,10 +621,69 @@ function appropriateClass(agg, actionLabels) {{
   return pred ? 'yes' : 'no';
 }}
 
+const ACTION_LABEL_TEXT = {{
+  'scaffolding': 'scaffolding',
+  'rigor': 'rigor push',
+  'both': 'scaffolding + rigor',
+  'neither': 'neither',
+  'unclear': 'unclear',
+}};
+const RESULT_LABEL_TEXT = {{
+  'pos': 'student progressed',
+  'neg': 'student stuck',
+  'no_evidence': 'no evidence',
+  'unclear': 'unclear',
+}};
+
+function actionBadge(lbl) {{
+  if (!lbl) return '';
+  const txt = ACTION_LABEL_TEXT[lbl] || lbl;
+  return '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(txt) + '</span>';
+}}
+function resultBadge(lbl) {{
+  if (!lbl) return '';
+  const txt = RESULT_LABEL_TEXT[lbl] || lbl;
+  return '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(txt) + '</span>';
+}}
+
+function renderReveal(klass, summary, body, meta) {{
+  if (!body) return '';
+  const metaHtml = meta ? '<span class="meta">' + escapeHtml(meta) + '</span>' : '';
+  return '<details class="reveal ' + klass + '"><summary>' + escapeHtml(summary) + metaHtml + '</summary>' +
+         '<pre>' + escapeHtml(body) + '</pre></details>';
+}}
+
 function renderAnnotations(s) {{
   const det = s.detection || {{}};
   const anns = s.annotations || [];
   let h = '';
+
+  // Ended-via badge inline at the top
+  if (s.ended_via) {{
+    h += '<div style="margin-bottom:8px;font-size:11px;color:#666;">terminated via ' +
+         '<span class="ended-via-badge ' + escapeHtml(s.ended_via) + '">' + escapeHtml(s.ended_via) + '</span></div>';
+  }}
+
+  // Collapsible reveals: prompts + persona + reference + annotator suggestion
+  const charsTutor = s.tutor_system_prompt ? s.tutor_system_prompt.length : 0;
+  const charsStudent = s.student_system_prompt ? s.student_system_prompt.length : 0;
+  h += renderReveal('tutor-prompt', 'Tutor system prompt',
+                    s.tutor_system_prompt || (s.tutor_prompt_error || ''),
+                    charsTutor ? `${{charsTutor}} chars` : null);
+  h += renderReveal('student-prompt', 'Student system prompt',
+                    s.student_system_prompt || (s.student_prompt_error || ''),
+                    charsStudent ? `${{charsStudent}} chars` : null);
+  // Note: trait_persona is already substituted into student_system_prompt
+  // (replaces [[PERSONA_DESCRIPTION_HERE]]), so we don't show it as a
+  // separate reveal -- would just duplicate the same text.
+  if (s.reference_transcript) {{
+    h += renderReveal('reference', 'Oracle reference (post-cut real transcript)',
+                      s.reference_transcript, `${{s.reference_transcript.length}} chars`);
+  }}
+  if (s.annotator_suggestion) {{
+    h += renderReveal('suggestion', 'Annotator suggestion',
+                      s.annotator_suggestion, 'fed into the v13 annotator prompt');
+  }}
 
   if (det.turn_start != null) {{
     h += '<div class="detection-box">' +
@@ -400,13 +698,23 @@ function renderAnnotations(s) {{
       const votes = Object.entries(det.cut_votes).map(([k, v]) => k + ':' + v).join(', ');
       h += '<div><span class="label">Votes:</span> ' + escapeHtml(votes) + ' (cluster=' + (det.cluster_size || '?') + ')</div>';
     }}
+    if (det.situation) {{
+      h += '<div style="margin-top:6px;"><span class="label">Human note:</span> <span style="color:#555;font-style:italic;">' + escapeHtml(det.situation) + '</span></div>';
+    }}
     h += '</div>';
   }}
 
   // Flatten action labels across all annotations for verdict.
+  // Lucy's structure pipeline emits a single string per annotation; older
+  // annotator output emitted a list. Accept both.
   const allActionLabels = [];
   for (const a of anns) {{
-    for (const lbl of (a.action_label || [])) allActionLabels.push(lbl);
+    const lbl = a.action_label;
+    if (Array.isArray(lbl)) {{
+      for (const x of lbl) allActionLabels.push(x);
+    }} else if (typeof lbl === 'string' && lbl) {{
+      allActionLabels.push(lbl);
+    }}
   }}
   const verdict = appropriateClass(det.situation_label_agg, allActionLabels);
   const verdictTag = (verdict === 'yes') ? 'appropriate ✓'
@@ -435,32 +743,35 @@ function renderAnnotations(s) {{
       h += '<div class="ann-field"><div class="ann-field-label">Situation</div><div class="ann-field-value">' + escapeHtml(a.situation) + '</div></div>';
     }}
 
-    if (a.action_decomposed && a.action_decomposed.length) {{
-      h += '<div class="ann-field"><div class="ann-field-label">Action facets</div>';
-      const actionLabels = a.action_label || [];
-      for (let i = 0; i < a.action_decomposed.length; i++) {{
-        const lbl = actionLabels[i] || '';
-        h += '<div class="facet"><span class="facet-text">' + escapeHtml(a.action_decomposed[i]) + '</span>';
-        if (lbl) h += '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(lbl) + '</span>';
-        h += '</div>';
-      }}
-      h += '</div>';
-    }} else if (a.action) {{
+    // Action: show prose narrative + overall classification badge + facet bullets.
+    // (Lucy's structure pipeline emits ONE label per annotation, not per facet,
+    // so facet rows don't carry their own badge.)
+    if (a.action) {{
       h += '<div class="ann-field"><div class="ann-field-label">Action</div><div class="ann-field-value">' + escapeHtml(a.action) + '</div></div>';
     }}
-
-    if (a.result_decomposed && a.result_decomposed.length) {{
-      h += '<div class="ann-field"><div class="ann-field-label">Result facets</div>';
-      const resultLabels = a.result_label || [];
-      for (let i = 0; i < a.result_decomposed.length; i++) {{
-        const lbl = resultLabels[i] || '';
-        h += '<div class="facet"><span class="facet-text">' + escapeHtml(a.result_decomposed[i]) + '</span>';
-        if (lbl) h += '<span class="facet-badge ' + escapeHtml(lbl) + '">' + escapeHtml(lbl) + '</span>';
-        h += '</div>';
+    if (a.action_decomposed && a.action_decomposed.length) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Action facets</div>';
+      const overall = (typeof a.action_label === 'string') ? a.action_label
+                    : (Array.isArray(a.action_label) ? a.action_label[0] : '');
+      if (overall) h += '<div style="margin:4px 0 6px;">' + actionBadge(overall) + '</div>';
+      for (let i = 0; i < a.action_decomposed.length; i++) {{
+        h += '<div class="facet"><span class="facet-text">' + escapeHtml(a.action_decomposed[i]) + '</span></div>';
       }}
       h += '</div>';
-    }} else if (a.result) {{
+    }}
+
+    if (a.result) {{
       h += '<div class="ann-field"><div class="ann-field-label">Result</div><div class="ann-field-value">' + escapeHtml(a.result) + '</div></div>';
+    }}
+    if (a.result_decomposed && a.result_decomposed.length) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Result facets</div>';
+      const overallR = (typeof a.result_label === 'string') ? a.result_label
+                     : (Array.isArray(a.result_label) ? a.result_label[0] : '');
+      if (overallR) h += '<div style="margin:4px 0 6px;">' + resultBadge(overallR) + '</div>';
+      for (let i = 0; i < a.result_decomposed.length; i++) {{
+        h += '<div class="facet"><span class="facet-text">' + escapeHtml(a.result_decomposed[i]) + '</span></div>';
+      }}
+      h += '</div>';
     }}
 
     h += '</div>';
@@ -469,6 +780,19 @@ function renderAnnotations(s) {{
   return h;
 }}
 
+// --- Bootstrap (must run AFTER all const declarations above so the JS
+// temporal-dead-zone doesn't trip when selectScenario(0) reaches actionBadge
+// / resultBadge, which read ACTION_LABEL_TEXT / RESULT_LABEL_TEXT). ---
+const sel = document.getElementById('scenario-select');
+DATA.forEach((s, i) => {{
+  const opt = document.createElement('option');
+  opt.value = i;
+  const label = s.scenario_id.length > 60 ? s.scenario_id.substring(0, 57) + '...' : s.scenario_id;
+  opt.textContent = (i + 1) + '. ' + label;
+  sel.appendChild(opt);
+}});
+renderRunHeader();
+if (DATA.length > 0) {{ sel.value = 0; selectScenario(0); }}
 
 </script>
 </body>
@@ -481,19 +805,19 @@ def main():
     ap.add_argument("--version", required=True)
     ap.add_argument("--profile", default="anthropic")
     ap.add_argument("--out", default=None,
-                    help="Output HTML path (default: results/benchmark/<version>/viewer_replay_<profile>.html)")
+                    help="Output HTML path (default: results/benchmark/<version>/<version>.html)")
     args = ap.parse_args()
 
-    scenarios = load_data(args.version, args.profile)
+    scenarios, run_meta = load_data(args.version, args.profile)
     print(f"Loaded {len(scenarios)} scenarios for {args.profile}")
-    out = build_html(scenarios, args.version, args.profile)
+    out = build_html(scenarios, args.version, args.profile, run_meta)
 
     if args.out:
         out_path = args.out
     else:
         from annotator.core.storage import get_benchmark_result_path
         base = get_benchmark_result_path(args.version)
-        out_path = str(base / f"viewer_replay_{args.profile}.html")
+        out_path = str(base / f"{args.version}.html")
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(out)

@@ -1,5 +1,8 @@
 """Tests for eval metric functions."""
 import pytest
+
+pytest.importorskip("krippendorff")  # annotator.eval.eval imports krippendorff
+
 from annotator.eval.eval import (
     cohens_kappa, compute_consensus_label, map_to_binary, compute_student_outcome_f1,
     EFFECTIVENESS_LABELS, BINARY_LABELS,

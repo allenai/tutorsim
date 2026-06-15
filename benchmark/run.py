@@ -364,9 +364,18 @@ def _resolve_or_create_version(config: dict) -> str:
     Reads results/benchmark/_active_runs/{tutor_profile}.json. If that pointer
     names a version whose _complete.json marker doesn't exist, reuse it; this
     is what makes a ctrl-C'd run resumable across midnight. Otherwise generate
-    f'{profile}_{date}' and write a fresh pointer.
+    f'{tutor_model}_{date}' and write a fresh pointer.
+
+    Naming convention: the tutor MODEL (not the profile) goes in the version
+    string so future replays against a different LM are visually distinct on
+    disk. The resolved tutor model is read via get_phase_config("tutor", ...).
     """
+    from annotator.core.config import get_phase_config
+
     tutor_profile = config.get("tutor_profiles", ["anthropic"])[0]
+    tutor_model = get_phase_config("tutor", tutor_profile)["model"]
+    tutor_slug = tutor_model.replace("/", "_")
+
     pointer = load_benchmark_result("_active_runs", f"{tutor_profile}.json")
     if pointer:
         candidate = pointer.get("version")
@@ -376,7 +385,7 @@ def _resolve_or_create_version(config: dict) -> str:
                 logger.info("Resuming in-progress version: %s", candidate)
                 return candidate
 
-    new_version = f"{tutor_profile}_{datetime.date.today().strftime('%Y-%m-%d')}"
+    new_version = f"{tutor_slug}_{datetime.date.today().strftime('%Y-%m-%d')}"
     save_benchmark_result("_active_runs", f"{tutor_profile}.json", data={
         "version": new_version,
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),

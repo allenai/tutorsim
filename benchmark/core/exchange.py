@@ -11,7 +11,6 @@ real transcript patterns where the same speaker sends consecutive messages.
 
 import math
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
 
 from annotator.core.client import (
     ModelClient, build_batch_entry, run_batch, run_sync_entries,
@@ -21,8 +20,6 @@ import logging
 from .scenarios import Scenario
 
 logger = logging.getLogger(__name__)
-
-PROMPTS_BASE = Path(__file__).parent.parent.parent / "prompts" / "benchmark"
 
 NEXT_DELIMITER = "[NEXT]"
 NEW_MESSAGE_DELIMITER = "[NEW_MESSAGE]"
@@ -43,21 +40,34 @@ def _check_end_token(text: str) -> tuple[str, bool]:
     return cleaned, True
 
 
-NEXT_PROBLEM_TOKEN = "[NEXT_PROBLEM]"
+PROBLEM_CHANGE_TOKEN = "[PROBLEM_CHANGE]"
+NEXT_PROBLEM_TOKEN = "[NEXT_PROBLEM]"  # legacy alias for v5 and earlier prompts
 
 
 def _parse_tutor_tokens(text: str) -> tuple[str, bool, bool]:
     """Strip tutor control tokens and report which were present.
 
-    Returns (cleaned_text, ended, next_problem).
-    END takes precedence: if both tokens appear, ended=True, next_problem=False.
+    Returns (cleaned_text, ended, problem_change).
+    END takes precedence: if both kinds of tokens appear, ended=True,
+    problem_change=False.
+
+    Both [PROBLEM_CHANGE] (v6+) and [NEXT_PROBLEM] (v5 legacy) trigger
+    problem_change=True. v6 prompts the tutor to emit [PROBLEM_CHANGE]
+    because the "scene change" framing reads more clearly as "this problem
+    is over" than "give me a new one to work on" -- the latter wording
+    seems to encourage the AI tutor to keep going onto follow-up problems.
     """
     has_end = END_TOKEN in text
-    has_next = NEXT_PROBLEM_TOKEN in text
-    cleaned = text.replace(END_TOKEN, "").replace(NEXT_PROBLEM_TOKEN, "").rstrip()
+    has_change = (PROBLEM_CHANGE_TOKEN in text) or (NEXT_PROBLEM_TOKEN in text)
+    cleaned = (
+        text.replace(END_TOKEN, "")
+            .replace(PROBLEM_CHANGE_TOKEN, "")
+            .replace(NEXT_PROBLEM_TOKEN, "")
+            .rstrip()
+    )
     if has_end:
         return cleaned, True, False
-    return cleaned, False, has_next
+    return cleaned, False, has_change
 
 
 @dataclass
@@ -72,16 +82,11 @@ class Exchange:
         "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
     })
     completed: bool = False
-    ended_via: str = ""                                   # "END" | "NEXT_PROBLEM" | "MAX_TURNS" | ""
+    # "END" | "PROBLEM_CHANGE" | "MAX_TURNS" | "" (older runs may have "NEXT_PROBLEM")
+    ended_via: str = ""
 
     def to_dict(self):
         return asdict(self)
-
-
-def _load_prompt(prompt_version: str, filename: str) -> str:
-    path = PROMPTS_BASE / prompt_version / filename
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read().strip()
 
 
 def _build_role_prompt(
@@ -99,53 +104,46 @@ def _build_role_prompt(
 ) -> tuple[str, str]:
     """Build (cacheable_head, tail) for either tutor or student.
 
-    head = system_prompt (with substitutions) + "Here is the conversation so far:\\n" + transcript_prefix
+    Thin coordinator: delegates system-prompt assembly to
+    `benchmark.core.tutors.build_tutor_system_prompt` /
+    `benchmark.core.students.build_student_system_prompt`, then wraps the
+    result with the running conversation history.
+
+    head = system_prompt + "Here is the conversation so far:\\n" + transcript_prefix
     tail = extra + "\\n\\n" + role_instruction
 
-    The head is byte-identical across all rounds of one scenario, so it hits
-    the prompt cache (Anthropic explicit / OpenAI automatic) on round 2+.
-
-    Tutor mode: when tutor_mode is set and role=="TUTOR", loads
-    tutors/{tutor_mode}.txt instead of tutor_system.txt and substitutes
-    {reference_transcript} (which must be supplied).
-
-    Student trait mode: see existing docstring.
+    The head is byte-stable across rounds (system + static cut), so the
+    prompt cache hits on round 2+. Generated turns flow through `extra` (tail).
     """
+    from benchmark.core.tutors import build_tutor_system_prompt
+    from benchmark.core.students import build_student_system_prompt, is_trait_mode
+
     if role == "TUTOR":
-        if tutor_mode:
-            system_prompt = _load_prompt(prompt_version, f"tutors/{tutor_mode}.txt")
-        else:
-            system_prompt = _load_prompt(prompt_version, "tutor_system.txt")
+        system_prompt = build_tutor_system_prompt(
+            tutor_mode,
+            prompt_version=prompt_version,
+            student_context=student_context,
+            reference_transcript=reference_transcript,
+        )
         role_instruction = "Respond as the TUTOR. Give only your response, no labels or prefixes."
     else:
-        if student_mode:
-            student_file = f"students/{student_mode}.txt"
-        else:
-            student_file = "student_system.txt"
-        system_prompt = _load_prompt(prompt_version, student_file)
-        role_instruction = "Respond as the STUDENT. Give only your response, no labels or prefixes."
-
-    system_prompt = system_prompt.replace("{student_context}", student_context)
-
-    if role == "TUTOR" and tutor_mode:
-        if reference_transcript is None:
-            raise ValueError(
-                f"_build_role_prompt: tutor_mode={tutor_mode!r} requires "
-                "reference_transcript"
-            )
-        system_prompt = system_prompt.replace("{reference_transcript}", reference_transcript)
-
-    if role == "STUDENT" and student_mode == "trait":
-        if scenario is None or trait_client is None or trait_model is None:
-            raise ValueError(
-                "_build_role_prompt: student_mode='trait' requires scenario, "
-                "trait_client, and trait_model"
-            )
-        from benchmark.core.traits import get_or_generate_trait
-        persona = get_or_generate_trait(
-            scenario, prompt_version, trait_client, trait_model,
+        mode = student_mode or "simple"
+        persona = None
+        if is_trait_mode(mode):
+            if scenario is None or trait_client is None or trait_model is None:
+                raise ValueError(
+                    f"_build_role_prompt: student_mode={mode!r} requires scenario, "
+                    "trait_client, and trait_model"
+                )
+            from benchmark.core.traits import get_or_generate_trait
+            persona = get_or_generate_trait(scenario, mode, trait_client, trait_model)
+        system_prompt = build_student_system_prompt(
+            mode,
+            student_context=student_context,
+            transcript_prefix=transcript_prefix,
+            persona=persona,
         )
-        system_prompt = system_prompt.replace("{trait_persona}", persona)
+        role_instruction = "Respond as the STUDENT. Give only your response, no labels or prefixes."
 
     head = f"{system_prompt}\n\nHere is the conversation so far:\n\n{transcript_prefix}"
     tail = f"{extra}\n\n{role_instruction}"
@@ -248,7 +246,8 @@ def run_exchange(
 ) -> Exchange:
     """Sync mode multi-turn exchange.
 
-    Both [END] and [NEXT_PROBLEM] terminate; recorded on Exchange.ended_via.
+    Both [END] and [PROBLEM_CHANGE] (or legacy [NEXT_PROBLEM]) terminate;
+    recorded on Exchange.ended_via.
     Each tutor/student call passes scenario.transcript_prefix's head as
     cacheable_prefix so the static head hits the prompt cache on round 2+.
 
@@ -293,9 +292,9 @@ def run_exchange(
         )
         _add_usage(exchange.tutor_usage, response.usage)
 
-        text, ended, next_problem = _parse_tutor_tokens(response.text)
+        text, ended, problem_change = _parse_tutor_tokens(response.text)
         messages = _split_messages(text)
-        if not messages and not (ended or next_problem):
+        if not messages and not (ended or problem_change):
             messages = ["..."]
         if messages:
             extra, next_turn_num = _append_turns_to_extra(
@@ -305,8 +304,8 @@ def run_exchange(
         if ended:
             ended_via = "END"
             break
-        if next_problem:
-            ended_via = "NEXT_PROBLEM"
+        if problem_change:
+            ended_via = "PROBLEM_CHANGE"
             break
         if len(exchange.generated_turns) >= max_turns:
             ended_via = "MAX_TURNS"
@@ -438,9 +437,9 @@ def run_exchanges_batch(
             if result.get("usage"):
                 _add_usage(exchange.tutor_usage, result["usage"])
 
-            text, ended, next_problem = _parse_tutor_tokens(result["text"])
+            text, ended, problem_change = _parse_tutor_tokens(result["text"])
             messages = _split_messages(text)
-            if not messages and not (ended or next_problem):
+            if not messages and not (ended or problem_change):
                 messages = ["..."]
             if messages:
                 extras[sid], next_turns[sid] = _append_turns_to_extra(
@@ -451,8 +450,8 @@ def run_exchanges_batch(
                 ended_via[sid] = "END"
                 ended_this_round.append(sid)
                 continue
-            if next_problem:
-                ended_via[sid] = "NEXT_PROBLEM"
+            if problem_change:
+                ended_via[sid] = "PROBLEM_CHANGE"
                 ended_this_round.append(sid)
                 continue
             if len(exchange.generated_turns) >= max_turns:

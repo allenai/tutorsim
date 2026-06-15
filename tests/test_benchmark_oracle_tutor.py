@@ -67,7 +67,7 @@ def test_build_reference_transcript_empty_when_cut_is_last_turn():
 def test_build_role_prompt_oracle_mode_substitutes_reference(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: (
             "ORACLE ctx={student_context} ref={reference_transcript}"
             if "tutors/oracle" in fname
@@ -91,7 +91,7 @@ def test_build_role_prompt_oracle_mode_substitutes_reference(tmp_path, monkeypat
 def test_build_role_prompt_oracle_without_reference_raises(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "ORACLE {student_context} {reference_transcript}",
     )
     with pytest.raises(ValueError, match="reference_transcript"):
@@ -113,7 +113,7 @@ def test_build_role_prompt_tutor_mode_unset_uses_default_prompt(tmp_path, monkey
     def _loader(version, fname):
         loaded.append(fname)
         return "DEFAULT {student_context}"
-    monkeypatch.setattr("benchmark.core.exchange._load_prompt", _loader)
+    monkeypatch.setattr("benchmark.core.tutors._load_template", _loader)
 
     head, tail = _build_role_prompt(
         "TUTOR",
@@ -135,7 +135,7 @@ def test_run_exchange_oracle_mode_passes_reference_in_head(tmp_path, monkeypatch
         if "tutors/oracle" in fname:
             return "ORACLE {student_context} REF={reference_transcript}"
         return "DEFAULT {student_context}"
-    monkeypatch.setattr("benchmark.core.exchange._load_prompt", _loader)
+    monkeypatch.setattr("benchmark.core.tutors._load_template", _loader)
 
     seen_prefixes = []
     def _tutor_generate(prompt, **kwargs):
@@ -165,7 +165,7 @@ def test_run_exchange_oracle_mode_passes_reference_in_head(tmp_path, monkeypatch
 def test_run_exchange_oracle_without_transcripts_raises(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "X {student_context} {reference_transcript}",
     )
     tutor = _stub_client(["Hi"])
@@ -186,7 +186,7 @@ def test_run_exchange_tutor_mode_none_ignores_transcripts(tmp_path, monkeypatch)
     even if transcripts is passed."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "DEFAULT {student_context}",
     )
     tutor = _stub_client(["Done. [NEXT_PROBLEM]"])
@@ -199,4 +199,4 @@ def test_run_exchange_tutor_mode_none_ignores_transcripts(tmp_path, monkeypatch)
         transcripts={"conv1": _conv_with_turns(num_turns=8)},
     )
     assert ex.completed is True
-    assert ex.ended_via == "NEXT_PROBLEM"
+    assert ex.ended_via == "PROBLEM_CHANGE"

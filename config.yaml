@@ -69,30 +69,6 @@ profiles:
     advisor:
       timeout: 300
 
-  gemini_25_pro:
-    model: gemini-2.5-pro
-    max_tokens: 65536
-    mode: batch
-    poll_interval: 30
-    thinking: true
-    thinking_budget: 16384
-    annotate:
-      context_window: 50
-    advisor:
-      timeout: 300
-
-  gemini_35_flash:
-    model: gemini-3.5-flash
-    max_tokens: 65536
-    mode: batch
-    poll_interval: 30
-    thinking: true
-    thinking_budget: 16384
-    annotate:
-      context_window: 50
-    advisor:
-      timeout: 300
-
   openai:
     model: gpt-5.5-2026-04-23
     max_tokens: 128000
@@ -122,21 +98,6 @@ profiles:
       max_tokens: 65536
     annotate:
       context_window: 20
-    advisor:
-      timeout: 300
-
-  anthropic46:
-    model: claude-opus-4-6           # default for student / detect / annotate / label / advisor
-    max_tokens: 128000
-    mode: batch
-    poll_interval: 60
-    thinking: true
-    thinking_budget: 16384
-    tutor:
-      model: claude-opus-4-8         # tutor on latest; all other phases on 4-6
-      max_tokens: 65536
-    annotate:
-      context_window: 50
     advisor:
       timeout: 300
 
@@ -174,7 +135,7 @@ batch:
 
 # Benchmark model config
 benchmark:
-  version: null                # null = auto-generate as {tutor_profile}_{date}
+  version: null                # null = auto-generate as {tutor_model}_{date} (model not profile, so swapping LMs creates a visually distinct run dir)
   scenarios:
     mode: human                   # detected | random | both | human
     max_scenarios: 0
@@ -185,24 +146,39 @@ benchmark:
   exchange:
     max_turns: 100               # was: num_turns: 2 — tutor decides end via [END]/[NEXT_PROBLEM]; this is a hard cap on generated turns
     poll_interval: 60
-    prompt_version: v5           # v5 = rewritten tutor prompt, [NEW_MESSAGE] delimiter, [NEXT_PROBLEM] only
+    prompt_version: v6           # v6 = v5 + rigor-push section + tightened [NEXT_PROBLEM] "one problem" semantics (replay-stopper)
 
   tutor_profiles:
     - anthropic
 
   student:
     profile: anthropic
-    # Selects prompts/benchmark/{prompt_version}/students/{mode}.txt.
-    # Modes ported from synth-students (Alexis et al.):
-    #   imitate_example          - imitate the real student from the transcript prefix (strongest realism)
-    #   simple                   - generic K-12 student persona
-    #   expert                   - strong student, no mistakes (upper-bound control)
-    #   paraphrase_with_example  - paraphrase the real student's style
-    # Set to null to fall back to {prompt_version}/student_system.txt (v1 behavior).
+    # Student prompt templates live in code (benchmark/synth_students/prompts.py)
+    # -- the prompt_version dir does NOT contain per-mode student .txt files.
+    # Accepted modes (dispatched by benchmark/core/students.py):
+    #   simple                    - generic K-12 student persona
+    #   expert                    - strong student, no mistakes (upper-bound control)
+    #   imitate_example           - imitate the real student from the transcript prefix (strongest realism)
+    #   paraphrase_with_example   - paraphrase the real student's style
+    #   trait                     - LLM-generated joined-3 persona (oracle-safe, prefix-only)
+    #   trait_with_example        - trait persona + real student example
+    #   <dimension>-<n>           - single-dimension persona, n sentences
+    #                               (dimensions: distractedness, active_vs_passive_learning,
+    #                                affect, misconceptions, learning_efficiency)
+    #   joined-<n>                - all-dimension persona, n sentences per dimension
+    # null falls back to "simple" (see benchmark/core/exchange.py:_build_role_prompt).
     mode: imitate_example
 
   tutor:
-    mode: null         # null = default v5 tutor; "oracle" = mimic real tutor (sees post-cut)
+    # Tutor prompt templates live in prompts/benchmark/{prompt_version}/tutors/.
+    # Accepted modes (dispatched by benchmark/core/tutors.py):
+    #   null / default            - prompts/benchmark/{version}/tutors/default.txt
+    #                               (v5 and earlier: tutor_system.txt at the version root)
+    #   oracle                    - prompts/benchmark/{version}/tutors/oracle.txt
+    #                               (requires the real post-cut transcript as reference)
+    #   rigor                     - prompts/benchmark/{version}/tutors/rigor.txt
+    #                               (rigor-only: ablation cell to isolate the rigor push)
+    mode: null
 
   detect:
     profile: anthropic
@@ -214,11 +190,5 @@ benchmark:
     context_window: 20             # was: 50 -- matches Lucy's revert
     mode: batch
     poll_interval: 60
-
-  aggregation:
-    label_weights:
-      effective: 1.0
-      partial: 0.5
-      ineffective: 0.0
 
   with_screenshots: false  # opt-in; requires vision-capable models on tutor, student, annotator, detector, labeller

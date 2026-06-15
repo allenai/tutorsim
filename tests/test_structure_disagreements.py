@@ -5,6 +5,10 @@ LLM 4-way action labels are decomposed into independent (scaffolding, rigor)
 yes/no dimensions, sentinel labels ("unclear"/"unknown") are excluded, and a
 span is a disagreement only when the two sides differ on at least one dimension.
 """
+import pytest
+
+pytest.importorskip("krippendorff")  # transitively imported via annotator.eval.eval
+
 from annotator.iteration.structure_disagreements import (
     collect_action_direction_disagreements,
     collect_action_direction_agreements,

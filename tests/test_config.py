@@ -26,7 +26,7 @@ class TestGetPhaseConfig:
         cfg = get_phase_config("annotate", "anthropic")
         assert "max_tokens" in cfg
         assert "context_window" in cfg
-        assert cfg["context_window"] == 50
+        assert cfg["context_window"] == 20  # matches anthropic.annotate.context_window in config.yaml
 
     def test_unknown_profile_raises(self):
         from annotator.core.config import get_phase_config

@@ -15,7 +15,7 @@ from annotator.core.storage import save_benchmark_result
 from annotator.core.utils import load_transcripts
 from annotator.core.client import ModelClient
 from benchmark.core.scenarios import extract_human_scenarios
-from benchmark.core.exchange import run_exchange
+from benchmark.core.exchange import run_exchange, run_exchanges_batch
 from benchmark.run import run_phase2_and_score
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s | %(message)s")
@@ -64,20 +64,37 @@ def pick_balanced(scenarios, per_label: int, seed: int = 42):
     return chosen
 
 
+def _default_version(profile: str, tutor_mode: str | None, student_mode: str) -> str:
+    """Build a version name that surfaces the tutor MODEL, so replays under
+    a different LM are visually distinct on disk."""
+    tutor_model = get_phase_config("tutor", profile)["model"].replace("/", "_")
+    tm = tutor_mode or "default"
+    return f"{tutor_model}_{tm}_tutor_{student_mode}_student_{datetime.date.today().strftime('%Y%m%d')}"
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--version", default=f"varied_smoke_{datetime.date.today().isoformat()}")
+    p.add_argument("--version", default=None,
+                   help="Run directory name. Default: {tutor_model}_{tutor_mode}_tutor_{student_mode}_student_{date}")
     p.add_argument("--per-label", type=int, default=5,
                    help="scenarios per agg label (scaffolding, rigor)")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--profile", default="anthropic")
     p.add_argument("--style", default="balanced",
                    help="single annotator style to run (one of generous|balanced|demanding); profiles prompt is used")
-    p.add_argument("--mode", default="sync", choices=["sync", "batch"])
+    p.add_argument("--mode", default="batch", choices=["sync", "batch"])
+    p.add_argument("--poll-interval", type=int, default=60,
+                   help="seconds between batch-job poll checks (batch mode only)")
     p.add_argument("--max-turns", type=int, default=100)
-    p.add_argument("--prompt-version", default="v5")
+    p.add_argument("--prompt-version", default="v6")
     p.add_argument("--student-mode", default="imitate_example")
+    p.add_argument("--tutor-mode", default=None,
+                   help="None=default tutor; 'oracle'=tutor sees post-cut real transcript")
     args = p.parse_args()
+
+    if args.version is None:
+        args.version = _default_version(args.profile, args.tutor_mode, args.student_mode)
+        logger.info("Auto-generated version: %s", args.version)
 
     # --- Phase 0: pick scenarios ---
     transcripts = load_transcripts()
@@ -101,14 +118,14 @@ def main():
         "profile": args.profile,
         "prompt_version": args.prompt_version,
         "student_mode": args.student_mode,
+        "tutor_mode": args.tutor_mode,
         "mode": args.mode,
         "max_turns": args.max_turns,
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
     })
 
-    # --- Phase 1: exchange (sync only for this throwaway) ---
-    if args.mode != "sync":
-        sys.exit("Only sync mode supported in this script for now.")
+    # --- Phase 1: exchange (sync or batch) ---
+    from benchmark.core.students import is_trait_mode
 
     tutor_cfg = get_phase_config("tutor", args.profile)
     student_cfg = get_phase_config("tutor", args.profile)  # student uses same profile
@@ -117,38 +134,67 @@ def main():
 
     trait_client = None
     trait_model = None
-    if args.student_mode == "trait":
+    if is_trait_mode(args.student_mode):
         trait_client = student_client
         trait_model = student_cfg["model"]
 
-    exchanges = {}
-    for i, s in enumerate(chosen, 1):
-        logger.info("[%d/%d] %s (cut %d, agg %s)",
-                    i, len(chosen), s.scenario_id[-30:], s.cut_turn,
-                    s.detection["situation_label_agg"])
-        ex = run_exchange(
-            scenario=s,
+    def _save_exchange(scenario_id: str, ex):
+        save_benchmark_result(args.version, "exchanges", args.profile,
+                              f"{scenario_id}.json", data=ex.to_dict())
+
+    if args.mode == "batch":
+        logger.info("Running %d scenarios in batch mode (poll=%ds)",
+                    len(chosen), args.poll_interval)
+        exchanges = run_exchanges_batch(
+            scenarios=chosen,
             tutor_client=tutor_client,
             student_client=student_client,
             max_turns=args.max_turns,
             tutor_max_tokens=tutor_cfg["max_tokens"],
             student_max_tokens=student_cfg["max_tokens"],
+            poll_interval=args.poll_interval,
+            save_callback=_save_exchange,
             prompt_version=args.prompt_version,
             student_mode=args.student_mode,
             trait_client=trait_client,
             trait_model=trait_model,
+            tutor_mode=args.tutor_mode,
+            transcripts=transcripts if args.tutor_mode else None,
         )
-        exchanges[s.scenario_id] = ex
-        save_benchmark_result(args.version, "exchanges", args.profile,
-                              f"{s.scenario_id}.json", data=ex.to_dict())
-        logger.info("  turns=%d ended_via=%s", len(ex.generated_turns), ex.ended_via)
+        for sid, ex in exchanges.items():
+            _save_exchange(sid, ex)
+            logger.info("  %s: turns=%d ended_via=%s",
+                        sid[-30:], len(ex.generated_turns), ex.ended_via)
+    else:
+        exchanges = {}
+        for i, s in enumerate(chosen, 1):
+            logger.info("[%d/%d] %s (cut %d, agg %s)",
+                        i, len(chosen), s.scenario_id[-30:], s.cut_turn,
+                        s.detection["situation_label_agg"])
+            ex = run_exchange(
+                scenario=s,
+                tutor_client=tutor_client,
+                student_client=student_client,
+                max_turns=args.max_turns,
+                tutor_max_tokens=tutor_cfg["max_tokens"],
+                student_max_tokens=student_cfg["max_tokens"],
+                prompt_version=args.prompt_version,
+                student_mode=args.student_mode,
+                trait_client=trait_client,
+                trait_model=trait_model,
+                tutor_mode=args.tutor_mode,
+                transcripts=transcripts if args.tutor_mode else None,
+            )
+            exchanges[s.scenario_id] = ex
+            _save_exchange(s.scenario_id, ex)
+            logger.info("  turns=%d ended_via=%s", len(ex.generated_turns), ex.ended_via)
 
     # --- Phase 2 + 3: annotate -> decompose -> structure -> score ---
     summary = run_phase2_and_score(
         version=args.version,
         profile=args.profile,
         annotator_profile=args.profile,
-        annotator_mode="sync",
+        annotator_mode=args.mode,
         prompt_version="v13",
         context_window=20,
         scenarios=chosen,

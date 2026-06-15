@@ -1,10 +1,12 @@
 """Tests for student_mode dispatch in benchmark/core/exchange.py.
 
-The synthetic student can be configured to use one of several personas
-(imitate_example, simple, expert, paraphrase_with_example) by loading
-prompts/benchmark/{version}/students/{mode}.txt. When student_mode is
-None or omitted, the loader falls back to the legacy student_system.txt
-so older prompt versions (e.g. v1) keep working.
+The synthetic student is built from `benchmark/core/students.py`, which
+dispatches `student_mode` to one of the Python prompt classes in
+`benchmark.synth_students.prompts` (verbatim port of Alexis's
+synth-students repo). `prompts/benchmark/{version}/students/*.txt` files
+are NOT loaded by this path -- the prompt text lives in the synth_students
+classes. When student_mode is None, _build_role_prompt defaults to
+"simple".
 """
 from benchmark.core.exchange import _build_role_prompt
 
@@ -13,50 +15,50 @@ TRANSCRIPT = "Turn 1. TUTOR: hi\nTurn 2. STUDENT: hey"
 CTX = "Grade 5, fractions"
 
 
-def test_student_mode_none_falls_back_to_student_system_v1():
-    """No mode -> legacy student_system.txt under v1."""
+def test_student_mode_none_defaults_to_simple():
+    """No mode -> falls back to 'simple' (synth_students.SimpleMultiTurnStudentPrompt)."""
     head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
-                             student_context=CTX, prompt_version="v1",
+                             student_context=CTX, prompt_version="v6",
                              student_mode=None)
     out = head + tail
-    assert "role-playing as a K-12 student" in out          # v1 student_system.txt
+    assert "elementary school student" in out
     assert CTX in out
     assert TRANSCRIPT in out
 
 
-def test_student_mode_imitate_example_loads_v2_students_folder():
+def test_student_mode_imitate_example_uses_imitate_prompt_class():
     head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
-                             student_context=CTX, prompt_version="v2",
+                             student_context=CTX, prompt_version="v6",
                              student_mode="imitate_example")
     out = head + tail
-    assert "imitate a human K-12 student" in out
+    assert "imitate a human student" in out
     assert "indistinguishable" in out
     assert CTX in out
     assert TRANSCRIPT in out
 
 
-def test_student_mode_simple_loads_v2_students_folder():
+def test_student_mode_simple_uses_simple_prompt_class():
     head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
-                             student_context=CTX, prompt_version="v2",
+                             student_context=CTX, prompt_version="v6",
                              student_mode="simple")
     out = head + tail
-    assert "Respond like a K-12 student would" in out
-    assert "imitate" not in out.lower()                      # not the imitate prompt
+    assert "elementary school student" in out
+    assert "imitate" not in out.lower()
     assert CTX in out
 
 
-def test_student_mode_expert_loads_v2_students_folder():
+def test_student_mode_expert_uses_expert_prompt_class():
     head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
-                             student_context=CTX, prompt_version="v2",
+                             student_context=CTX, prompt_version="v6",
                              student_mode="expert")
     out = head + tail
     assert "very strong" in out
     assert "no mistakes" in out
 
 
-def test_student_mode_paraphrase_loads_v2_students_folder():
+def test_student_mode_paraphrase_uses_paraphrase_prompt_class():
     head, tail = _build_role_prompt("STUDENT", transcript_prefix=TRANSCRIPT, extra="",
-                             student_context=CTX, prompt_version="v2",
+                             student_context=CTX, prompt_version="v6",
                              student_mode="paraphrase_with_example")
     out = head + tail
     assert "paraphrase" in out.lower()

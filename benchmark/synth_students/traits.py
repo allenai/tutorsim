@@ -46,32 +46,32 @@ class TraitGenerator:
         """
         Get the system prompt for trait generation based on the trait type.
 
-        Args:
-            trait_type: Type of trait to generate (one of ALL_DIMENSION_NAMES)
-            num_sentences: Optional number of sentences for the description
-
-        Returns:
-            System prompt string for trait generation
-
-        Raises:
-            ValueError: If trait_type is not supported
+        Loads `prompts/benchmark/v6/students/trait_generator/system.txt` and
+        substitutes `{dimension_description}` and `{sentence_count_suffix}`.
         """
+        from pathlib import Path
         dimension_description = get_dimension_description(trait_type)
 
-        system_prompt = f"""You are an expert in analyzing student behavior in tutoring conversations. You will be shown a tutoring conversation between a tutor and a student. Please provide a description of the student's behavior in the conversation. The description should be in present tense.
+        template_path = (
+            Path(__file__).parent.parent.parent
+            / "prompts" / "benchmark" / "v6" / "students"
+            / "trait_generator" / "system.txt"
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            template = f.read().rstrip("\n")
 
-You should describe the student's behavior along the following dimensions:
-{dimension_description}
+        if num_sentences is None:
+            suffix = ""
+        elif num_sentences > 1:
+            suffix = f" The description should be {num_sentences} sentences long."
+        else:
+            suffix = " The description should be 1 sentence long."
 
-Please avoid mentioning specific problems. The description should be general enough to apply to multiple students."""
-        # Add sentence count instruction if specified
-        if num_sentences is not None:
-            if num_sentences > 1:
-                system_prompt += f""" The description should be {num_sentences} sentences long."""
-            else:
-                system_prompt += f""" The description should be 1 sentence long."""
-
-        return system_prompt
+        return (
+            template
+            .replace("{dimension_description}", dimension_description)
+            .replace("{sentence_count_suffix}", suffix)
+        )
 
     def parse_trait_output(self, raw_output: str) -> tuple[str, str]:
         """
@@ -127,17 +127,23 @@ Please avoid mentioning specific problems. The description should be general eno
     def _get_user_prompt(self, conversation_text: str, num_sentences: Optional[int] = None) -> str:
         """
         Get the user prompt for trait generation.
-        """
-        user_prompt = (
-            conversation_text
-            + f"""\n\nFirst, think step by step about the student's behavior in the conversation. Then, output 'DESCRIPTION:' followed by your final description of the student's behavior. The description should be {num_sentences} sentences long.
 
-Your output should be formatted as follows:
-[optional step-by-step thinking]
-DESCRIPTION:
-[description]"""
+        Loads `prompts/benchmark/v6/students/trait_generator/user.txt` and
+        substitutes `{conversation_text}` and `{num_sentences}`.
+        """
+        from pathlib import Path
+        template_path = (
+            Path(__file__).parent.parent.parent
+            / "prompts" / "benchmark" / "v6" / "students"
+            / "trait_generator" / "user.txt"
         )
-        return user_prompt
+        with open(template_path, "r", encoding="utf-8") as f:
+            template = f.read().rstrip("\n")
+        return (
+            template
+            .replace("{conversation_text}", conversation_text)
+            .replace("{num_sentences}", str(num_sentences))
+        )
 
     def _generate_joined_trait(
         self,
@@ -165,7 +171,7 @@ DESCRIPTION:
         Returns:
             Consolidated trait description (or tuple with message history/raw output if requested)
         """
-        from src.students.dimension import ALL_DIMENSIONS
+        from benchmark.synth_students.dimension import ALL_DIMENSIONS
 
         # Get all individual dimension names (exclude 'all' and 'joined')
         # if individual_dimensions is not specified, use all dimensions
@@ -444,7 +450,7 @@ DESCRIPTION:
     ) -> List[Dict[str, Any]]:
         """Batch version of _generate_joined_trait: for each individual dimension,
         batch-extract traits across all conversations, then consolidate per conversation."""
-        from src.students.dimension import ALL_DIMENSIONS
+        from benchmark.synth_students.dimension import ALL_DIMENSIONS
 
         if trait_type == "joined_misconceptions_distractedness":
             individual_dimensions = ["misconceptions", "distractedness"]

@@ -39,7 +39,9 @@ synthetic_annotator/
 # History archive (restored from git, too large to track)
 history/
 
-# Claude Code session data
+# Claude Code session data (harness state — local only)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
 *.html
 *.pdf

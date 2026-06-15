@@ -121,7 +121,7 @@ def test_run_exchange_ends_on_first_tutor_end_token(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)  # avoid touching real prompt files
     # Patch prompt loader to return a fixed string, so we don't need v3 on disk in test
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
 
@@ -143,7 +143,7 @@ def test_run_exchange_ends_on_first_tutor_end_token(tmp_path, monkeypatch):
 def test_run_exchange_runs_full_turn_then_ends(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
     tutor = _stub_client([
@@ -167,7 +167,7 @@ def test_run_exchange_runs_full_turn_then_ends(tmp_path, monkeypatch):
 def test_run_exchange_respects_max_turns_when_no_end(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
     # Both clients always reply with single-message text and never emit [END].
@@ -189,7 +189,7 @@ def test_run_exchange_respects_max_turns_when_no_end(tmp_path, monkeypatch):
 def test_run_exchange_end_token_alone_skips_empty_turn(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
     tutor = _stub_client(["What did you get?", "[END]"])
@@ -229,7 +229,7 @@ def _scenario(sid):
 def test_run_exchanges_batch_ends_per_scenario(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
 
@@ -295,7 +295,7 @@ def test_run_exchanges_batch_ends_per_scenario(monkeypatch, tmp_path):
 def test_next_problem_ends_exchange_with_distinct_label(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
     tutor = _stub_client(["Ready for next? [NEXT_PROBLEM]"])
@@ -307,7 +307,7 @@ def test_next_problem_ends_exchange_with_distinct_label(tmp_path, monkeypatch):
         prompt_version="v4",
     )
     assert ex.completed is True
-    assert ex.ended_via == "NEXT_PROBLEM"
+    assert ex.ended_via == "PROBLEM_CHANGE"
     # No student turn after [NEXT_PROBLEM]; tutor wrap-up text is kept.
     assert [t["role"] for t in ex.generated_turns] == ["TUTOR"]
     assert ex.generated_turns[0]["text"] == "Ready for next?"
@@ -316,7 +316,7 @@ def test_next_problem_ends_exchange_with_distinct_label(tmp_path, monkeypatch):
 def test_end_token_takes_precedence_over_next_problem(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
     tutor = _stub_client(["Wrap up [NEXT_PROBLEM] [END]"])
@@ -334,7 +334,7 @@ def test_end_token_takes_precedence_over_next_problem(tmp_path, monkeypatch):
 def test_batch_records_ended_via_per_scenario(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
 
@@ -367,8 +367,8 @@ def test_batch_records_ended_via_per_scenario(monkeypatch, tmp_path):
         poll_interval=0, prompt_version="v4",
     )
 
-    # s1 emitted [NEXT_PROBLEM] -> single tutor turn, ended_via=NEXT_PROBLEM
-    assert exchanges["s1"].ended_via == "NEXT_PROBLEM"
+    # s1 emitted [PROBLEM_CHANGE] -> single tutor turn, ended_via=PROBLEM_CHANGE
+    assert exchanges["s1"].ended_via == "PROBLEM_CHANGE"
     assert [t["role"] for t in exchanges["s1"].generated_turns] == ["TUTOR"]
     assert exchanges["s1"].generated_turns[0]["text"] == "p1 done"
 
@@ -383,27 +383,16 @@ def test_batch_records_ended_via_per_scenario(monkeypatch, tmp_path):
 
 def test_build_role_prompt_trait_mode_substitutes_persona(tmp_path, monkeypatch):
     """When student_mode='trait', _build_role_prompt resolves a persona via
-    get_or_generate_trait and substitutes {trait_persona}."""
+    get_or_generate_trait and the persona text appears in the assembled head."""
     monkeypatch.setenv("STORAGE_BACKEND", "local")
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path))
     import annotator.core.storage as st
     st._cache.clear()
     st._backend = None
 
-    monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
-        lambda version, fname: (
-            "STUDENT-TRAIT-PROMPT context={student_context} persona={trait_persona}"
-            if "trait" in fname else "OTHER {student_context}"
-        ),
-    )
-    monkeypatch.setattr(
-        "benchmark.core.traits._load_prompt",
-        lambda version, fname: "GEN {transcript_prefix}",
-    )
-
     from unittest.mock import MagicMock
     fake_client = MagicMock()
+    fake_client.model = "m1"
     fake_response = MagicMock()
     fake_response.text = "A determined 5th grader who skips multiplication facts."
     fake_response.usage = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
@@ -425,7 +414,10 @@ def test_build_role_prompt_trait_mode_substitutes_persona(tmp_path, monkeypatch)
     out = head + tail
 
     assert "A determined 5th grader" in out
-    assert "{trait_persona}" not in out
+    # synth_students prompts use [[PERSONA_DESCRIPTION_HERE]] / [[NEXT_CONVERSATION_INFORMATION_HERE]];
+    # all placeholders must be filled.
+    assert "[[PERSONA_DESCRIPTION_HERE]]" not in out
+    assert "[[NEXT_CONVERSATION_INFORMATION_HERE]]" not in out
     assert scenario.student_context in out
 
 
@@ -440,22 +432,11 @@ def test_run_exchange_with_trait_mode(tmp_path, monkeypatch):
     st._cache.clear()
     st._backend = None
 
-    def _stub_loader(version, fname):
-        if "trait_generator" in fname:
-            return "GEN {transcript_prefix}"
-        if "students/trait" in fname:
-            return "STUDENT context={student_context} persona={trait_persona}"
-        if fname == "tutor_system.txt":
-            return "TUTOR {student_context}"
-        return "OTHER"
-
-    monkeypatch.setattr("benchmark.core.exchange._load_prompt", _stub_loader)
-    monkeypatch.setattr("benchmark.core.traits._load_prompt", _stub_loader)
-
     fake_response = MagicMock()
     fake_response.text = "calm but distracted 5th grader"
     fake_response.usage = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
     trait_client = MagicMock()
+    trait_client.model = "stub-trait"
     trait_client.generate.return_value = fake_response
 
     # The student client records the cacheable_prefix (head) it sees so we can
@@ -504,7 +485,7 @@ def test_run_exchange_with_trait_mode(tmp_path, monkeypatch):
 def test_build_role_prompt_returns_head_tail_tuple(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
 
@@ -526,7 +507,7 @@ def test_build_role_prompt_returns_head_tail_tuple(tmp_path, monkeypatch):
 def test_build_role_prompt_head_invariant_across_extras(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
 
@@ -552,7 +533,7 @@ def test_run_exchange_sends_same_cacheable_prefix_each_round(tmp_path, monkeypat
     This is what makes the prompt cache hit on round 2+."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "benchmark.core.exchange._load_prompt",
+        "benchmark.core.tutors._load_template",
         lambda version, fname: "SYS {student_context}",
     )
 
