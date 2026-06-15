@@ -680,11 +680,6 @@ function renderAnnotations(s) {{
     h += renderReveal('reference', 'Oracle reference (post-cut real transcript)',
                       s.reference_transcript, `${{s.reference_transcript.length}} chars`);
   }}
-  if (s.annotator_suggestion) {{
-    h += renderReveal('suggestion', 'Annotator suggestion',
-                      s.annotator_suggestion, 'fed into the v13 annotator prompt');
-  }}
-
   if (det.turn_start != null) {{
     h += '<div class="detection-box">' +
          '<div><span class="label">Moment:</span> turns ' + (det.turn_start || '?') + '&ndash;' + (det.turn_end || '?') + '</div>';
@@ -698,8 +693,12 @@ function renderAnnotations(s) {{
       const votes = Object.entries(det.cut_votes).map(([k, v]) => k + ':' + v).join(', ');
       h += '<div><span class="label">Votes:</span> ' + escapeHtml(votes) + ' (cluster=' + (det.cluster_size || '?') + ')</div>';
     }}
-    if (det.situation) {{
-      h += '<div style="margin-top:6px;"><span class="label">Human note:</span> <span style="color:#555;font-style:italic;">' + escapeHtml(det.situation) + '</span></div>';
+    // What the LM annotator actually saw as {{suggestion}} in the v13 Pass 2
+    // prompt -- one of 6 canned sentences keyed off situation_label_agg.
+    // This is the only teacher signal that reaches the annotator; teacher
+    // free-text situation prose is NOT fed to the LM.
+    if (s.annotator_suggestion) {{
+      h += '<div style="margin-top:6px;"><span class="label">Hint to annotator LM:</span> <span style="color:#555;font-style:italic;">' + escapeHtml(s.annotator_suggestion) + '</span></div>';
     }}
     h += '</div>';
   }}
