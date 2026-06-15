@@ -201,12 +201,20 @@ def main():
         exchanges=exchanges,
         with_screenshots=False,
     )
-    logger.info("Done. Version: %s | scaffolding F1=%.3f rigor F1=%.3f outcome_pos_rate=%.3f n=%d",
-                args.version,
-                summary["scaffolding"]["f1"],
-                summary["rigor"]["f1"],
-                summary["outcome_pos_rate"],
-                summary["n_scenarios"])
+    def _fmt(rate):
+        return f"{rate:.3f}" if isinstance(rate, (int, float)) else "—"
+    scaf = summary["scaffolding_did"]
+    rig = summary["rigor_did"]
+    over = summary["overscaffold"]
+    logger.info(
+        "Done. Version: %s | did_scaffold=%s (%d/%d)  did_rigor=%s (%d/%d)  overscaffold=%s (%d/%d, avail=%s)  outcome+=%.3f  n=%d",
+        args.version,
+        _fmt(scaf["rate"]), scaf["n_yes"], scaf["n_total"],
+        _fmt(rig["rate"]), rig["n_yes"], rig["n_total"],
+        _fmt(over["rate"]), over["n_yes"], over["n_total"], over["available"],
+        summary["outcome_pos_rate"],
+        summary["n_scenarios"],
+    )
 
 
 if __name__ == "__main__":
