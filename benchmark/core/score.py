@@ -1,29 +1,29 @@
-"""Per-scenario benchmark scoring under the new annotator pipeline.
+"""Per-scenario benchmark scoring.
 
-Mirrors the annotator-validation pattern in `annotator/eval/eval.py`:
-both the gold tag (`situation_label_agg`) and the AI's annotation
-(`action_label`) are 4-way labels in `{both, scaffolding, rigor, neither}`,
-collapsed from two independent yes/no judgements (`scaffolding=yes/no` and
-`rigor=yes/no`). We decompose both sides back to (scaffolding_yn, rigor_yn)
-via `_ACTION_LABEL_TO_DIMENSIONS` and compute binary F1 per dimension.
+Lucy's three-axis scoring (proposed 2026-06-15):
 
-This avoids the asymmetric trap where, e.g., a gold "both" vs LM "scaffolding"
-(partial agreement: both say scaffolding=yes, only the rigor side disagrees)
-gets counted as a total miss under a 4-way one-vs-rest.
+  scaffolding_did_rate    yes_count / (count where gold says scaffolding-appropriate). Higher better.
+  rigor_did_rate          yes_count / (count where gold says rigor-appropriate).      Higher better.
+  overscaffold_rate       count where any overscaffold_decomposed facet was emitted / total scenarios. Lower better.
 
-Scenarios whose collapsed label is a non-substantive sentinel (`mixed`,
-`unknown`, `unclear`) on either side are excluded from per-dimension F1 --
-they don't decompose into yes/no on either dimension. They still contribute
-to the outcome rate.
+These replace the prior per-dimension F1 numbers. The shift drops the
+precision penalty (a tutor that scaffolds-on-rigor-moments no longer gets
+penalized on the scaffolding dimension) and trusts the over-scaffold signal
+to catch the always-both exploit instead. See `prompts/annotator/decomposer/
+decompose_overscaffold.md` and Lucy's `compute_overscaffold_f1` for the
+detection mechanism.
+
+The collapsed action label decomposes via `_ACTION_LABEL_TO_DIMENSIONS`:
+  both        -> scaffolding=yes, rigor=yes
+  scaffolding -> scaffolding=yes, rigor=no
+  rigor       -> scaffolding=no,  rigor=yes
+  neither     -> scaffolding=no,  rigor=no
+"unclear" (LM parse-failure) and "unknown" (gold missing-facets) are
+non-substantive sentinels: scenarios with those on either side are excluded
+from did-rate denominators (the gold doesn't carry a definite direction).
 """
 from __future__ import annotations
 
-# Canonical decomposition from collapsed 4-way label -> (scaffolding_yn, rigor_yn).
-# Mirrors `annotator.eval.eval._ACTION_LABEL_TO_DIMENSIONS` -- we inline here
-# to avoid pulling that module's heavy dependencies (krippendorff, etc.).
-# "unclear" (LM parse-failure) and "unknown" (gold-side missing-facets) are
-# non-substantive sentinels and intentionally absent from this map -- any
-# label not in it gets None and is excluded from per-dimension F1.
 _ACTION_LABEL_TO_DIMENSIONS = {
     "both":        ("yes", "yes"),
     "scaffolding": ("yes", "no"),
@@ -33,20 +33,11 @@ _ACTION_LABEL_TO_DIMENSIONS = {
 
 
 def _to_dims(label):
-    """Return (scaffolding_yn, rigor_yn) for a collapsed action label,
-    or None if the label is a non-substantive sentinel."""
     return _ACTION_LABEL_TO_DIMENSIONS.get(label)
 
 
 def _action_label_for_scenario(annotation_data: dict):
-    """Return the AI's action_label for the scenario.
-
-    Lucy's structure.py emits ONE collapsed `action_label` per annotation
-    (string, one of {both, scaffolding, rigor, neither, unclear}).
-    Benchmark Phase 2 produces one annotation per scenario, so we read the
-    first annotation's label. If multiple annotations are ever present we
-    fall back to the first substantive one.
-    """
+    """First substantive action_label across annotations in this scenario."""
     for ann in annotation_data.get("annotations", []) or []:
         label = ann.get("action_label")
         if isinstance(label, str) and label:
@@ -66,83 +57,98 @@ def _has_pos_result(annotation_data: dict) -> bool:
     return False
 
 
-def _precision(tp: int, fp: int) -> float:
-    denom = tp + fp
-    return tp / denom if denom else 0.0
-
-
-def _recall(tp: int, fn: int) -> float:
-    denom = tp + fn
-    return tp / denom if denom else 0.0
-
-
-def _f1(tp: int, fp: int, fn: int) -> float:
-    denom = 2 * tp + fp + fn
-    return (2 * tp) / denom if denom else 0.0
+def _has_overscaffold(annotation_data: dict) -> bool:
+    """True if ANY annotation in the scenario emitted a non-empty
+    overscaffold_decomposed list. The list is produced by Lucy's
+    decompose_overscaffold step (PR #18); empty means no over-scaffolding
+    detected; missing key means the over-scaffolding pass didn't run yet."""
+    for ann in annotation_data.get("annotations", []) or []:
+        if ann.get("overscaffold_decomposed"):
+            return True
+    return False
 
 
 def score_scenarios(scenarios: list[dict], annotations: list[dict]) -> dict:
-    """Compute per-dimension binary F1 (scaffolding / rigor) + outcome rate.
-
-    Args:
-        scenarios: list of scenario dicts (must include detection.situation_label_agg).
-        annotations: aligned list of annotation dicts (each has 'annotations' list
-                     with 'action_label' (str) + 'result_label' populated).
+    """Compute Lucy's three-axis scoring + outcome+ rate.
 
     Returns:
         {
-          "scaffolding": {tp, fp, fn, precision, recall, f1},
-          "rigor": {tp, fp, fn, precision, recall, f1},
+          "scaffolding_did": {n_yes, n_total, rate},
+          "rigor_did":       {n_yes, n_total, rate},
+          "overscaffold":    {n_yes, n_total, rate, available},
           "outcome_pos_rate": float,
           "n_scenarios": int,
-          "n_scored_for_f1": int,
         }
+
+      scaffolding_did.rate  = scenarios where gold==scaffolding-yes and LM scaffolded
+                              (collapsed action_label in {scaffolding, both})
+                              divided by all scaffolding-appropriate scenarios.
+      rigor_did.rate        = analogous for rigor-appropriate scenarios.
+      overscaffold.rate     = scenarios with non-empty overscaffold_decomposed
+                              divided by total scenarios. `available=False` if
+                              none of the annotation files carried the field
+                              (PR #18 wasn't run on this batch).
+      outcome_pos_rate      = scenarios with at least one result facet labeled
+                              "pos" / total.
+
+    Scenarios where gold is mixed/unknown/neither/unclear are excluded from
+    BOTH did-rate denominators -- they don't carry a clean direction.
     """
-    counts = {
-        "scaffolding": {"tp": 0, "fp": 0, "fn": 0},
-        "rigor": {"tp": 0, "fp": 0, "fn": 0},
-    }
+    scaf_yes = scaf_total = 0
+    rig_yes = rig_total = 0
+    over_yes = 0
     outcome_pos = 0
+    any_overscaffold_field = False
     n_total = 0
-    n_scored = 0
 
     for scenario, ann in zip(scenarios, annotations):
         n_total += 1
 
         gt_label = (scenario.get("detection") or {}).get("situation_label_agg")
         pred_label = _action_label_for_scenario(ann)
-
-        gt_dims = _to_dims(gt_label)
         pred_dims = _to_dims(pred_label)
 
-        # Score only when BOTH sides decompose to yes/no on each dimension.
-        if gt_dims is not None and pred_dims is not None:
-            n_scored += 1
-            gt_scaf, gt_rig = gt_dims
-            pred_scaf, pred_rig = pred_dims
-            for cls, gtv, predv in (
-                ("scaffolding", gt_scaf, pred_scaf),
-                ("rigor", gt_rig, pred_rig),
-            ):
-                if gtv == "yes" and predv == "yes":
-                    counts[cls]["tp"] += 1
-                elif gtv == "yes" and predv == "no":
-                    counts[cls]["fn"] += 1
-                elif gtv == "no" and predv == "yes":
-                    counts[cls]["fp"] += 1
-                # else: tn -- not counted in binary F1
+        if gt_label == "scaffolding":
+            scaf_total += 1
+            if pred_dims is not None and pred_dims[0] == "yes":
+                scaf_yes += 1
+        elif gt_label == "rigor":
+            rig_total += 1
+            if pred_dims is not None and pred_dims[1] == "yes":
+                rig_yes += 1
+        # mixed / both / neither / unknown / unclear -> excluded from both
+        # did-rate denominators. Still counts toward outcome and overscaffold.
 
         if _has_pos_result(ann):
             outcome_pos += 1
 
-    result: dict = {"n_scenarios": n_total, "n_scored_for_f1": n_scored}
-    for cls in ("scaffolding", "rigor"):
-        tp, fp, fn = counts[cls]["tp"], counts[cls]["fp"], counts[cls]["fn"]
-        result[cls] = {
-            "tp": tp, "fp": fp, "fn": fn,
-            "precision": _precision(tp, fp),
-            "recall": _recall(tp, fn),
-            "f1": _f1(tp, fp, fn),
-        }
-    result["outcome_pos_rate"] = (outcome_pos / n_total) if n_total else 0.0
-    return result
+        for a in ann.get("annotations", []) or []:
+            if "overscaffold_decomposed" in a:
+                any_overscaffold_field = True
+                break
+        if _has_overscaffold(ann):
+            over_yes += 1
+
+    def _rate(yes, total):
+        return (yes / total) if total else None
+
+    return {
+        "n_scenarios": n_total,
+        "scaffolding_did": {
+            "n_yes": scaf_yes,
+            "n_total": scaf_total,
+            "rate": _rate(scaf_yes, scaf_total),
+        },
+        "rigor_did": {
+            "n_yes": rig_yes,
+            "n_total": rig_total,
+            "rate": _rate(rig_yes, rig_total),
+        },
+        "overscaffold": {
+            "n_yes": over_yes,
+            "n_total": n_total,
+            "rate": _rate(over_yes, n_total),
+            "available": any_overscaffold_field,
+        },
+        "outcome_pos_rate": (outcome_pos / n_total) if n_total else 0.0,
+    }

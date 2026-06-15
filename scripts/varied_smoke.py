@@ -159,7 +159,7 @@ def main():
             trait_client=trait_client,
             trait_model=trait_model,
             tutor_mode=args.tutor_mode,
-            transcripts=transcripts if args.tutor_mode else None,
+            transcripts=transcripts if (args.tutor_mode or args.student_mode == "oracle") else None,
         )
         for sid, ex in exchanges.items():
             _save_exchange(sid, ex)
@@ -183,7 +183,7 @@ def main():
                 trait_client=trait_client,
                 trait_model=trait_model,
                 tutor_mode=args.tutor_mode,
-                transcripts=transcripts if args.tutor_mode else None,
+                transcripts=transcripts if (args.tutor_mode or args.student_mode == "oracle") else None,
             )
             exchanges[s.scenario_id] = ex
             _save_exchange(s.scenario_id, ex)

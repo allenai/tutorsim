@@ -232,12 +232,20 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
             return None
         logger.info("Loaded: %s", input_filename)
 
-    split_ids = load_split_ids(split)
-    results = {
-        conv_id: conv_data
-        for conv_id, conv_data in data["results"].items()
-        if conv_id.rsplit("_", 1)[-1] in split_ids
-    }
+    if in_memory:
+        # Bridge-style invocations (e.g. benchmark.core.annotator_bridge.decompose_bulk)
+        # pass scenario-keyed data that is NOT in data/split.json (scenario IDs
+        # like "{conv_id}__hum_{ts}_{te}", not raw conv UUIDs). The split filter
+        # below would discard all of them. Skip it for in-memory callers --
+        # they're already passing exactly the subset they want decomposed.
+        results = data["results"]
+    else:
+        split_ids = load_split_ids(split)
+        results = {
+            conv_id: conv_data
+            for conv_id, conv_data in data["results"].items()
+            if conv_id.rsplit("_", 1)[-1] in split_ids
+        }
 
     action_template = _load_prompt("decompose_action.md")
     result_template = _load_prompt("decompose_result.md")

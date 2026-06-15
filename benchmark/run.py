@@ -113,12 +113,21 @@ def run_phase2_and_score(
     summary = score_scenarios(scenario_dicts, annotation_dicts)
     summary["profile"] = profile
     save_benchmark_result(version, "scores", f"{profile}.json", data=summary)
-    logger.info("[%s] scaffolding F1=%.3f rigor F1=%.3f outcome_pos_rate=%.3f n=%d",
-                profile,
-                summary["scaffolding"]["f1"],
-                summary["rigor"]["f1"],
-                summary["outcome_pos_rate"],
-                summary["n_scenarios"])
+    def _fmt(rate):
+        return f"{rate:.3f}" if isinstance(rate, (int, float)) else "—"
+    logger.info(
+        "[%s] scaffolding_did=%s (%d/%d)  rigor_did=%s (%d/%d)  overscaffold=%s (%d/%d, avail=%s)  outcome+=%.3f  n=%d",
+        profile,
+        _fmt(summary["scaffolding_did"]["rate"]),
+        summary["scaffolding_did"]["n_yes"], summary["scaffolding_did"]["n_total"],
+        _fmt(summary["rigor_did"]["rate"]),
+        summary["rigor_did"]["n_yes"], summary["rigor_did"]["n_total"],
+        _fmt(summary["overscaffold"]["rate"]),
+        summary["overscaffold"]["n_yes"], summary["overscaffold"]["n_total"],
+        summary["overscaffold"]["available"],
+        summary["outcome_pos_rate"],
+        summary["n_scenarios"],
+    )
     return summary
 
 

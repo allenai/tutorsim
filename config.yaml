@@ -144,24 +144,25 @@ benchmark:
     min_turn: 10
 
   exchange:
-    max_turns: 100               # was: num_turns: 2 — tutor decides end via [END]/[NEXT_PROBLEM]; this is a hard cap on generated turns
+    max_turns: 5                 # T-S-T-S-T -- scoped to the one moment, no replay-stopper needed
     poll_interval: 60
-    prompt_version: v6           # v6 = v5 + rigor-push section + tightened [NEXT_PROBLEM] "one problem" semantics (replay-stopper)
+    prompt_version: v7           # v7 = v6 with [PROBLEM_CHANGE] / ending instructions stripped (max_turns=5 caps replays) + oracle student mode
 
   tutor_profiles:
     - anthropic
 
   student:
     profile: anthropic
-    # Student prompt templates live in code (benchmark/synth_students/prompts.py)
-    # -- the prompt_version dir does NOT contain per-mode student .txt files.
+    # Student prompts live in prompts/benchmark/{prompt_version}/students/.
     # Accepted modes (dispatched by benchmark/core/students.py):
     #   simple                    - generic K-12 student persona
     #   expert                    - strong student, no mistakes (upper-bound control)
-    #   imitate_example           - imitate the real student from the transcript prefix (strongest realism)
+    #   imitate_example           - imitate the real student from the transcript prefix (strongest realism, pre-cut only)
     #   paraphrase_with_example   - paraphrase the real student's style
     #   trait                     - LLM-generated joined-3 persona (oracle-safe, prefix-only)
     #   trait_with_example        - trait persona + real student example
+    #   oracle                    - sees the real student's POST-CUT turns within the moment range as a
+    #                               reference. Student-side analog of oracle tutor. Post-cut aware.
     #   <dimension>-<n>           - single-dimension persona, n sentences
     #                               (dimensions: distractedness, active_vs_passive_learning,
     #                                affect, misconceptions, learning_efficiency)

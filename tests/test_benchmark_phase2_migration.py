@@ -113,57 +113,62 @@ def _scenario_score_input(sid, agg, action_label, result_label):
     return scenario, annotation
 
 
-def test_score_scenarios_scaffolding_tp_fn():
-    """gt=scaffolding & pred=scaffolding -> scaffolding TP; gt=scaffolding & pred=neither -> scaffolding FN."""
+def test_score_scenarios_scaffolding_did_rate():
+    """Lucy's scaffolding_did_rate = (# scaffolding-gold scenarios where LM
+    scaffolded) / (# scaffolding-gold scenarios). gt=scaffolding & pred=scaffolding
+    counts as yes; gt=scaffolding & pred=neither counts as no."""
     pairs = [
         _scenario_score_input("a", "scaffolding", "scaffolding", "pos"),
         _scenario_score_input("b", "scaffolding", "neither", "neg"),
     ]
     result = score_scenarios([p[0] for p in pairs], [p[1] for p in pairs])
-    assert result["scaffolding"]["tp"] == 1
-    assert result["scaffolding"]["fn"] == 1
-    assert result["scaffolding"]["fp"] == 0
-    assert abs(result["scaffolding"]["f1"] - 2/3) < 1e-6
+    assert result["scaffolding_did"]["n_yes"] == 1
+    assert result["scaffolding_did"]["n_total"] == 2
+    assert result["scaffolding_did"]["rate"] == 0.5
 
 
-def test_score_scenarios_rigor_fp():
-    """gt=scaffolding & pred=rigor -> rigor FP and scaffolding FN."""
+def test_score_scenarios_rigor_pred_on_scaffolding_gold_no_penalty():
+    """Under Lucy's scoring, pred=rigor on scaffolding-gold no longer
+    penalizes the rigor axis (no FP). It just counts as 'didn't scaffold'."""
     pairs = [
         _scenario_score_input("a", "scaffolding", "rigor", "pos"),
     ]
     result = score_scenarios([p[0] for p in pairs], [p[1] for p in pairs])
-    assert result["rigor"]["fp"] == 1
-    assert result["scaffolding"]["fn"] == 1
+    assert result["scaffolding_did"]["n_yes"] == 0
+    assert result["scaffolding_did"]["n_total"] == 1
+    # rigor_did denominator is scenarios where GOLD says rigor -- this one isn't.
+    assert result["rigor_did"]["n_total"] == 0
 
 
-def test_score_scenarios_both_decomposes_to_both_dimensions():
-    """'both' decomposes to (scaf=yes, rig=yes) on both sides via Lucy's
-    _ACTION_LABEL_TO_DIMENSIONS, so partial agreement is scored per dimension."""
+def test_score_scenarios_both_credits_both_dimensions():
+    """'both' decomposes to (scaf=yes, rig=yes), so it counts as a yes on
+    whichever dimension the gold cared about."""
     pairs = [
-        # gt='scaffolding' -> (yes,no); pred='both' -> (yes,yes): scaf TP, rigor FP
+        # gt='scaffolding' (denominator counts), pred='both' -> scaffolded: yes
         _scenario_score_input("a", "scaffolding", "both", "pos"),
-        # gt='rigor' -> (no,yes); pred='both' -> (yes,yes): scaf FP, rigor TP
+        # gt='rigor' (denominator counts), pred='both' -> pushed rigor: yes
         _scenario_score_input("b", "rigor", "both", "pos"),
     ]
     result = score_scenarios([p[0] for p in pairs], [p[1] for p in pairs])
-    assert result["scaffolding"]["tp"] == 1
-    assert result["rigor"]["tp"] == 1
-    assert result["scaffolding"]["fp"] == 1
-    assert result["rigor"]["fp"] == 1
+    assert result["scaffolding_did"]["rate"] == 1.0
+    assert result["rigor_did"]["rate"] == 1.0
 
 
-def test_score_scenarios_gold_both_scores_both_dimensions():
-    """A gold 'both' tag should count toward both dimensions' recall (positive on each)."""
+def test_score_scenarios_gold_both_excluded_from_did_rates():
+    """Gold 'both' / 'mixed' / 'neither' / 'unknown' lack a clean direction so
+    they're excluded from BOTH did-rate denominators (still count toward
+    outcome / over-scaffold rates)."""
     pairs = [
-        # gt='both' -> (yes,yes); pred='scaffolding' -> (yes,no): scaf TP, rigor FN
         _scenario_score_input("a", "both", "scaffolding", "pos"),
-        # gt='both' -> (yes,yes); pred='both' -> (yes,yes): scaf TP, rigor TP
-        _scenario_score_input("b", "both", "both", "pos"),
+        _scenario_score_input("b", "scaffolding", "scaffolding", "pos"),
     ]
     result = score_scenarios([p[0] for p in pairs], [p[1] for p in pairs])
-    assert result["scaffolding"]["tp"] == 2
-    assert result["rigor"]["tp"] == 1
-    assert result["rigor"]["fn"] == 1
+    # Only 1 scenario has gold='scaffolding'; the 'both' scenario is excluded.
+    assert result["scaffolding_did"]["n_total"] == 1
+    assert result["scaffolding_did"]["n_yes"] == 1
+    assert result["rigor_did"]["n_total"] == 0
+    # Outcome rate is over ALL scenarios, including the excluded 'both' one.
+    assert result["outcome_pos_rate"] == 1.0
 
 
 def test_score_scenarios_outcome_rate():
@@ -176,18 +181,44 @@ def test_score_scenarios_outcome_rate():
     assert result["outcome_pos_rate"] == 2/3
 
 
-def test_score_scenarios_sentinel_labels_excluded_from_action_f1():
-    """gt or pred 'mixed'/'unclear'/'unknown' -> no per-dimension verdict -> excluded
-    from F1 (still counts toward outcome rate)."""
+def test_score_scenarios_sentinel_labels_excluded_from_did_rate():
+    """gt or pred 'mixed'/'unclear'/'unknown' don't carry a clean direction
+    on the relevant axis -- excluded from the corresponding did-rate."""
     pairs = [
         _scenario_score_input("a", "scaffolding", "scaffolding", "pos"),
-        _scenario_score_input("b", "mixed", "scaffolding", "pos"),       # gt sentinel
-        _scenario_score_input("c", "scaffolding", "unclear", "neg"),     # pred sentinel
+        _scenario_score_input("b", "mixed", "scaffolding", "pos"),       # gt sentinel: excluded
+        _scenario_score_input("c", "scaffolding", "unclear", "neg"),     # pred sentinel: counts as 'didn't scaffold'
     ]
     result = score_scenarios([p[0] for p in pairs], [p[1] for p in pairs])
-    assert result["scaffolding"]["tp"] == 1
-    assert result["n_scored_for_f1"] == 1
+    # scaffolding_did: gold='scaffolding' on (a, c). LM scaffolded only on (a).
+    assert result["scaffolding_did"]["n_yes"] == 1
+    assert result["scaffolding_did"]["n_total"] == 2
     assert result["outcome_pos_rate"] == 2/3
+
+
+def test_score_scenarios_overscaffold_rate_when_field_absent():
+    """If no annotation has overscaffold_decomposed (PR #18 not run),
+    `overscaffold.available` is False and rate is 0."""
+    pairs = [
+        _scenario_score_input("a", "scaffolding", "scaffolding", "pos"),
+    ]
+    result = score_scenarios([p[0] for p in pairs], [p[1] for p in pairs])
+    assert result["overscaffold"]["available"] is False
+    assert result["overscaffold"]["n_yes"] == 0
+
+
+def test_score_scenarios_overscaffold_rate_when_field_present():
+    """When `overscaffold_decomposed` is populated, the rate counts scenarios
+    with any non-empty facet list."""
+    sa, aa = _scenario_score_input("a", "scaffolding", "scaffolding", "pos")
+    sb, ab = _scenario_score_input("b", "scaffolding", "scaffolding", "pos")
+    aa["annotations"][0]["overscaffold_decomposed"] = ["The tutor over-explained."]
+    ab["annotations"][0]["overscaffold_decomposed"] = []
+    result = score_scenarios([sa, sb], [aa, ab])
+    assert result["overscaffold"]["available"] is True
+    assert result["overscaffold"]["n_yes"] == 1
+    assert result["overscaffold"]["n_total"] == 2
+    assert result["overscaffold"]["rate"] == 0.5
 
 
 import pytest
@@ -283,9 +314,13 @@ def test_phase2_e2e_produces_one_annotation_per_scenario_and_score(monkeypatch, 
         exchanges=exchanges,
     )
 
-    assert "scaffolding" in summary
-    assert "rigor" in summary
+    assert "scaffolding_did" in summary
+    assert "rigor_did" in summary
     assert "outcome_pos_rate" in summary
-    assert summary["scaffolding"]["tp"] == 1
-    assert summary["rigor"]["fn"] == 1
+    # Test fixture: 1 scaffolding-gold scenario where the LM scaffolded, 1
+    # rigor-gold scenario where the LM did NOT push rigor.
+    assert summary["scaffolding_did"]["n_yes"] == 1
+    assert summary["scaffolding_did"]["n_total"] == 1
+    assert summary["rigor_did"]["n_yes"] == 0
+    assert summary["rigor_did"]["n_total"] == 1
     assert summary["outcome_pos_rate"] == 1.0

@@ -101,6 +101,7 @@ def _build_role_prompt(
     trait_model: str | None = None,
     tutor_mode: str | None = None,
     reference_transcript: str | None = None,
+    moment_reference: str | None = None,
 ) -> tuple[str, str]:
     """Build (cacheable_head, tail) for either tutor or student.
 
@@ -142,6 +143,7 @@ def _build_role_prompt(
             student_context=student_context,
             transcript_prefix=transcript_prefix,
             persona=persona,
+            moment_reference=moment_reference,
         )
         role_instruction = "Respond as the STUDENT. Give only your response, no labels or prefixes."
 
@@ -225,6 +227,31 @@ def _build_reference_transcript(conversation: dict, cut_turn: int) -> str:
     return "\n".join(lines)
 
 
+def _build_moment_reference(conversation: dict, cut_turn: int, turn_end: int) -> str:
+    """Format the post-cut real student/tutor turns WITHIN the moment range.
+
+    Returns a newline-joined string of `Turn N. ROLE: text` lines for every
+    turn N where cut_turn < N <= turn_end. Empty string if no such turns.
+
+    Used by the `oracle` student mode -- the reference shown to the synthetic
+    student so it can imitate the real student's behavior in this specific
+    moment. Bounded by `turn_end` so the student only sees the in-moment
+    continuation, not the entire rest of the conversation (which is what
+    `_build_reference_transcript` returns for the oracle tutor).
+    """
+    if turn_end is None:
+        return ""
+    lines = []
+    for turn in conversation.get("turns", []):
+        n = turn.get("turn_number")
+        if n is None or n <= cut_turn or n > turn_end:
+            continue
+        role = turn.get("role", "")
+        text = turn.get("text", "")
+        lines.append(f"Turn {n}. {role}: {text}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Sync mode: one scenario at a time
 # ---------------------------------------------------------------------------
@@ -278,6 +305,21 @@ def run_exchange(
             )
         reference_transcript = _build_reference_transcript(conv, scenario.cut_turn)
 
+    moment_reference = None
+    if student_mode == "oracle":
+        if not transcripts:
+            raise ValueError(
+                "run_exchange: student_mode='oracle' requires transcripts"
+            )
+        conv = transcripts.get(scenario.conv_id)
+        if conv is None:
+            raise ValueError(
+                f"run_exchange: student_mode='oracle' but no transcript "
+                f"loaded for conv_id={scenario.conv_id!r}"
+            )
+        turn_end = (scenario.detection or {}).get("turn_end")
+        moment_reference = _build_moment_reference(conv, scenario.cut_turn, turn_end)
+
     while len(exchange.generated_turns) < max_turns:
         # --- Tutor turn ---
         head, tail = _build_role_prompt(
@@ -316,6 +358,7 @@ def run_exchange(
             "STUDENT", scenario.transcript_prefix, extra, scenario.student_context,
             prompt_version, student_mode=student_mode,
             scenario=scenario, trait_client=trait_client, trait_model=trait_model,
+            moment_reference=moment_reference,
         )
         response = student_client.generate(
             tail, json_mode=False, max_tokens=student_max_tokens,
@@ -372,6 +415,7 @@ def run_exchanges_batch(
     next_turns = {}
     ended_via: dict[str, str] = {}
     refs: dict[str, str] = {}
+    moment_refs: dict[str, str] = {}
 
     for scenario in scenarios:
         exchanges[scenario.scenario_id] = Exchange(
@@ -392,6 +436,21 @@ def run_exchanges_batch(
                     f"loaded for conv_id={scenario.conv_id!r}"
                 )
             refs[scenario.scenario_id] = _build_reference_transcript(conv, scenario.cut_turn)
+        if student_mode == "oracle":
+            if not transcripts:
+                raise ValueError(
+                    "run_exchanges_batch: student_mode='oracle' requires transcripts"
+                )
+            conv = transcripts.get(scenario.conv_id)
+            if conv is None:
+                raise ValueError(
+                    f"run_exchanges_batch: student_mode='oracle' but no transcript "
+                    f"loaded for conv_id={scenario.conv_id!r}"
+                )
+            turn_end = (scenario.detection or {}).get("turn_end")
+            moment_refs[scenario.scenario_id] = _build_moment_reference(
+                conv, scenario.cut_turn, turn_end,
+            )
 
     scenario_map = {s.scenario_id: s for s in scenarios}
     active_ids = list(scenario_map.keys())
@@ -481,6 +540,7 @@ def run_exchanges_batch(
                 "STUDENT", scenario.transcript_prefix, extras[sid], scenario.student_context,
                 prompt_version, student_mode=student_mode,
                 scenario=scenario, trait_client=trait_client, trait_model=trait_model,
+                moment_reference=moment_refs.get(sid),
             )
             scenario_images = (images_by_scenario or {}).get(sid)
             student_entries.append(

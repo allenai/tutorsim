@@ -519,8 +519,9 @@ const META = {meta_json};
 function renderRunHeader() {{
   const m = META || {{}};
   const agg = m.aggregate || {{}};
-  const scaf = agg.scaffolding || {{}};
-  const rig = agg.rigor || {{}};
+  const scafDid = agg.scaffolding_did || {{}};
+  const rigDid = agg.rigor_did || {{}};
+  const overscaffold = agg.overscaffold || {{}};
   const lc = agg.action_label_counts || {{}};
   const tutorPill = '<span class="pill ' + escapeHtml(m.tutor_mode || 'default') + '">' +
                     escapeHtml(m.tutor_mode || 'default') + ' tutor</span>';
@@ -535,6 +536,16 @@ function renderRunHeader() {{
   const chips = ['scaffolding', 'rigor', 'both', 'neither'].map(k =>
     '<span class="chip ' + k + '">' + chipLabels[k] + ': ' + (lc[k] || 0) + '</span>'
   ).join('');
+  function _fmtRate(rate, denom) {{
+    if (rate == null || denom === 0) return '—';
+    return rate.toFixed(2);
+  }}
+  function _fracChip(yes, total) {{
+    return total > 0 ? '<span style="color:#888;font-size:10px;">(' + yes + '/' + total + ')</span>' : '';
+  }}
+  // Lucy's three axes (2026-06-15): two recall-style "did the tutor do X?"
+  // rates + over-scaffold rate. Over-scaffold rate may say "not available"
+  // when the decompose_overscaffold step hasn't been run on the annotations.
   const html = (
     '<div class="row">' +
       '<div class="version-name">' + escapeHtml(m.version || '') + '</div>' +
@@ -544,15 +555,23 @@ function renderRunHeader() {{
     '</div>' +
     '<div class="row" style="margin-top:8px;">' +
       '<div class="scores">' +
-        '<div class="score-block"><div class="label">scaffolding F1</div><div class="value">' + (scaf.f1 != null ? scaf.f1.toFixed(3) : '—') + '</div></div>' +
-        '<div class="score-block"><div class="label">rigor F1</div><div class="value">' + (rig.f1 != null ? rig.f1.toFixed(3) : '—') + '</div></div>' +
-        '<div class="score-block"><div class="label">outcome+ rate</div><div class="value">' + (agg.outcome_pos_rate != null ? agg.outcome_pos_rate.toFixed(2) : '—') + '</div></div>' +
-        // Show n_scored_for_f1 / n_scenarios ONLY when some scenarios were dropped
-        // (gold or LM produced a non-substantive label). In the normal case
-        // everything scores and the "10/10" block is just noise.
-        ((agg.n_scored_for_f1 != null && agg.n_scenarios != null && agg.n_scored_for_f1 < agg.n_scenarios)
-          ? '<div class="score-block" title="Scenarios excluded from F1 because gold or LM label was mixed/unknown/unclear"><div class="label">scored</div><div class="value">' + agg.n_scored_for_f1 + '/' + agg.n_scenarios + '</div></div>'
-          : '') +
+        '<div class="score-block" title="Of scaffolding-appropriate scenarios, fraction where the AI tutor scaffolded (action_label in scaffolding-or-both). Higher better.">' +
+          '<div class="label">did scaffold</div><div class="value">' + _fmtRate(scafDid.rate, scafDid.n_total) + '</div>' +
+          '<div style="font-size:10px;color:#888;">' + _fracChip(scafDid.n_yes, scafDid.n_total) + '</div>' +
+        '</div>' +
+        '<div class="score-block" title="Of rigor-appropriate scenarios, fraction where the AI tutor pushed for rigor (action_label in rigor-or-both). Higher better.">' +
+          '<div class="label">did rigor</div><div class="value">' + _fmtRate(rigDid.rate, rigDid.n_total) + '</div>' +
+          '<div style="font-size:10px;color:#888;">' + _fracChip(rigDid.n_yes, rigDid.n_total) + '</div>' +
+        '</div>' +
+        (overscaffold.available
+          ? '<div class="score-block" title="Fraction of scenarios where the annotator detected over-scaffolding facets in the tutor\\'s actions. Lower better.">' +
+              '<div class="label">over-scaffold</div><div class="value">' + _fmtRate(overscaffold.rate, overscaffold.n_total) + '</div>' +
+              '<div style="font-size:10px;color:#888;">' + _fracChip(overscaffold.n_yes, overscaffold.n_total) + '</div>' +
+            '</div>'
+          : '<div class="score-block" title="The annotations don\\'t carry overscaffold_decomposed -- re-run Phase 2 to populate it."><div class="label">over-scaffold</div><div class="value">—</div><div style="font-size:10px;color:#888;">not run</div></div>') +
+        '<div class="score-block" title="Fraction of scenarios where the annotator labeled any result facet as student progressed (pos).">' +
+          '<div class="label">outcome+ rate</div><div class="value">' + (agg.outcome_pos_rate != null ? agg.outcome_pos_rate.toFixed(2) : '—') + '</div>' +
+        '</div>' +
       '</div>' +
       '<div class="label-dist" style="margin-left:auto;align-self:center;">action labels: ' + chips + '</div>' +
     '</div>'
@@ -755,6 +774,22 @@ function renderAnnotations(s) {{
       if (overall) h += '<div style="margin:4px 0 6px;">' + actionBadge(overall) + '</div>';
       for (let i = 0; i < a.action_decomposed.length; i++) {{
         h += '<div class="facet"><span class="facet-text">' + escapeHtml(a.action_decomposed[i]) + '</span></div>';
+      }}
+      h += '</div>';
+    }}
+
+    // Over-scaffold facets (from Lucy's decompose_overscaffold step, PR #18).
+    // Each facet is a description of an over-scaffolding behavior the annotator
+    // detected in the tutor's action. Empty list = no over-scaffolding detected.
+    // Missing key = the decompose step wasn't run on this annotation.
+    if (Array.isArray(a.overscaffold_decomposed)) {{
+      h += '<div class="ann-field"><div class="ann-field-label">Over-scaffold facets</div>';
+      if (a.overscaffold_decomposed.length === 0) {{
+        h += '<div class="empty" style="font-size:11px;color:#888;">(none detected)</div>';
+      }} else {{
+        for (const facet of a.overscaffold_decomposed) {{
+          h += '<div class="facet" style="border-left:3px solid #ff8a65;padding-left:6px;"><span class="facet-text">' + escapeHtml(facet) + '</span></div>';
+        }}
       }}
       h += '</div>';
     }}

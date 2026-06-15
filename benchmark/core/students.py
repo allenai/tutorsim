@@ -11,16 +11,24 @@ Modes (mirrors synth-students):
 - "paraphrase_with_example"  -> ParaphraseWithExampleMultiTurnStudentPrompt
 - "trait" or "<dim>-<n>" or "joined-<n>"  -> TraitMultiTurnStudentPrompt
 - "trait_with_example"       -> TraitWithExampleMultiTurnStudentPrompt
+- "oracle"                   -> OracleMomentStudentPrompt
+                                  Sees the post-cut real student turns within
+                                  the moment range (turn_end-bounded) and is
+                                  asked to imitate that specific student's
+                                  behavior in this moment. Post-cut aware --
+                                  student-side analog of the oracle tutor.
 
 Placeholders consumed (one or more per mode):
 - [[NEXT_CONVERSATION_INFORMATION_HERE]]  <- student_context
 - [[EXAMPLE_CONVERSATION_HERE]]           <- transcript_prefix
 - [[PERSONA_DESCRIPTION_HERE]]            <- persona (trait mode)
 - [[STUDENT_DESCRIPTION_HERE]]            <- persona (trait_with_example)
+- [[MOMENT_REFERENCE_HERE]]               <- moment_reference (oracle mode)
 
 The function is pure: no file I/O, no model clients, no scenario object.
 Trait persona generation lives in `benchmark.core.traits` (cache wrapper
-around synth_students.TraitGenerator).
+around synth_students.TraitGenerator). Oracle moment reference is built
+by the caller (exchange.py) from the conversation + scenario.detection.turn_end.
 """
 from __future__ import annotations
 
@@ -28,6 +36,7 @@ from benchmark.synth_students.prompts import (
     SimpleMultiTurnStudentPrompt,
     ExpertMultiTurnStudentPrompt,
     ImitateExampleMultiTurnStudentPrompt,
+    OracleMomentStudentPrompt,
     ParaphraseWithExampleMultiTurnStudentPrompt,
     TraitMultiTurnStudentPrompt,
     TraitWithExampleMultiTurnStudentPrompt,
@@ -38,6 +47,7 @@ from benchmark.synth_students.dimension import ALL_DIMENSION_NAMES
 _NEEDS_EXAMPLE = {"imitate_example", "paraphrase_with_example", "trait_with_example"}
 _NEEDS_PERSONA_TRAIT = "trait"
 _NEEDS_PERSONA_TRAIT_WITH_EXAMPLE = "trait_with_example"
+_NEEDS_MOMENT_REFERENCE = "oracle"
 
 
 def is_trait_mode(student_mode: str) -> bool:
@@ -64,6 +74,8 @@ def _resolve_prompt_class(student_mode: str):
         return ParaphraseWithExampleMultiTurnStudentPrompt
     if student_mode == _NEEDS_PERSONA_TRAIT_WITH_EXAMPLE:
         return TraitWithExampleMultiTurnStudentPrompt
+    if student_mode == _NEEDS_MOMENT_REFERENCE:
+        return OracleMomentStudentPrompt
     # Trait family: bare "trait" OR "<dim>-<n>" / "joined-<n>"
     if is_trait_mode(student_mode):
         return TraitMultiTurnStudentPrompt
@@ -76,6 +88,7 @@ def build_student_system_prompt(
     student_context: str,
     transcript_prefix: str,
     persona: str | None = None,
+    moment_reference: str | None = None,
     num_turns: int | None = None,
 ) -> str:
     """Assemble the STUDENT system prompt for `student_mode`.
@@ -86,6 +99,9 @@ def build_student_system_prompt(
         transcript_prefix: text to substitute for [[EXAMPLE_CONVERSATION_HERE]]
             on modes that need an example.
         persona: trait persona text (required for trait modes).
+        moment_reference: real student post-cut turns within the moment range
+            (required for oracle mode). Built by the caller from
+            conversation + scenario.detection.turn_end.
         num_turns: passed through to the prompt class constructor.
 
     Returns:
@@ -112,5 +128,14 @@ def build_student_system_prompt(
             )
         out = out.replace("[[PERSONA_DESCRIPTION_HERE]]", persona)
         out = out.replace("[[STUDENT_DESCRIPTION_HERE]]", persona)
+
+    if student_mode == _NEEDS_MOMENT_REFERENCE:
+        # moment_reference can legitimately be empty when the scenario was
+        # role-adjusted (cut_turn = turn_end-1) or when the moment span is so
+        # tight there are no further turns to show. Substitute a noop string
+        # rather than raising -- the LM just has no in-moment reference and
+        # falls back to its general "imitate a K-12 student" instruction.
+        ref = moment_reference or "(no further turns in this moment)"
+        out = out.replace("[[MOMENT_REFERENCE_HERE]]", ref)
 
     return out

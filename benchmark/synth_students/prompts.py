@@ -23,7 +23,7 @@ from typing import Optional
 TUTOR_NAME = "TUTOR"
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "benchmark"
-_PROMPT_VERSION = "v6"  # bump if a new student prompt set ships
+_PROMPT_VERSION = "v7"  # bump if a new student prompt set ships
 
 
 def _load_student_template(mode: str) -> str:
@@ -105,6 +105,22 @@ class ParaphraseWithExampleMultiTurnStudentPrompt:
     def __init__(self, num_turns: Optional[int] = None):
         self.num_turns = num_turns
         self.system_prompt = _render("paraphrase_with_example", num_turns, include_example=True)
+
+    def get_system_prompt(self) -> str:
+        return self.system_prompt
+
+
+class OracleMomentStudentPrompt:
+    """Student sees the post-cut turns within the moment range as a reference,
+    and is asked to imitate the real student's behavior in that specific moment.
+    Unlike trait/imitate_example which see pre-cut only, this mode is post-cut
+    aware -- it's the student-side analog of the oracle tutor.
+    """
+    def __init__(self, num_turns: Optional[int] = None):
+        self.num_turns = num_turns
+        # Use the no-example shared instructions: we don't want the model to
+        # think the "moment reference" is a length anchor for the conversation.
+        self.system_prompt = _render("oracle", num_turns, include_example=False)
 
     def get_system_prompt(self) -> str:
         return self.system_prompt
