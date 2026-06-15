@@ -186,8 +186,8 @@ benchmark:
 
   annotator:
     profile: anthropic
-    prompt_version: v13            # was: profiles -- single-prompt v13 with decompose+structure pipeline
-    context_window: 20             # was: 50 -- matches Lucy's revert
+    prompt_version: v13            # single-prompt v13 with decompose+structure pipeline (was: profiles)
+    context_window: 20             # matches Lucy's revert + the value all v13 results were generated with (was: 50)
     mode: batch
     poll_interval: 60
 

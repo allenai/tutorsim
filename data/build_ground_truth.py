@@ -31,6 +31,7 @@ Output format — one JSON file per conversation:
         "situation_label_agg": "both" | "scaffolding" | "rigor" | "neither" | "mixed" | "unknown",  # scaffolding only; majority-voted across overlapping annotators (IoU == 1.0, i.e. exact turn-range match), no_mention/unclear → no; "mixed" = tie, "unknown" = no annotator gave signal
         "action_decomposed": ["<str>", ...],  # atomic facets of the action field
         "result_decomposed": ["<str>", ...],  # atomic facets of the result field
+        "overscaffold_decomposed": ["<str>", ...],  # scaffolding only; spans of situation/action/result suggesting the tutor over-scaffolded (empty list = none found)
         "action_direction_agg": "scaffolding" | "rigor" | "neither" | "both" | "unclear" | "unknown",  # scaffolding only; classify_action.md run once on the union of action_decomposed facets across an IoU>=1.0 cluster (one contribution per annotator); same label written to every moment in the cluster; "unclear" = unparseable model response; "unknown" = cluster had no action facets to classify (no annotator contributed an action_decomposed facet)
         "student_outcome_agg": "pos" | "neg" | "no_evidence" | "unclear",  # scaffolding only; classify_student_result.md run once on the union of result_decomposed facets across an IoU>=1.0 cluster (one contribution per annotator); same label written to every moment in the cluster; mutually-exclusive choice between trending toward demonstrated understanding ("pos") and misconceptions predominantly remaining ("neg"); "no_evidence" = cluster had no result facets to classify; "unclear" = unparseable model response
         "cut_turn": <int>,          # optional — annotator-chosen benchmark cut point
@@ -46,6 +47,13 @@ Usage:
     python data/build_ground_truth.py --labeller v2
     python data/build_ground_truth.py --labeller hybrid   # routes per annotation_type via config
     python data/build_ground_truth.py --input path/to/annotations.jsonl
+    python data/build_ground_truth.py --refresh-overscaffold  # re-run over-scaffold decomp for all scaffolding moments
+
+Decomposition (action, result, and -- for scaffolding moments -- over-scaffolding)
+is cached by a content hash of the source text, so a plain run decomposes only
+moments not already done; nothing else re-runs when its cache is warm. Editing a
+decompose_*.md prompt does NOT invalidate the cache (it keys on text, not the
+prompt) -- use --refresh-decomp / --refresh-overscaffold to force a re-run.
 """
 import argparse
 import hashlib
@@ -68,6 +76,7 @@ from annotator.core.decompose import (
     JUNK_TEXTS as DECOMPOSE_JUNK_TEXTS,
     _load_prompt as _load_decompose_prompt,
     _parse_decomposed,
+    _build_overscaffold_prompt,
 )
 from annotator.core.structure import (
     ACTION_PROMPT_PATH,
@@ -226,6 +235,49 @@ def result_decompose_key(m):
     )
 
 
+def overscaffold_decompose_key(m):
+    """Stable key for caching over-scaffolding decomposition by content hash.
+
+    The over-scaffold prompt reads situation + action + result, so the cache key
+    hashes all three (joined) -- a change to any of them re-decomposes.
+    """
+    blob = "\x1f".join([
+        m.get("situation", "") or "",
+        m.get("action", "") or "",
+        m.get("result", "") or "",
+    ])
+    return (
+        m.get("annotator_id", ""),
+        m.get("turn_start"),
+        m.get("turn_end"),
+        m.get("annotation_type", ""),
+        hashlib.md5(blob.encode("utf-8")).hexdigest()[:12],
+    )
+
+
+def load_existing_overscaffold_decompositions():
+    """Return {conv_id: {overscaffold_decompose_key: facets}} for scaffolding
+    moments that already carry overscaffold_decomposed in ground truth.
+
+    Kept separate from load_existing_decompositions so --refresh-overscaffold and
+    --refresh-decomp invalidate independently.
+    """
+    existing = {}
+    if not GROUND_TRUTH_DIR.exists():
+        return existing
+    for f in GROUND_TRUTH_DIR.glob("*.json"):
+        with open(f, "r", encoding="utf-8") as fp:
+            d = json.load(fp)
+        cache = {
+            overscaffold_decompose_key(m): m["overscaffold_decomposed"]
+            for m in d.get("key_moments", [])
+            if m.get("annotation_type") == "scaffolding" and "overscaffold_decomposed" in m
+        }
+        if cache:
+            existing[f.stem] = cache
+    return existing
+
+
 def load_existing_decompositions():
     """Return {conv_id: {"action": {action_decompose_key: facets}, "result": {result_decompose_key: facets}}}."""
     existing = {}
@@ -340,9 +392,13 @@ def _invalidate_decomp_cache(cache, field):
 
 
 def decompose_batch(items):
-    """Batch decompose action and result fields into atomic facets.
+    """Batch decompose action / result / over-scaffolding into atomic facets.
 
-    items: list of {key, field ("action"|"result"), text} plus situation+action for result items.
+    items: list of {key, field ("action"|"result"|"overscaffold"), ...}:
+      - action: {text}
+      - result: {text} plus situation+action
+      - overscaffold: {situation, action, result} (no "text"; the prompt reads
+        all three, and junk-skipping is handled by _build_overscaffold_prompt)
     Returns {key: [facets]}.
     """
     if not items:
@@ -355,10 +411,20 @@ def decompose_batch(items):
 
     action_template = _load_decompose_prompt("decompose_action.md")
     result_template = _load_decompose_prompt("decompose_result.md")
+    overscaffold_template = _load_decompose_prompt("decompose_overscaffold.md")
 
     entries = []
     results = {}
     for it in items:
+        if it["field"] == "overscaffold":
+            prompt = _build_overscaffold_prompt(
+                it.get("situation", ""), it.get("action", ""), it.get("result", ""),
+                overscaffold_template)
+            if prompt is None:  # both action and result are junk -- nothing to analyze
+                results[it["key"]] = []
+                continue
+            entries.append(build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True))
+            continue
         text = (it["text"] or "").strip()
         if text.lower() in DECOMPOSE_JUNK_TEXTS:
             results[it["key"]] = []
@@ -899,6 +965,16 @@ def main():
                              "automatically when the resulting facets change (no separate "
                              "--refresh-agg needed); unchanged facets keep their agg label. "
                              "Strategy/situation label caches are unaffected.")
+    parser.add_argument("--refresh-overscaffold", action="store_true",
+                        help="Bypass the cached over-scaffolding decomposition and re-run "
+                             "decompose_overscaffold.md for every scaffolding moment. Like "
+                             "--refresh-decomp, the cache keys on a content hash of "
+                             "situation+action+result (not the prompt), so use this flag to pick "
+                             "up edits to decompose_overscaffold.md. Over-scaffolding is "
+                             "scaffolding-only; rapport moments are never decomposed for it. "
+                             "Other caches are unaffected. Note: with a warm cache, a plain run "
+                             "already decomposes only moments whose overscaffold_decomposed is "
+                             "missing, so no flag is needed to incrementally fill new moments.")
     args = parser.parse_args()
 
     global GROUND_TRUTH_DIR
@@ -932,6 +1008,12 @@ def main():
         decomp_field_desc = {"both": "action and result", "action": "action only",
                              "result": "result only"}[args.refresh_decomp]
         print(f"--refresh-decomp={args.refresh_decomp}: re-decomposing {decomp_field_desc}")
+    existing_overscaffold = load_existing_overscaffold_decompositions()
+    overscaffold_cache_total = sum(len(v) for v in existing_overscaffold.values())
+    print(f"Loaded existing over-scaffold decompositions for {len(existing_overscaffold)} conversations ({overscaffold_cache_total} moments)")
+    if args.refresh_overscaffold:
+        existing_overscaffold = {}
+        print("--refresh-overscaffold: re-decomposing over-scaffolding for all scaffolding moments")
     existing_action_result_agg = load_existing_action_result_agg()
     if args.refresh_agg:
         existing_action_result_agg = _invalidate_agg_cache(existing_action_result_agg, args.refresh_agg)
@@ -949,7 +1031,7 @@ def main():
     to_situation_classify = []  # [{key, situation}] — scaffolding moments only
     to_decompose = []         # [{key, field, text}]
     situation_plans = {}      # {conv_id: [s_item, ...]} parallel to plan
-    decompose_plans = {}      # {conv_id: [(action_item, result_item), ...]} parallel to plan
+    decompose_plans = {}      # {conv_id: [(action_item, result_item, overscaffold_item), ...]} parallel to plan
     skipped_dup_count = 0
 
     for conv_id, conv_data in conversations:
@@ -960,6 +1042,7 @@ def main():
         known_decomp = existing_decompositions.get(conv_id, {})
         known_action_decomp = known_decomp.get("action", {})
         known_result_decomp = known_decomp.get("result", {})
+        known_overscaffold_decomp = existing_overscaffold.get(conv_id, {})
 
         plan = []
         s_plan = []
@@ -1016,7 +1099,22 @@ def main():
                                      "situation": ann.get("situation", ""), "action": ann.get("action", "")})
                 result_item = ("classify", dkey)
 
-            d_plan.append((action_item, result_item))
+            # Over-scaffolding decomposition: scaffolding moments only.
+            if ann.get("annotation_type") == "scaffolding":
+                ok = overscaffold_decompose_key(ann)
+                if ok in known_overscaffold_decomp:
+                    overscaffold_item = ("reuse", known_overscaffold_decomp[ok])
+                else:
+                    okey = f"{conv_id}__{idx}__overscaffold"
+                    to_decompose.append({"key": okey, "field": "overscaffold",
+                                         "situation": ann.get("situation", ""),
+                                         "action": ann.get("action", ""),
+                                         "result": ann.get("result", "")})
+                    overscaffold_item = ("classify", okey)
+            else:
+                overscaffold_item = None
+
+            d_plan.append((action_item, result_item, overscaffold_item))
 
         conv_plans.append((conv_id, conv_data, plan))
         situation_plans[conv_id] = s_plan
@@ -1027,8 +1125,11 @@ def main():
     to_class = total_moments - reused
     new_convs = sum(1 for cid, _, _ in conv_plans if cid not in existing_labels)
     sit_reused = sum(1 for sp in situation_plans.values() for item in sp if item and item[0] == "reuse")
-    decomp_action_reused = sum(1 for dp in decompose_plans.values() for a, _ in dp if a[0] == "reuse")
-    decomp_result_reused = sum(1 for dp in decompose_plans.values() for _, r in dp if r[0] == "reuse")
+    decomp_action_reused = sum(1 for dp in decompose_plans.values() for a, _, _ in dp if a[0] == "reuse")
+    decomp_result_reused = sum(1 for dp in decompose_plans.values() for _, r, _ in dp if r[0] == "reuse")
+    decomp_overscaffold_reused = sum(
+        1 for dp in decompose_plans.values() for _, _, o in dp if o is not None and o[0] == "reuse")
+    new_overscaffold = sum(1 for it in to_decompose if it["field"] == "overscaffold")
 
     print(f"Plan: {len(conv_plans)} conversations, {total_moments} moments")
     print(f"  Skipped (situation==action or action==result): {skipped_dup_count}")
@@ -1038,7 +1139,9 @@ def main():
     print(f"  Classify new situation labels:    {len(to_situation_classify)}")
     print(f"  Reuse existing action decomps:    {decomp_action_reused}")
     print(f"  Reuse existing result decomps:    {decomp_result_reused}")
-    print(f"  New decompositions (action+result): {len(to_decompose)}")
+    print(f"  Reuse existing overscaffold decomps: {decomp_overscaffold_reused}")
+    print(f"  New decompositions (action+result+overscaffold): {len(to_decompose)} "
+          f"({new_overscaffold} overscaffold)")
     print(f"  Brand new conversations:          {new_convs}")
 
     # Second pass: batch classify strategy labels, situation labels, and decompositions.
@@ -1066,7 +1169,7 @@ def main():
         s_plan = situation_plans[conv_id]
         d_plan = decompose_plans[conv_id]
         moments = []
-        for (kind, ann, val), s_item, (action_item, result_item) in zip(plan, s_plan, d_plan):
+        for (kind, ann, val), s_item, (action_item, result_item, overscaffold_item) in zip(plan, s_plan, d_plan):
             label = val if kind == "reuse" else new_labels.get(val, "unclear")
             moment = build_moment(ann, label)
             sit = _resolve_situation(s_item)
@@ -1080,6 +1183,11 @@ def main():
                 result_item[1] if result_item[0] == "reuse"
                 else new_decompositions.get(result_item[1], [])
             )
+            if overscaffold_item is not None:  # scaffolding moments only
+                moment["overscaffold_decomposed"] = (
+                    overscaffold_item[1] if overscaffold_item[0] == "reuse"
+                    else new_decompositions.get(overscaffold_item[1], [])
+                )
             moments.append(moment)
         agg = compute_situation_label_agg(moments)
         for idx, agg_label in agg.items():
@@ -1107,8 +1215,9 @@ def main():
     print(f"  Reuse cached student outcome labels:    {result_kinds['reuse']}")
     print(f"  Default student outcome (no facets):    {result_kinds['default']}")
     print(f"  Classify new student outcome labels:    {result_kinds['classify']}")
-    if args.dry_run and to_decompose:
-        print(f"  NOTE: {len(to_decompose)} action/result decompositions are pending — "
+    pending_ar = sum(1 for it in to_decompose if it["field"] in ("action", "result"))
+    if args.dry_run and pending_ar:
+        print(f"  NOTE: {pending_ar} action/result decompositions are pending — "
               f"clusters touching them used placeholder (empty) facets above, so their "
               f"reuse/classify counts are estimates and may change once decomposition runs")
 

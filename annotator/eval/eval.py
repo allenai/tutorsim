@@ -418,6 +418,81 @@ def compute_student_outcome_f1(ground_truth, structure_labels_by_conv, eval_conv
     }
 
 
+def compute_overscaffold_f1(ground_truth, decomposed_by_conv, eval_conv_ids,
+                            min_teachers):
+    """Binary F1 ("yes" = over-scaffolding present) comparing LM vs teacher gold on
+    scaffolding moments.
+
+    Scaffolding only. Each unique gold span (turn_start, turn_end) contributes one
+    unit. The teacher signal comes from the ground truth (one moment per annotator
+    on a span); the LM signal comes from the decomposed_gold side file, keyed by
+    span -- both carry overscaffold_decomposed (an empty list means none detected).
+    Mirrors compute_student_outcome_f1's span lookup.
+
+    The gold span is positive when at least `min_teachers` DISTINCT annotators
+    flagged over-scaffolding (non-empty overscaffold_decomposed); the LM is positive
+    when its overscaffold_decomposed is non-empty. The denominator is every gold
+    scaffolding span the LM also decomposed -- a span with fewer than `min_teachers`
+    flaggers simply counts as gold-negative. precision/recall/F1 are for the
+    positive class: precision = of LM-flagged spans, how many the teachers also
+    flagged; recall = of teacher-flagged spans, how many the LM caught.
+    """
+    llm_over_by_span = {}
+    for conv_id in eval_conv_ids:
+        for a in decomposed_by_conv.get(conv_id, []):
+            if a.get("annotation_type") != "scaffolding":
+                continue
+            llm_over_by_span[(conv_id, a["turn_start"], a["turn_end"])] = \
+                bool(a.get("overscaffold_decomposed"))
+
+    pairs = []
+    span_flaggers = defaultdict(set)
+    for conv_id in eval_conv_ids:
+        for m in ground_truth["conversations"].get(conv_id, {}).get("key_moments", []):
+            if m.get("annotation_type") != "scaffolding":
+                continue
+            span = (conv_id, m["turn_start"], m["turn_end"])
+            if m.get("overscaffold_decomposed"):
+                span_flaggers[span].add(m.get("annotator_id", "unknown"))
+            else:
+                span_flaggers.setdefault(span, set())
+
+    for span, flaggers in span_flaggers.items():
+        llm_positive = llm_over_by_span.get(span)
+        if llm_positive is None:
+            continue  # LM never decomposed this gold span -- nothing to compare
+        gold = "yes" if len(flaggers) >= min_teachers else "no"
+        llm = "yes" if llm_positive else "no"
+        pairs.append((gold, llm))
+
+    tp = sum(1 for g, l in pairs if g == "yes" and l == "yes")
+    fp = sum(1 for g, l in pairs if g == "no" and l == "yes")
+    fn = sum(1 for g, l in pairs if g == "yes" and l == "no")
+    tn = sum(1 for g, l in pairs if g == "no" and l == "no")
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+    return {
+        "min_teachers": min_teachers,
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+        "n_units": len(pairs),
+        "n_gold_positive": tp + fn,
+        "n_llm_positive": tp + fp,
+        # Shaped like _per_class_f1 output so print_f1_table can render it.
+        "f1_by_label": {"yes": {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "support": tp + fn,
+        }},
+        "confusion": build_confusion(pairs, YES_NO_LABELS),
+    }
+
+
 def map_to_binary(label):
     """effective -> 'right', partial/ineffective -> 'wrong'."""
     if label == "effective":
@@ -1135,6 +1210,62 @@ def ground_truth_has_student_outcome_agg(ground_truth: dict) -> bool:
     return False
 
 
+def ground_truth_has_overscaffold(ground_truth: dict) -> bool:
+    """Whether any scaffolding moment in the ground truth carries overscaffold_decomposed.
+
+    Present once data/build_ground_truth.py has run its over-scaffold decompose
+    pass; older snapshots lack it (scoring would otherwise read every teacher as
+    non-flagging and report misleading zeros).
+    """
+    for conv_data in ground_truth.get("conversations", {}).values():
+        for m in conv_data.get("key_moments", []):
+            if m.get("annotation_type") == "scaffolding" and "overscaffold_decomposed" in m:
+                return True
+    return False
+
+
+def decomposed_has_overscaffold(decomposed_by_conv: dict) -> bool:
+    """Whether any scaffolding annotation in the decomposed LM data carries
+    overscaffold_decomposed.
+
+    Absent when the decomposed file predates the over-scaffold pass; scoring would
+    otherwise read every LM annotation as non-flagging and report misleading zeros
+    (run `decompose --gold --only-overscaffold` to backfill).
+    """
+    for anns in decomposed_by_conv.values():
+        for a in anns:
+            if a.get("annotation_type") == "scaffolding" and "overscaffold_decomposed" in a:
+                return True
+    return False
+
+
+def load_decomposed_gold(version: str, profile: str | None = None,
+                         annotator_style: str | None = None,
+                         split: str = "train",
+                         target: str = "scaffolding") -> tuple[dict, str] | tuple[None, None]:
+    """Load decomposed_gold_{target}.json (output of decompose.py --gold), which
+    carries overscaffold_decomposed per annotation.
+
+    Filename must match exactly -- mirrors the suffix construction in
+    decompose.run_decompose for the given version/profile/style/split.
+    Returns ({conv_id: [annotation dicts]}, filename) or (None, None).
+    """
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    filename = f"decomposed_gold{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+
+    data = load_annotator_result(version, filename)
+    if data is None:
+        return None, None
+
+    by_conv = {}
+    for conv_id, conv_data in data["results"].items():
+        transcript_id = conv_id.rsplit("_", 1)[-1]
+        by_conv[transcript_id] = conv_data.get("annotations", [])
+    return by_conv, filename
+
+
 def load_structure_labels_gold(version: str, profile: str | None = None,
                                annotator_style: str | None = None,
                                split: str = "train",
@@ -1370,6 +1501,25 @@ def print_scorecard(output):
                         print(f"    {h:>15s}"
                               + "".join(f"{row.get(l, 0):>15d}" for l in STUDENT_OUTCOME_LABELS))
 
+            t_over = td.get("overscaffold_f1")
+            if t_over is not None:
+                for label, key in (("≥1 teacher", "min_1"), ("≥2 teachers", "min_2")):
+                    d = t_over[key]
+                    print(f"  Over-Scaffold F1 (gold-positive = {label}): "
+                          f"P={d['precision']:.4f}  R={d['recall']:.4f}  "
+                          f"F1={d['f1']:.4f}  "
+                          f"({d['n_units']} spans, {d['n_gold_positive']} gold+, "
+                          f"{d['n_llm_positive']} LM+)")
+                    cm = d.get("confusion", {})
+                    if cm:
+                        print("    Confusion (rows=gold, cols=LLM):")
+                        print("    " + " " * 11
+                              + "".join(f"{l:>10s}" for l in YES_NO_LABELS))
+                        for h in YES_NO_LABELS:
+                            row = cm.get(h, {})
+                            print(f"    {h:>11s}"
+                                  + "".join(f"{row.get(l, 0):>10d}" for l in YES_NO_LABELS))
+
             if t_guard.get("total_annotations", 0) > 0:
                 print(f"  Effective Rate:     {t_guard.get('effective_rate', 0):.1%}  |  "
                       f"Invalid: {t_guard.get('invalid_labels', 0)}")
@@ -1392,11 +1542,34 @@ def strip_per_conversation(output):
     return compact
 
 
-def load_eval_json(version, mode):
-    """Load eval_{mode}.json, falling back to eval.json for legacy results."""
-    data = load_annotator_result(version, f"eval_{mode}.json")
-    if data is not None:
-        return data
+def eval_output_filename(mode, profile=None, annotator_style=None, split="train"):
+    """Build the eval scorecard filename.
+
+    Mirrors the input-file suffix convention (profile, then style, then split)
+    so that runs with different profiles/styles/splits don't clobber each
+    other. train split stays unsuffixed for back-compat.
+    """
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{annotator_style}" if annotator_style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    return f"eval_{mode}{profile_suffix}{style_suffix}{split_suffix}.json"
+
+
+def load_eval_json(version, mode, profile=None, annotator_style=None, split="train"):
+    """Load the eval scorecard, trying the profile/style/split-suffixed name
+    first, then the unsuffixed eval_{mode}.json, then legacy eval.json."""
+    candidates = [
+        eval_output_filename(mode, profile, annotator_style, split),
+        f"eval_{mode}.json",
+    ]
+    seen: set = set()
+    for fname in candidates:
+        if fname in seen:
+            continue
+        seen.add(fname)
+        data = load_annotator_result(version, fname)
+        if data is not None:
+            return data
     legacy = load_annotator_result(version, "eval.json")
     if legacy is not None:
         if legacy.get("mode") == mode or mode == "full":
@@ -1565,7 +1738,8 @@ def main():
     if args.compare:
         evals = []
         for v in args.compare:
-            data = load_eval_json(v, args.mode)
+            data = load_eval_json(v, args.mode, profile=args.profile,
+                                  annotator_style=args.annotator_style, split=args.split)
             if data is None:
                 print(f"ERROR: No eval results for {v} (mode: {args.mode})")
                 return
@@ -1665,6 +1839,38 @@ def main():
         else:
             print("Structure labels: gold has action_direction_agg/student_outcome_agg but no "
                   "matching structure_labels_gold output found for these input flags -- skipping")
+
+    # --- Over-scaffold comparison (scaffolding only) ---
+    # Teacher signal lives in the ground truth (overscaffold_decomposed per annotator);
+    # the LM signal lives in the decomposed_gold side file, keyed by span. Runs whenever
+    # both carry the field for these exact input flags (--version/--profile/--style/--split).
+    overscaffold_f1 = None
+    if ground_truth_has_overscaffold(ground_truth):
+        decomposed_by_conv, decomposed_filename = load_decomposed_gold(
+            version, profile=args.profile, annotator_style=style, split=args.split)
+        if decomposed_by_conv is not None and not decomposed_has_overscaffold(decomposed_by_conv):
+            print(f"Over-scaffold: {decomposed_filename} lacks overscaffold_decomposed "
+                  "(predates the over-scaffold pass) -- run "
+                  "decompose --gold --only-overscaffold to backfill -- skipping")
+        elif decomposed_by_conv is not None:
+            over_eval_ids = (
+                set(ground_truth["conversations"].keys())
+                & set(decomposed_by_conv.keys())
+            ) - EXAMPLE_CONV_IDS
+            overscaffold_f1 = {
+                "min_1": compute_overscaffold_f1(
+                    ground_truth, decomposed_by_conv, over_eval_ids, min_teachers=1),
+                "min_2": compute_overscaffold_f1(
+                    ground_truth, decomposed_by_conv, over_eval_ids, min_teachers=2),
+            }
+            print(f"Loaded decomposed gold for over-scaffold comparison: {decomposed_filename} "
+                  f"({overscaffold_f1['min_1']['n_units']} scored spans, "
+                  f"≥1-teacher F1={overscaffold_f1['min_1']['f1']}, "
+                  f"≥2-teacher F1={overscaffold_f1['min_2']['f1']})")
+        else:
+            print("Over-scaffold: gold has overscaffold_decomposed but no matching "
+                  "decomposed_gold output found for these input flags -- skipping "
+                  "(run decompose --gold --only-overscaffold)")
 
     # --- Load LLM data based on mode ---
     llm_moments_by_conv = {}
@@ -1767,6 +1973,9 @@ def main():
         if ann_type == "scaffolding" and student_outcome_f1 is not None:
             type_result["student_outcome_f1"] = student_outcome_f1
 
+        if ann_type == "scaffolding" and overscaffold_f1 is not None:
+            type_result["overscaffold_f1"] = overscaffold_f1
+
         if detection:
             l_filtered = filter_moments_by_type(llm_moments_by_conv, ann_type)
             type_result["detection"] = compute_detection_metrics(h_filtered, l_filtered)
@@ -1835,6 +2044,9 @@ def main():
     output = {
         "version": version,
         "mode": args.mode,
+        "profile": args.profile,
+        "annotator_style": style,
+        "split": args.split,
         "num_conversations": len(eval_conv_ids),
     }
     if detection:
@@ -1849,9 +2061,8 @@ def main():
     print_scorecard(output)
 
     compact_output = strip_per_conversation(output)
-    style_suffix = f"_{style}" if style else ""
-    split_suffix = f"_{args.split}" if args.split != "train" else ""
-    eval_filename = f"eval_{args.mode}{style_suffix}{split_suffix}.json"
+    eval_filename = eval_output_filename(
+        args.mode, profile=args.profile, annotator_style=style, split=args.split)
     save_annotator_result(version, eval_filename, compact_output)
     print(f"\nSaved to: {eval_filename} (version: {version})")
 

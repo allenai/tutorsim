@@ -58,6 +58,23 @@ def test_empty_object_is_valid_no_facets():
     assert facets == []
 
 
+def test_wrapper_object_with_empty_list_is_empty_not_crammed():
+    # Regression: opus-4-8 wraps the array as {"spans": []} / {"facets": []} for an
+    # empty result. The cram-fallback must NOT fire on an empty list value, or the
+    # key+"[]" get returned as two bogus facets -- which silently flips an empty
+    # over-scaffold result into a (wrong) non-empty one.
+    for text in ('{"spans": []}', '{"facets": []}', '{"result": []}'):
+        facets, had_error = _parse_decomposed(text)
+        assert had_error is False, text
+        assert facets == [], text
+
+
+def test_wrapper_object_with_spans_key_extracts_list():
+    facets, had_error = _parse_decomposed('{"spans": ["a", "b"]}')
+    assert had_error is False
+    assert facets == ["a", "b"]
+
+
 def test_unparseable_text_flags_error():
     facets, had_error = _parse_decomposed("not json at all")
     assert had_error is True

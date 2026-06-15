@@ -3,8 +3,10 @@ import pytest
 
 pytest.importorskip("krippendorff")  # annotator.eval.eval imports krippendorff
 
+from annotator.eval import eval as eval_mod
 from annotator.eval.eval import (
     cohens_kappa, compute_consensus_label, map_to_binary, compute_student_outcome_f1,
+    eval_output_filename, load_eval_json,
     EFFECTIVENESS_LABELS, BINARY_LABELS,
 )
 
@@ -130,3 +132,48 @@ class TestComputeStudentOutcomeF1:
         structure_labels_by_conv = {"conv1": [_llm_annotation(1, 10, "pos")]}
         result = compute_student_outcome_f1(ground_truth, structure_labels_by_conv, ["conv1"])
         assert result == {"f1": {}, "macro_f1": None, "n_units": 0, "confusion": {}}
+
+
+class TestEvalOutputFilename:
+    def test_includes_profile_suffix(self):
+        # The whole bug: profile must appear in the output filename so two
+        # profiles don't clobber each other's scorecard.
+        assert eval_output_filename("annotations", profile="anthropic") == \
+            "eval_annotations_anthropic.json"
+
+    def test_suffix_order_profile_style_split(self):
+        assert eval_output_filename(
+            "annotations", profile="anthropic", annotator_style="lenient", split="test"
+        ) == "eval_annotations_anthropic_lenient_test.json"
+
+    def test_train_split_omitted(self):
+        # train is the default and stays unsuffixed for back-compat
+        assert eval_output_filename("detections", profile="gemini", split="train") == \
+            "eval_detections_gemini.json"
+
+    def test_no_optional_args_matches_legacy_mode_name(self):
+        assert eval_output_filename("full") == "eval_full.json"
+
+
+class TestLoadEvalJson:
+    def test_prefers_profile_suffixed_file(self, monkeypatch):
+        seen = []
+
+        def fake_load(version, filename):
+            seen.append(filename)
+            return {"mode": "annotations"} if filename == "eval_annotations_anthropic.json" else None
+
+        monkeypatch.setattr(eval_mod, "load_annotator_result", fake_load)
+        data = load_eval_json("v1", "annotations", profile="anthropic")
+        assert data == {"mode": "annotations"}
+        assert seen[0] == "eval_annotations_anthropic.json"
+
+    def test_falls_back_to_unsuffixed_then_legacy(self, monkeypatch):
+        def fake_load(version, filename):
+            if filename == "eval.json":
+                return {"mode": "annotations"}
+            return None
+
+        monkeypatch.setattr(eval_mod, "load_annotator_result", fake_load)
+        data = load_eval_json("v1", "annotations", profile="anthropic")
+        assert data == {"mode": "annotations"}

@@ -7,8 +7,13 @@ statements, using:
   - prompts/annotator/decomposer/decompose_action.md  (for action field)
   - prompts/annotator/decomposer/decompose_result.md  (for result field)
 
-Adds action_decomposed and result_decomposed (list[str]) to each annotation,
-then saves to decomposed_{target}.json.
+For the scaffolding target it additionally extracts spans suggesting the tutor
+over-scaffolded, using:
+  - prompts/annotator/decomposer/decompose_overscaffold.md  (situation+action+result)
+
+Adds action_decomposed and result_decomposed (and, for scaffolding,
+overscaffold_decomposed) (list[str]) to each annotation, then saves to
+decomposed_{target}.json.
 
 Usage:
     python -m annotator.core.decompose --version v13
@@ -16,6 +21,8 @@ Usage:
     python -m annotator.core.decompose --version v13 --split test
     python -m annotator.core.decompose --version v13 --target rapport
     python -m annotator.core.decompose --version v13 --gold --profile anthropic --target scaffolding --split train
+    # backfill only overscaffold_decomposed, reusing existing action/result facets:
+    python -m annotator.core.decompose --version v13 --gold --profile anthropic --target scaffolding --only-overscaffold
 """
 
 import argparse
@@ -69,13 +76,14 @@ def _coerce_facets(parsed: object) -> list[str] | None:
         return [str(s) for s in parsed]
 
     if isinstance(parsed, dict):
-        # Prefer any list value (the {"facets": [...]} wrapper shape).
-        list_facets = [
-            str(s) for v in parsed.values() if isinstance(v, list) for s in v
-        ]
-        if list_facets:
-            return list_facets
-        # No list anywhere: facets were crammed across keys and values.
+        # Prefer the wrapper shape: a list-valued key holds the facets (e.g.
+        # {"facets": [...]} or {"spans": [...]}). An empty list value
+        # ({"spans": []}) is a real empty result -- return [], do NOT fall through
+        # to the cram path, or the key and "[]" come back as two bogus facets.
+        list_values = [v for v in parsed.values() if isinstance(v, list)]
+        if list_values:
+            return [str(s) for v in list_values for s in v]
+        # No list value anywhere: facets were crammed across keys and values.
         # Interleave to preserve each pair's order.
         facets: list[str] = []
         for k, v in parsed.items():
@@ -84,6 +92,45 @@ def _coerce_facets(parsed: object) -> list[str] | None:
         return facets
 
     return None
+
+
+def _input_prefix(only_overscaffold: bool, gold: bool) -> str:
+    """Filename prefix for the decompose input.
+
+    A normal run reads raw annotations. An only-overscaffold run reads the
+    already-decomposed file instead, so the existing action_decomposed /
+    result_decomposed facets are carried through to the output untouched.
+    """
+    if only_overscaffold:
+        return "decomposed_gold" if gold else "decomposed"
+    return "annotations_gold" if gold else "annotations"
+
+
+def _result_filename(prefix: str, target: str, profile: str | None,
+                     style: str | None, split: str) -> str:
+    """Assemble a decompose input/output filename from its suffix parts."""
+    profile_suffix = f"_{profile}" if profile else ""
+    style_suffix = f"_{style}" if style else ""
+    split_suffix = f"_{split}" if split != "train" else ""
+    return f"{prefix}{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+
+
+def _build_overscaffold_prompt(situation: str, action: str, result_text: str,
+                               template: str) -> str | None:
+    """Build the over-scaffolding decomposition prompt for one annotation.
+
+    The prompt asks for spans (in situation/action/result) that suggest the
+    tutor over-scaffolded. Returns None when both action and result are junk --
+    there is no described tutor behavior or outcome to analyze, so we skip the
+    API call (the caller writes an empty facet list instead).
+    """
+    if (action.strip().lower() in JUNK_TEXTS
+            and result_text.strip().lower() in JUNK_TEXTS):
+        return None
+    return (template
+            .replace("{situation}", situation)
+            .replace("{action}", action)
+            .replace("{result}", result_text))
 
 
 def _parse_decomposed(text: str) -> tuple[list[str], bool]:
@@ -114,6 +161,35 @@ def _parse_decomposed(text: str) -> tuple[list[str], bool]:
     return [], True
 
 
+def _assign_facets(raw: dict, locations: list[tuple[str, int]], prefix: str,
+                   field: str, results: dict) -> tuple[int, int, int, int]:
+    """Parse model output for each location and write `field` onto the matching
+    annotation in `results`.
+
+    `prefix` is the request-key namespace (e.g. "action") and also labels parse
+    warnings. Returns (input_tokens, output_tokens, errors, total_facets).
+    """
+    in_tok = out_tok = errors = total_facets = 0
+    for conv_id, idx in locations:
+        key = f"{prefix}__{conv_id}__{idx}"
+        entry = raw.get(key, {})
+        if "error" in entry or not entry.get("text"):
+            facets = []
+            errors += 1
+        else:
+            usage = entry.get("usage", {})
+            in_tok += usage.get("input_tokens", 0)
+            out_tok += usage.get("output_tokens", 0)
+            facets, had_error = _parse_decomposed(entry["text"])
+            if had_error:
+                logger.warning("Could not parse %s decomposition for %s: %r",
+                               prefix, key, entry["text"][:200])
+                errors += 1
+        results[conv_id]["annotations"][idx][field] = facets
+        total_facets += len(facets)
+    return in_tok, out_tok, errors, total_facets
+
+
 def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
                   gold: bool = False,
                   annotator_style: str | None = None,
@@ -121,6 +197,7 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
                   profile: str | None = None,
                   target: str = "scaffolding",
                   split: str = "train",
+                  only_overscaffold: bool = False,
                   dry_run: bool = False) -> dict | None:
     """Run decomposition pass. Returns enriched annotations data dict.
 
@@ -129,13 +206,22 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
 
     Adds action_decomposed and result_decomposed (list[str]) to each
     annotation of the target type, then saves to decomposed_{target}.json.
+
+    only_overscaffold runs just the over-scaffold pass: it reads the existing
+    decomposed_{target}.json, leaves action_decomposed/result_decomposed
+    untouched, (re)computes overscaffold_decomposed, and writes back. Use it to
+    backfill the over-scaffold field without paying to re-decompose action and
+    result. Only valid for the scaffolding target.
     """
+    if only_overscaffold and target != "scaffolding":
+        logger.error("--only-overscaffold is only valid for --target scaffolding "
+                     "(got %s); over-scaffolding is scaffolding-specific.", target)
+        return None
+
     in_memory = annotations_data is not None
-    profile_suffix = f"_{profile}" if profile else ""
-    style_suffix = f"_{annotator_style}" if annotator_style else ""
-    split_suffix = f"_{split}" if split != "train" else ""
-    gold_prefix = "annotations_gold" if gold else "annotations"
-    input_filename = f"{gold_prefix}{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+    input_filename = _result_filename(
+        _input_prefix(only_overscaffold, gold), target, profile,
+        annotator_style, split)
 
     if in_memory:
         data = annotations_data
@@ -146,27 +232,31 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
             return None
         logger.info("Loaded: %s", input_filename)
 
-    if in_memory:
-        # In-memory path (benchmark/chaining): data is already scoped by the
-        # caller; skip split filtering so synthetic scenario IDs aren't dropped.
-        results = dict(data["results"])
-    else:
-        split_ids = load_split_ids(split)
-        results = {
-            conv_id: conv_data
-            for conv_id, conv_data in data["results"].items()
-            if conv_id.rsplit("_", 1)[-1] in split_ids
-        }
+    split_ids = load_split_ids(split)
+    results = {
+        conv_id: conv_data
+        for conv_id, conv_data in data["results"].items()
+        if conv_id.rsplit("_", 1)[-1] in split_ids
+    }
 
     action_template = _load_prompt("decompose_action.md")
     result_template = _load_prompt("decompose_result.md")
+    # Over-scaffolding is a scaffolding-specific concept; only decompose it for
+    # the scaffolding target.
+    overscaffold_enabled = target == "scaffolding"
+    overscaffold_template = (
+        _load_prompt("decompose_overscaffold.md") if overscaffold_enabled else None
+    )
 
     action_entries = []
     result_entries = []
+    overscaffold_entries = []
     locations_action = []
     locations_result = []
+    locations_overscaffold = []
     skipped_action = 0
     skipped_result = 0
+    skipped_overscaffold = 0
 
     for conv_id, conv_data in results.items():
         for idx, ann in enumerate(conv_data["annotations"]):
@@ -177,31 +267,48 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
             action = ann.get("action", "")
             result_text = ann.get("result", "")
 
-            if action.strip().lower() in JUNK_TEXTS:
-                results[conv_id]["annotations"][idx]["action_decomposed"] = []
-                skipped_action += 1
-            else:
-                key = f"action__{conv_id}__{idx}"
-                prompt = action_template.replace("{action}", action)
-                action_entries.append(build_batch_entry(key, prompt, json_mode=True))
-                locations_action.append((conv_id, idx))
+            # only_overscaffold skips these passes entirely, leaving the
+            # annotation's existing action_decomposed/result_decomposed intact.
+            if not only_overscaffold:
+                if action.strip().lower() in JUNK_TEXTS:
+                    results[conv_id]["annotations"][idx]["action_decomposed"] = []
+                    skipped_action += 1
+                else:
+                    key = f"action__{conv_id}__{idx}"
+                    prompt = action_template.replace("{action}", action)
+                    action_entries.append(build_batch_entry(key, prompt, json_mode=True))
+                    locations_action.append((conv_id, idx))
 
-            if result_text.strip().lower() in JUNK_TEXTS:
-                results[conv_id]["annotations"][idx]["result_decomposed"] = []
-                skipped_result += 1
-            else:
-                key = f"result__{conv_id}__{idx}"
-                prompt = (result_template
-                          .replace("{situation}", situation)
-                          .replace("{action}", action)
-                          .replace("{result}", result_text))
-                result_entries.append(build_batch_entry(key, prompt, json_mode=True))
-                locations_result.append((conv_id, idx))
+                if result_text.strip().lower() in JUNK_TEXTS:
+                    results[conv_id]["annotations"][idx]["result_decomposed"] = []
+                    skipped_result += 1
+                else:
+                    key = f"result__{conv_id}__{idx}"
+                    prompt = (result_template
+                              .replace("{situation}", situation)
+                              .replace("{action}", action)
+                              .replace("{result}", result_text))
+                    result_entries.append(build_batch_entry(key, prompt, json_mode=True))
+                    locations_result.append((conv_id, idx))
 
-    entries = action_entries + result_entries
+            if overscaffold_enabled:
+                prompt = _build_overscaffold_prompt(
+                    situation, action, result_text, overscaffold_template)
+                if prompt is None:
+                    results[conv_id]["annotations"][idx]["overscaffold_decomposed"] = []
+                    skipped_overscaffold += 1
+                else:
+                    key = f"overscaffold__{conv_id}__{idx}"
+                    overscaffold_entries.append(
+                        build_batch_entry(key, prompt, json_mode=True))
+                    locations_overscaffold.append((conv_id, idx))
+
+    entries = action_entries + result_entries + overscaffold_entries
     logger.info(
-        "Action entries: %d (%d skipped) | Result entries: %d (%d skipped)",
+        "Action entries: %d (%d skipped) | Result entries: %d (%d skipped) | "
+        "Over-scaffold entries: %d (%d skipped)",
         len(action_entries), skipped_action, len(result_entries), skipped_result,
+        len(overscaffold_entries), skipped_overscaffold,
     )
     logger.info("Model: %s | Mode: %s", model, mode)
 
@@ -211,8 +318,9 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
         print(f"Model:          {model}  [{mode}]")
         print(f"Action entries: {len(action_entries)}  ({skipped_action} skipped as junk)")
         print(f"Result entries: {len(result_entries)}  ({skipped_result} skipped as junk)")
+        print(f"Over-scaffold entries: {len(overscaffold_entries)}  ({skipped_overscaffold} skipped as junk)")
         print(f"Total API calls: {len(entries)}")
-        for label, sample_entries in [("action", action_entries[:2]), ("result", result_entries[:2])]:
+        for label, sample_entries in [("action", action_entries[:2]), ("result", result_entries[:2]), ("overscaffold", overscaffold_entries[:2])]:
             for e in sample_entries:
                 contents = e.get("request", {}).get("contents", [])
                 parts = contents[0].get("parts", []) if contents else []
@@ -224,6 +332,7 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
     client = ModelClient(model)
     if not in_memory:
         output_dir = get_annotator_result_path(version)
+        profile_suffix = f"_{profile}" if profile else ""
         jsonl_path = str(output_dir / f"decompose_requests{profile_suffix}.jsonl")
         write_jsonl(entries, jsonl_path)
 
@@ -238,73 +347,71 @@ def run_decompose(version: str, model: str, mode: str, phase_cfg: dict,
         logger.info("Running %d entries in sync mode...", len(entries))
         raw = run_sync_entries(client, entries, json_mode=True)
 
-    total_input = 0
-    total_output = 0
-    errors = 0
-    total_action_facets = 0
-    total_result_facets = 0
+    in_a, out_a, err_a, total_action_facets = _assign_facets(
+        raw, locations_action, "action", "action_decomposed", results)
+    in_r, out_r, err_r, total_result_facets = _assign_facets(
+        raw, locations_result, "result", "result_decomposed", results)
+    in_o, out_o, err_o, total_overscaffold_facets = _assign_facets(
+        raw, locations_overscaffold, "overscaffold", "overscaffold_decomposed", results)
 
-    for conv_id, idx in locations_action:
-        key = f"action__{conv_id}__{idx}"
-        entry = raw.get(key, {})
-        if "error" in entry or not entry.get("text"):
-            facets = []
-            errors += 1
-        else:
-            usage = entry.get("usage", {})
-            total_input += usage.get("input_tokens", 0)
-            total_output += usage.get("output_tokens", 0)
-            facets, had_error = _parse_decomposed(entry["text"])
-            if had_error:
-                logger.warning("Could not parse action decomposition for %s: %r", key, entry["text"][:200])
-                errors += 1
-        results[conv_id]["annotations"][idx]["action_decomposed"] = facets
-        total_action_facets += len(facets)
+    total_input = in_a + in_r + in_o
+    total_output = out_a + out_r + out_o
+    errors = err_a + err_r + err_o
 
-    for conv_id, idx in locations_result:
-        key = f"result__{conv_id}__{idx}"
-        entry = raw.get(key, {})
-        if "error" in entry or not entry.get("text"):
-            facets = []
-            errors += 1
-        else:
-            usage = entry.get("usage", {})
-            total_input += usage.get("input_tokens", 0)
-            total_output += usage.get("output_tokens", 0)
-            facets, had_error = _parse_decomposed(entry["text"])
-            if had_error:
-                logger.warning("Could not parse result decomposition for %s: %r", key, entry["text"][:200])
-                errors += 1
-        results[conv_id]["annotations"][idx]["result_decomposed"] = facets
-        total_result_facets += len(facets)
+    if only_overscaffold:
+        # Preserve the action/result stats and token cost from the prior run;
+        # refresh only the over-scaffold pass and add its token cost.
+        prev_stats = data.get("decompose_stats", {})
+        decompose_stats = {
+            **prev_stats,
+            "overscaffold_entries": len(overscaffold_entries),
+            "skipped_overscaffold": skipped_overscaffold,
+            "total_overscaffold_facets": total_overscaffold_facets,
+        }
+        prev_tokens = data.get("token_summary", {})
+        token_summary = {
+            "total_input_tokens": prev_tokens.get("total_input_tokens", 0) + total_input,
+            "total_output_tokens": prev_tokens.get("total_output_tokens", 0) + total_output,
+            "total_tokens": prev_tokens.get("total_tokens", 0) + total_input + total_output,
+            "errors": errors,
+        }
+    else:
+        decompose_stats = {
+            "action_entries": len(action_entries),
+            "result_entries": len(result_entries),
+            "overscaffold_entries": len(overscaffold_entries),
+            "skipped_action": skipped_action,
+            "skipped_result": skipped_result,
+            "skipped_overscaffold": skipped_overscaffold,
+            "total_action_facets": total_action_facets,
+            "total_result_facets": total_result_facets,
+            "total_overscaffold_facets": total_overscaffold_facets,
+        }
+        token_summary = {
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "total_tokens": total_input + total_output,
+            "errors": errors,
+        }
 
     output = {
         **data,
         "results": results,
         "decomposed": True,
-        "decompose_stats": {
-            "action_entries": len(action_entries),
-            "result_entries": len(result_entries),
-            "skipped_action": skipped_action,
-            "skipped_result": skipped_result,
-            "total_action_facets": total_action_facets,
-            "total_result_facets": total_result_facets,
-        },
-        "token_summary": {
-            "total_input_tokens": total_input,
-            "total_output_tokens": total_output,
-            "total_tokens": total_input + total_output,
-            "errors": errors,
-        },
+        "decompose_stats": decompose_stats,
+        "token_summary": token_summary,
     }
 
     decomposed_prefix = "decomposed_gold" if gold else "decomposed"
-    output_filename = f"{decomposed_prefix}{profile_suffix}{style_suffix}{split_suffix}_{target}.json"
+    output_filename = _result_filename(
+        decomposed_prefix, target, profile, annotator_style, split)
     save_annotator_result(version, output_filename, output)
     logger.info("Saved: %s", output_filename)
 
     logger.info("  Action facets extracted: %d", total_action_facets)
     logger.info("  Result facets extracted: %d", total_result_facets)
+    if overscaffold_enabled:
+        logger.info("  Over-scaffold facets extracted: %d", total_overscaffold_facets)
     logger.info("  Tokens: %s", f"{total_input + total_output:,}")
     if errors:
         logger.warning("  Errors: %d", errors)
@@ -333,6 +440,12 @@ def main():
                         help="Annotation type to decompose (default: scaffolding)")
     parser.add_argument("--split", choices=["train", "test"], default="train",
                         help="Which split to run on (default: train)")
+    parser.add_argument("--only-overscaffold", action="store_true",
+                        dest="only_overscaffold",
+                        help="Only run the over-scaffold pass: read the existing "
+                             "decomposed_{target}.json, keep action/result facets, "
+                             "and (re)compute overscaffold_decomposed. "
+                             "Scaffolding target only.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print entries that would be submitted without calling the API")
     args = parser.parse_args()
@@ -360,6 +473,7 @@ def main():
                            phase_cfg=phase_cfg, gold=args.gold,
                            annotator_style=style, profile=profile,
                            target=args.target, split=args.split,
+                           only_overscaffold=args.only_overscaffold,
                            dry_run=args.dry_run)
     # run_decompose returns None on missing input (a real failure) and also on
     # --dry-run (expected). Only the former should be a non-zero exit.

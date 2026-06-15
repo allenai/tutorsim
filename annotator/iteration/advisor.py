@@ -501,12 +501,16 @@ def collect_annotation_errors(version, ann_type, transcripts, limit=10,
 # Eval metrics loader
 # ===================================================================
 
-def load_eval_metrics(version, mode, ann_type=None):
+def load_eval_metrics(version, mode, ann_type=None, profile=None, annotator_style=None):
     """Load evaluation metrics from eval JSON (must run eval.py first).
 
-    Returns a dict with key metrics, or empty dict if not found.
+    Uses the shared eval.load_eval_json loader so the profile/style-suffixed
+    scorecard is found (with fallback to the unsuffixed name), matching the
+    naming eval.py writes. Returns a dict with key metrics, or empty dict if
+    not found.
     """
-    data = load_annotator_result(version, f"eval_{mode}.json")
+    from ..eval.eval import load_eval_json
+    data = load_eval_json(version, mode, profile=profile, annotator_style=annotator_style)
     if data is None:
         return {}
 
@@ -675,7 +679,8 @@ def main():
             show_human_annotations=not args.no_human_annotations,
         )
         # Load evaluation metrics (eval.py must have been run first)
-        eval_metrics = load_eval_metrics(args.version, "detections", ann_type=args.type)
+        eval_metrics = load_eval_metrics(args.version, "detections", ann_type=args.type,
+                                         profile=profile_name)
         current_metrics = format_detection_metrics(eval_metrics)
         if eval_metrics:
             print(f"Eval metrics: recall={eval_metrics.get('cluster_recall', 0):.1%}, "
@@ -806,13 +811,11 @@ def main():
         )
         confusion_summary = ", ".join(f"{k}: {v}" for k, v in stats["confusion_counts"].items())
 
-        # Load evaluation metrics (archetype-specific if style given)
-        style_suffix = f"_{args.annotator_style}" if args.annotator_style else ""
-        eval_mode_key = f"annotations{style_suffix}"
-        eval_metrics = load_eval_metrics(args.version, eval_mode_key, ann_type=args.type)
-        if not eval_metrics:
-            # Fall back to plain annotations metrics
-            eval_metrics = load_eval_metrics(args.version, "annotations", ann_type=args.type)
+        # Load evaluation metrics (profile/archetype-specific if given; the
+        # shared loader falls back to the unsuffixed scorecard automatically)
+        eval_metrics = load_eval_metrics(args.version, "annotations", ann_type=args.type,
+                                         profile=profile_name,
+                                         annotator_style=args.annotator_style)
         current_metrics = format_annotation_metrics(eval_metrics)
         if eval_metrics:
             print(f"Eval metrics: binary_kappa={eval_metrics.get('binary_kappa', 0):.4f}, "

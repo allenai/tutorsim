@@ -4,6 +4,16 @@ Running log of hard-won lessons from building and maintaining this project.
 
 ---
 
+## 2026-06-14: Empty `{"key": []}` wrapper silently became two bogus decomposition facets
+
+**What happened:** Evaluating decompose_overscaffold.md, the prompt looked terrible (21% precision, predicted over-scaffolding almost everywhere). The cause wasn't the prompt — it was `_coerce_facets` in `annotator/core/decompose.py`. opus-4-8 (with json_mode) wraps the requested array as `{"spans": [...]}`. For an *empty* result it returns `{"spans": []}`. The old code only took list values when the flattened result was non-empty (`if list_facets:`), so an empty list value fell through to the "cram object keys+values into facets" fallback and returned `['spans', '[]']` — a 2-element list. Downstream, `len(facets) > 0` flipped an empty result into a (wrong) non-empty one.
+
+**Why it matters:** This affects the real ground-truth pipeline, not just the eval — any action/result/over-scaffold decomposition the model returns as `{"facets": []}` / `{"spans": []}` would gain two junk facets. Corrected over-scaffold eval: 58% precision / 100% recall / F1 74% / 85% accuracy.
+
+**Fix:** Distinguish "has any list value" from "flattened result is non-empty". If any value is a list, return the concatenation (possibly empty); only cram when there is no list value at all. Regression tests in `tests/test_decompose_parse.py`.
+
+---
+
 ## 2026-03-24: Never gitignore results without preserving them first
 
 **What happened:** During the repo restructuring, `results/` was added to `.gitignore` and the old `synthetic_annotator/results/` directory was deleted as part of collapsing `synthetic_annotator/` into `annotator/`. The results were copied to the new `results/annotator/` location first, but a `git checkout HEAD -- .` command (used to recover from a failed `history/` restore) reverted tracked files and could have wiped results if they'd been in tracked paths.
@@ -182,3 +192,11 @@ When a prompt has drifted through iteration, don't patch further. Go back to the
 **Why:** The decomposer prompts ask for a bare JSON array, but the OpenAI path sets `response_format={"type": "json_object"}` (`client.py` sync ~414, batch ~849), which forbids a top-level array. The model is forced to wrap the facets in an object — either under a key (`{"facets": [...]}`) or, with no list to hand, crammed across the object's keys *and* values (`{"facet a": "facet b", ...}`). Gemini (only `response_mime_type`) and Anthropic (soft system rule) honor the array, so this is OpenAI-only.
 
 **Fix:** Added `_coerce_facets()` in `annotator/core/decompose.py` and routed `_parse_decomposed` through it. It accepts a bare array, a `{...: [list]}` wrapper (flattens list values), or the crammed shape (interleaves keys+values). Parser-level fix only — no prompt/client changes, so Gemini/Anthropic outputs are unchanged. Covered by `tests/test_decompose_parse.py`. Tradeoff: a single-key wrapper with a *string* value (e.g. `{"facets": "one facet"}`) would yield `["facets", "one facet"]`, but OpenAI doesn't emit that shape in practice.
+
+---
+
+## 2026-06-10: eval scorecard filename omitted `--profile` — profiles clobbered each other
+
+**What happened:** `annotator.eval.eval` selected profile-specific *input* files (detections/annotations/structure all build a `_{profile}` suffix), but the *output* filename was `eval_{mode}{style}{split}.json` — no profile. So `--profile anthropic` then `--profile openai` (same mode/style/split) loaded different inputs but wrote the same `eval_{mode}.json`, silently clobbering the first. `load_eval_json`/`--compare` and `advisor.load_eval_metrics` also read the unsuffixed name, so a profile-suffixed scorecard wouldn't be found.
+
+**Fix:** Added `eval_output_filename(mode, profile, style, split)` (single source of truth, suffix order profile→style→split, train stays unsuffixed). Save site uses it; `load_eval_json` now takes profile/style/split and tries suffixed → unsuffixed `eval_{mode}.json` → legacy `eval.json`. `--compare` threads `--profile`. `advisor.load_eval_metrics` now delegates to `load_eval_json` (replacing its own ad-hoc `eval_mode_key = f"annotations{style}"` hack, which ignored profile). Output dict now records profile/style/split for self-identification. Covered by `tests/test_eval_metrics.py`.
