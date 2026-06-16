@@ -101,21 +101,44 @@ def score_scenarios(scenarios: list[dict], annotations: list[dict]) -> dict:
     any_overscaffold_field = False
     n_total = 0
 
+    # Calibrated scoring (Albert 2026-06-16):
+    #   scaffold_calibrated = (n_scaffolded_cleanly - n_over_scaffolded_in_scaffold_moments) / n_scaffold_moments
+    #     -- credits clean scaffolding (right action AND no over-scaffold facets),
+    #        penalizes over-scaffolding in moments where scaffolding WAS appropriate.
+    #        Range: [-1, 1]. Higher better.
+    #   rigor_calibrated     = n_rigor_pushed_cleanly / n_rigor_moments
+    #     -- credits clean rigor (right action AND no over-scaffold). No penalty
+    #        column because over-scaffolding in a rigor moment is doubly wrong
+    #        and already shows up as a failed rigor action (action != rigor/both).
+    #        Range: [0, 1]. Higher better.
+    scaf_clean_yes = 0    # scaffold-gold + action right + no over-scaffold
+    scaf_over_yes = 0     # scaffold-gold + over-scaffold emitted (regardless of action)
+    rig_clean_yes = 0     # rigor-gold + action right + no over-scaffold
+
     for scenario, ann in zip(scenarios, annotations):
         n_total += 1
 
         gt_label = (scenario.get("detection") or {}).get("situation_label_agg")
         pred_label = _action_label_for_scenario(ann)
         pred_dims = _to_dims(pred_label)
+        has_over = _has_overscaffold(ann)
 
         if gt_label == "scaffolding":
             scaf_total += 1
-            if pred_dims is not None and pred_dims[0] == "yes":
+            action_right = pred_dims is not None and pred_dims[0] == "yes"
+            if action_right:
                 scaf_yes += 1
+                if not has_over:
+                    scaf_clean_yes += 1
+            if has_over:
+                scaf_over_yes += 1
         elif gt_label == "rigor":
             rig_total += 1
-            if pred_dims is not None and pred_dims[1] == "yes":
+            action_right = pred_dims is not None and pred_dims[1] == "yes"
+            if action_right:
                 rig_yes += 1
+                if not has_over:
+                    rig_clean_yes += 1
         # mixed / both / neither / unknown / unclear -> excluded from both
         # did-rate denominators. Still counts toward outcome and overscaffold.
 
@@ -126,11 +149,14 @@ def score_scenarios(scenarios: list[dict], annotations: list[dict]) -> dict:
             if "overscaffold_decomposed" in a:
                 any_overscaffold_field = True
                 break
-        if _has_overscaffold(ann):
+        if has_over:
             over_yes += 1
 
     def _rate(yes, total):
         return (yes / total) if total else None
+
+    def _signed_rate(num, total):
+        return (num / total) if total else None
 
     return {
         "n_scenarios": n_total,
@@ -151,4 +177,18 @@ def score_scenarios(scenarios: list[dict], annotations: list[dict]) -> dict:
             "available": any_overscaffold_field,
         },
         "outcome_pos_rate": (outcome_pos / n_total) if n_total else 0.0,
+        # Calibrated scores -- subsume did-rate + over-scaffold into one
+        # number per axis. Components exposed so other formulas can be
+        # recomputed from the same data without re-running annotation.
+        "scaffold_calibrated": {
+            "n_clean_yes": scaf_clean_yes,
+            "n_overscaffold": scaf_over_yes,
+            "n_total": scaf_total,
+            "score": _signed_rate(scaf_clean_yes - scaf_over_yes, scaf_total),
+        },
+        "rigor_calibrated": {
+            "n_clean_yes": rig_clean_yes,
+            "n_total": rig_total,
+            "score": _rate(rig_clean_yes, rig_total),
+        },
     }

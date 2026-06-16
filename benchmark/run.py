@@ -134,6 +134,17 @@ def run_phase2_and_score(
         summary["outcome_pos_rate"],
         summary["n_scenarios"],
     )
+    logger.info(
+        "[%s] scaffold_calibrated=%s ((%d-%d)/%d)  rigor_calibrated=%s (%d/%d)",
+        profile,
+        _fmt(summary["scaffold_calibrated"]["score"]),
+        summary["scaffold_calibrated"]["n_clean_yes"],
+        summary["scaffold_calibrated"]["n_overscaffold"],
+        summary["scaffold_calibrated"]["n_total"],
+        _fmt(summary["rigor_calibrated"]["score"]),
+        summary["rigor_calibrated"]["n_clean_yes"],
+        summary["rigor_calibrated"]["n_total"],
+    )
     return summary
 
 

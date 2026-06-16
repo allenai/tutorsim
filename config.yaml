@@ -85,16 +85,24 @@ profiles:
       timeout: 300
 
   anthropic:
-    model: claude-opus-4-8
+    # Profile default is the *evaluation infrastructure* model: annotator,
+    # decompose, structure, label, trait generator, advisor, and student
+    # all inherit this. Pinned to opus-4-6 for stability across runs --
+    # never swap this when you're A/B'ing tutor models, or you'll bake
+    # annotator drift into the comparison. The tutor model is decoupled:
+    # pass --tutor-model on varied_smoke or set tutor.model below.
+    model: claude-opus-4-6
     max_tokens: 128000
     mode: batch
     poll_interval: 60
-    # opus-4-8 uses adaptive thinking: the client sends {type: adaptive} and the
-    # model controls depth. There is no budget/effort knob -- thinking_budget and
-    # reasoning_effort are intentionally absent (the Anthropic client ignores both
-    # on 4.8). See _anthropic_thinking_param in annotator/core/client.py.
+    # opus 4.6 supports both adaptive thinking and the legacy enabled+
+    # budget_tokens shape. The client routes 4.6 to adaptive (see
+    # _ANTHROPIC_ADAPTIVE_THINKING_MODELS in annotator/core/client.py).
     thinking: true
     tutor:
+      # Tutor model is the moving piece -- override per run with
+      # --tutor-model on varied_smoke. The default below is only used
+      # when no override is passed.
       max_tokens: 65536
     annotate:
       context_window: 20

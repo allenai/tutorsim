@@ -114,6 +114,8 @@ def _presigned_url(rel_path: str, expires_seconds: int = 172800) -> str:
 _ANTHROPIC_ADAPTIVE_THINKING_MODELS = (
     "claude-opus-4-8",
     "claude-opus-4-7",
+    "claude-opus-4-6",      # 4-6 accepts both adaptive and legacy enabled+budget_tokens;
+                            # adaptive is the non-deprecated path.
     "claude-haiku-4-5",
     "claude-sonnet-4-6",
     "claude-fable-5",
