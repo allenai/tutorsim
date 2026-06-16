@@ -62,12 +62,18 @@ def run_phase2_and_score(
     from .core.score import score_scenarios
 
     # --- Annotate ---
+    # Force context_window=0 for benchmark scoring. The annotator must see
+    # ONLY the AI replay -- the surrounding excerpt window otherwise leaks
+    # pre-cut human-tutor turns into the prompt, and the LM may attribute
+    # them to "the tutor" despite the >>> DETECTED MOMENT <<< markers.
+    # This is a benchmark-only override; the annotator pipeline still uses
+    # the configured context_window for its own (non-cut) runs.
     entries, all_detections, _ = prepare_bulk_entries(
         scenarios=scenarios,
         exchanges=exchanges,
         annotator_style=None,
         prompt_version=prompt_version,
-        context_window=context_window,
+        context_window=0,
         with_screenshots=with_screenshots,
     )
     logger.info("Phase 2: %d annotation entries across %d scenarios",
