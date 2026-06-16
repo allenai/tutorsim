@@ -222,7 +222,19 @@ class LocalBackend(StorageBackend):
         tmp_path = path.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=str)
-        os.replace(tmp_path, path)
+        # OneDrive can hold a transient lock on the target file while syncing.
+        # Retry the rename a few times before giving up.
+        last_err = None
+        for delay in (0, 0.2, 0.5, 1.0, 2.0):
+            if delay:
+                import time
+                time.sleep(delay)
+            try:
+                os.replace(tmp_path, path)
+                return
+            except PermissionError as e:
+                last_err = e
+        raise last_err
 
     def list_files(self, rel_prefix: str) -> list[str]:
         directory = self.root / rel_prefix

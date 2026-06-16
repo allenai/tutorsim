@@ -23,7 +23,7 @@ from typing import Optional
 TUTOR_NAME = "TUTOR"
 
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "benchmark"
-_PROMPT_VERSION = "v7"  # bump if a new student prompt set ships
+_PROMPT_VERSION = "v8"  # bump if a new student prompt set ships
 
 
 def _load_student_template(mode: str) -> str:
@@ -36,18 +36,12 @@ def _load_student_template(mode: str) -> str:
 def get_shared_generation_instructions(
     convo_length: Optional[int] = None, include_example: bool = True
 ):
-    shared = "You may generate multiple student turns in a row as needed. Do *not* generate any turns as the tutor. You should only generate turns that involve student utterances or actions. Remember to wait for the tutor to respond before generating your next turns. When the conversation is ready to end, set the 'end' key to True."
-    if convo_length is None:
-        if include_example:
-            shared += " You should consider the example conversation when deciding when to end the conversation. You should aim to have a conversation that is the same length (number of turns) as the example conversation. Do not end the conversation early."
-        else:
-            return shared
-    else:
-        if include_example:
-            shared += f" You should consider the example conversation when deciding when to end the conversation. You should aim to have a conversation that is the same length (number of turns) as the example conversation, up to {convo_length} turns. Do not end the conversation early."
-        else:
-            shared += f" You should have a conversation that is {convo_length} turns long. Do not end the conversation early."
-    return shared
+    # convo_length and include_example are accepted for synth-students API
+    # compatibility but no longer used: our pipeline caps turns via max_turns
+    # and doesn't take an 'end' key from the student, so the original
+    # length/end-key sentences were incoherent in our context and have been
+    # stripped (see chat 2026-06-15).
+    return "You may generate multiple student turns in a row as needed. Do *not* generate any turns as the tutor. You should only generate turns that involve student utterances or actions. Remember to wait for the tutor to respond before generating your next turns."
 
 
 def _render(mode: str, num_turns: Optional[int], include_example: bool) -> str:
@@ -111,16 +105,14 @@ class ParaphraseWithExampleMultiTurnStudentPrompt:
 
 
 class OracleMomentStudentPrompt:
-    """Student sees the post-cut turns within the moment range as a reference,
-    and is asked to imitate the real student's behavior in that specific moment.
-    Unlike trait/imitate_example which see pre-cut only, this mode is post-cut
-    aware -- it's the student-side analog of the oracle tutor.
+    """Oracle student: imitate the real student using the full post-cut
+    transcript as an example conversation, plus a generated trait persona.
+    Modeled on ImitateExampleMultiTurnStudentPrompt (synth-students) with
+    an added persona section.
     """
     def __init__(self, num_turns: Optional[int] = None):
         self.num_turns = num_turns
-        # Use the no-example shared instructions: we don't want the model to
-        # think the "moment reference" is a length anchor for the conversation.
-        self.system_prompt = _render("oracle", num_turns, include_example=False)
+        self.system_prompt = _render("oracle", num_turns, include_example=True)
 
     def get_system_prompt(self) -> str:
         return self.system_prompt

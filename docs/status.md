@@ -1,225 +1,93 @@
 # Project Status
 
-*Last updated: 2026-06-10*
-
-## Recently Shipped: Annotator Pipeline Migration (2026-06-10)
+*Last updated: 2026-06-16*
 
-Benchmark Phase 2 migrated from the legacy per-style profiles SAR pipeline
-to Lucy's new `annotate -> decompose -> structure` pipeline. Per-scenario
-output now includes per-facet action labels (`scaffolding | rigor | neither
-| both`) and result labels (`pos | neg`). Scoring is action-appropriateness
-F1 against the human `situation_label_agg` tag (scaffolding F1 + rigor F1)
-plus a student outcome positive rate.
+## Active experimental loop
 
-- Pulled annotator-side code from `scaffolding_anno`; preserved our caching
-  / composite-id / adaptive-thinking patches.
-- New `benchmark/core/score.py` and new bridge functions `decompose_bulk`,
-  `structure_bulk` in `annotator_bridge.py`.
-- `benchmark/run.py` Phase 2 collapsed from a per-style loop to a single
-  `run_phase2_and_score` call.
-- Annotations now save flat at `annotations/{profile}/{scenario_id}.json`
-  (no per-style subdir).
-- Viewers render per-facet labels with colored badges and an
-  "appropriate?" verdict against the human tag.
-- Config: `benchmark.annotator.prompt_version: v13`,
-  `context_window: 20`, `styles` removed.
+User (Albert) drives iteration: posts a diagnostic from a viewer or a comparison, names a small targeted change (prompt edit, code edit, new metric), Claude makes the change and re-runs the relevant cells, surfaces the new scores + viewer link. Repeat.
 
-Spec: [plans/specs/2026-06-10-annotator-pipeline-migration-design.md](plans/specs/2026-06-10-annotator-pipeline-migration-design.md)
-Plan: [plans/2026-06-10-annotator-pipeline-migration.md](plans/2026-06-10-annotator-pipeline-migration.md)
+Current cells: **default-tutor × oracle-student** and **rigor-tutor × oracle-student**, both on **v9 prompts**, **max_turns=5**, same 10-scenario varied_smoke corpus (seed=42, 5 scaffolding + 5 rigor gold).
 
----
+## Hard rules for prompt edits
 
-## Previously Shipped: Oracle Tutor Mode + Prompt Caching + Trait Students (2026-06-10)
+1. **Use the user's exact words.** When the user gives you a prompt or a sentence to add to a prompt, paste it verbatim. Do not add embellishments, paraphrases, or "stay within the conceptual ceiling..." style restatements. Albert called this fluff and it cost a full re-run.
+2. **Verbatim from synth-students otherwise.** Student prompts (`prompts/benchmark/v*/students/*.txt`, `trait_generator/*.txt`, `dimensions/*.txt`) come from `C:\Users\azhang\OneDrive - Insource Services Inc\Desktop\Ai2\synth-students/src/students/`. If the user asks for a new student variant, model it on the closest synth-students class verbatim, then add only the minimum structural changes our pipeline needs.
+3. **Minimal structural mods only — and tell the user exactly what you added.** Two known necessary additions:
+   - `{student_context}` substitution (system passes student metadata via this placeholder)
+   - `[NEW_MESSAGE]` instruction (our exchange loop splits multi-utterance turns on this token)
+   No other additions without asking. Don't invent "When to scaffold" / "When to push for rigor" / "Stay within the conceptual ceiling" sections.
+4. **Strip synth-students instructions that don't apply to our pipeline.** We use single-call turns, not their two-call workflow. We don't have a JSON `'end'` key. Specifically:
+   - "First start by describing what the student does..." in ImitateExample / Oracle → strip
+   - "set the 'end' key to True" in `get_shared_generation_instructions` → stripped
+   - Length-matching-the-example-conversation → stripped
+5. **Bump prompt version, never overwrite.** New prompt content goes in a new `prompts/benchmark/v{N+1}/` dir. Run dirs include `prompt_version` in the name (`{tutor_model}_{prompt_version}_{tutor_mode}_tutor_{student_mode}_student_{date}`).
 
-Three benchmark features shipped today:
+## Current scoring
 
-1. **Oracle tutor mode** (`benchmark.tutor.mode: oracle`) -- new prompt
-   `prompts/benchmark/v5/tutors/oracle.txt` that gives the AI tutor the
-   post-cut real human turns and instructs it to mimic the real tutor's
-   style / pedagogy. Tutor-side ceiling cell for the experimental matrix.
-2. **Trait-generated student** (`benchmark.student.mode: trait`) -- per-
-   scenario LLM-generated persona (prefix-only, oracle-safe), cached at
-   `results/benchmark/_trait_cache/<conv_id>__<cut_turn>.json`.
-3. **Prompt caching** -- `ModelClient.generate(cacheable_prefix=...)` puts
-   the static head (system + transcript_prefix [+ reference / persona]) into
-   Anthropic's `cache_control: ephemeral` block. Cuts Phase 1 input-token
-   cost ~85% on multi-round exchanges. OpenAI auto-caches via byte-identical
-   concatenation. Gemini stub for future.
+`benchmark/core/score.py` — Lucy's 3-axis (proposed 2026-06-15):
 
-Plus: model split -- tutor uses `claude-opus-4-8`; all other phases (student,
-detect, annotate, label, advisor, trait generator) use `claude-opus-4-6`.
+- `scaffolding_did` rate: of scaffolding-gold scenarios, fraction where LM action_label ∈ {scaffolding, both}. Higher better.
+- `rigor_did` rate: of rigor-gold scenarios, fraction where LM action_label ∈ {rigor, both}. Higher better.
+- `overscaffold` rate: scenarios with non-empty `overscaffold_decomposed` / total. Lower better. This is the real discriminator between tutors — the always-both cheat is caught here, not by the did-rates.
+- `outcome_pos_rate`: scenarios with any `pos` result facet / total.
 
-Specs / plans under `docs/plans/specs/2026-06-10-*.md` and `docs/plans/2026-06-10-*.md`.
+Per-dim F1 is gone. The 5-turn cap doesn't reduce "both" labeling (both rate stays 0.40–0.60 regardless of max_turns) — the over-scaffold rate does the discriminating work.
 
----
+## Tutor modes (v9)
 
-## Previously Shipped: Modal Cut Selection (2026-06-09)
+- `default` (`v9/tutors/default.txt`): NEW "Expert K-12 math tutor" prompt (Albert wrote it). Frames the scaffold↔rigor dial; names over-scaffolding as the most common failure. With this prompt, default tutor's over-scaffold rate dropped 0.30 → 0.10, basically matching the dedicated rigor prompt.
+- `oracle` (`v9/tutors/oracle.txt`): unchanged from v8. Tutor sees full post-cut real transcript via `{reference_transcript}`.
+- `rigor` (`v9/tutors/rigor.txt`): unchanged from v8. Socratic, withhold answers.
 
-Benchmark human-mode scenario extraction now clusters moments by exact turn-range
-and picks the modal teacher cut (smallest on tie) per cluster. Role-adjusts the
-chosen cut so the AI tutor always speaks first (TUTOR cut -> cut - 1).
+## Student modes (v9)
 
-- New helpers in `benchmark/core/scenarios.py`: `_pick_modal_cut`, `_role_adjust_cut`,
-  `_pick_representative_member`.
-- `scenario_id` format: `{conv_id}__hum_{turn_start}_{turn_end}` (range-based, stable).
-- `Scenario.detection` gains `chosen_cut_turn`, `cut_votes`, `cluster_size`.
-- Scope: **926 scenarios** across 115 conversations (down from 2,975 raw moments;
-  ~3.2x dedup). 7.6% are role-adjusted off a TUTOR cut.
+- `oracle` (`v9/students/oracle.txt`): persona (TraitGenerator-generated joined-3 from pre-cut) + full post-cut transcript verbatim. **Includes Albert's "DO NOT provide the correct answer..." rule as a bullet (his exact words, no embellishment).**
+- `trait` / `imitate_example` / `simple` / `expert` / `paraphrase_with_example` / `trait_with_example`: verbatim synth-students.
+- `_PROMPT_VERSION` hardcoded in `benchmark/synth_students/prompts.py` decouples student version from tutor version. Currently at v8; v9 students are identical to v8.
 
-Spec: [plans/specs/2026-06-09-modal-cut-selection-design.md](plans/specs/2026-06-09-modal-cut-selection-design.md)
-Plan: [plans/2026-06-09-modal-cut-selection.md](plans/2026-06-09-modal-cut-selection.md)
+## Latest results (n=10, v9, max_turns=5, oracle student)
 
----
+| | default × oracle (new Expert prompt) | rigor × oracle | 
+|---|---|---|
+| did_scaffold | 0.80 (4/5) | 0.80 (4/5) |
+| did_rigor | 1.00 (5/5) | 0.80 (4/5) |
+| overscaffold (lower=better) | 0.10 (1/10) | 0.00 (0/10) |
+| outcome+ | 1.00 | 1.00 |
+| both-rate | 0.60 | 0.40 |
 
-## Previously Shipped: Human Key Moments as Benchmark Source (2026-06-08)
+Notable: the new default closes most of the gap with rigor. If this holds at larger n the rigor-specific mode might be subsumable into a well-written default.
 
-The benchmark default scenario source is now human-annotated key moments from
-`data/ground_truth_hybrid/`, filtered to `situation_label_agg in {scaffolding, rigor}`
-and presence of an annotator-chosen `cut_turn`. Synthetic-detection mode (`detected`)
-remains available for reproducing prior runs.
+Run dirs:
+- `results/benchmark/claude-opus-4-8_v9_default_tutor_oracle_student_20260616/`
+- `results/benchmark/claude-opus-4-8_v9_rigor_tutor_oracle_student_20260616/`
+- Older runs archived under `results/benchmark/archive/`.
 
-- New `extract_human_scenarios()` in `benchmark/core/scenarios.py`; `Scenario.detection`
-  is shape-compatible with the existing detected-mode path so nothing downstream changes.
-- Default `scenarios.mode: human` in `config.yaml`.
-- IoU clustering threshold in `data/build_ground_truth.py` tightened 0.7 -> 1.0 so only
-  exact turn-range matches cluster across annotators.
-- Current scope post-resync: 2,975 scaffolding/rigor scenarios across 115 conversations.
+## How to launch a run
 
-Spec: [plans/specs/2026-06-08-human-key-moments-benchmark-design.md](plans/specs/2026-06-08-human-key-moments-benchmark-design.md)
-Plan: [plans/2026-06-08-human-key-moments-benchmark.md](plans/2026-06-08-human-key-moments-benchmark.md)
+```
+PYTHONPATH=. python scripts/varied_smoke.py \
+  --tutor-mode {default|rigor|oracle} \
+  --student-mode {oracle|trait|...} \
+  --prompt-version v9 \
+  --max-turns 5
+```
 
----
+Auto-naming: `{tutor_model}_{prompt_version}_{tutor_mode}_tutor_{student_mode}_student_{date}`. Trait personas are cached at `results/benchmark/_trait_cache/` keyed by `(conv_id, cut_turn, trait_mode)` so re-runs are free on persona generation.
 
-## Recently Shipped: Benchmark Student Modes (2026-06-01)
+## Viewer
 
-Benchmark synthetic student is now selectable. Ported four prompt-only modes from Alexis's synth-students repo:
-- `imitate_example` (new default) -- model imitates the specific real student in the transcript prefix; strongest realism mode in her judge experiments.
-- `simple` -- generic K-12 student persona.
-- `expert` -- strong student, no mistakes (upper-bound control).
-- `paraphrase_with_example` -- paraphrase the real student's style.
+`PYTHONPATH=. python -m benchmark.eval.view_replay --version <dir-name> --profile anthropic`
 
-Wiring: new `prompts/benchmark/v2/students/{mode}.txt` files, new `benchmark.student.mode` config field, `_build_role_prompt` in `benchmark/core/exchange.py` dispatches on it, `run.py` threads it through sync + batch call sites and records it in `resolved_models`. Default config flips to `prompt_version: v2` + `student.mode: imitate_example` -- v1 stays reproducible. Null mode falls back to legacy `student_system.txt`. Trait-based modes (`trait_*`) deferred -- they need a separate trait-generator phase. 6 new tests pass, full 175-test suite green.
+Surfaces: did-rates, over-scaffold rate, outcome+, action label distribution, per-scenario verdict, tutor + student system prompts (with persona + reference substituted in), moment box, annotation card with action/result prose + facets + over-scaffold facets.
 
-Spec: [plans/specs/2026-06-01-benchmark-student-modes-design.md](plans/specs/2026-06-01-benchmark-student-modes-design.md)
+The "scored N/N" block hides when nothing was dropped. Verdict badge is direction-match, not quality (quality lives in over-scaffold + outcome).
 
----
+## Known open questions
 
-## Previously Shipped: Labeller Headroom Check (2026-05-22 -> 2026-05-23)
+- Pin the "missed scaffolding scenario" in v9 default (4/5 scaffolding instead of 5/5) — is the new prompt over-rotating toward rigor?
+- Whether to also extend the v9 default's "Expert K-12 math tutor" framing to the rigor mode (rigor was unchanged in v9; might benefit from the same scaffold↔rigor explicit framing).
+- n=10 caveat throughout. None of these comparisons are at confirmation sample sizes.
 
-Tried to find headroom in the per-type labeller (test_v2 kappa 0.782) without commissioning new human ratings. Three independent angles all point to "at ceiling":
+## Git state
 
-1. **Error analysis on the 21 test_v2 hybrid errors:** 81% (17/21) are human-disagreement (16 A) or junk-annotation (1 C). Only 4 errors look prompt-fixable -- all rapport, same "explicit-effective + improvement-note" pattern that v2 catches and v6 misses. Max realistic upper bound: ~+0.03 kappa.
-
-2. **Oracle analysis over existing prompts (v2, v4, v5, v6):** Best-of-4 oracle is 0.833 kappa (+0.051 above current 0.782). But only 5 of 21 hybrid errors are oracle-correctable, naive majority-vote ensemble *regresses* (0.750), and v4=v5=v6 agree on 91.2% of items -- the Claude-designed prompts share error patterns. No simple router captures the oracle headroom.
-
-3. **Cross-architecture meta-prompts:** v7 generated by Gemini 3.1 Pro Preview underperformed both incumbents on the train set (sc 0.694 vs v2 0.778, ra 0.772 vs v6 0.808). v8 (gpt-5.4) blocked on OpenAI quota -- not generated this session. v7's loss across both types is evidence that the classifier (Claude Opus 4.6) -- not the prompt -- is the bottleneck.
-
-**Conclusion:** the per-type hybrid (v2 scaffolding + v6 rapport, test_v2 kappa 0.782) is the practical ceiling on this data. Further prompt iteration without addressing the classifier or measuring a real human ceiling will yield noise. Wrap-up complete.
-
-**What would move the needle next:**
-- New human ratings with cross-reviewer overlap (~30-50 items × 3 reviewers) to establish a real ceiling number.
-- Try a different classifier model (Gemini, GPT) instead of fixed-Claude-Opus-4-6, with held-constant prompt.
-- Improve annotation inputs upstream -- the one junk-SAR case (scaffolding #1: "this conversation has no math work in it" in all three fields) is an artifact of the annotation pipeline, not the labeller.
-
-See [plans/2026-05-22-labeller-headroom.md](plans/2026-05-22-labeller-headroom.md).
-
----
-
-## Previously Shipped: Per-Type Labeller (2026-05-21)
-
-The EC2 validation app (`http://54.184.80.37/labeller-validation/`) collected 490 human ratings on SAR annotations across 4 reviewers (dani 88, nathan 294, query 19, rebecca 89). v2 stratified split (343 train / 147 test). The labeller routes per `annotation_type`: scaffolding uses the rule-based prompt (existing v2), rapport uses a prompt generated by Claude Opus 4.7 1M from the 343 train examples via a minimal meta-prompt.
-
-**Test kappa: 0.725 -> 0.782 (+0.057), no binary regression (0.796 preserved).**
-
-Per-type rationale: single-prompt variants plateau at ~0.74 because scaffolding humans rate "worked + improvement note" inconsistently -- some treat it as effective, some as partial. Routing by type lets each domain use the prompt its humans actually agree with. Rapport lifts +0.111 kappa; scaffolding unchanged.
-
-**Config shape change:** `annotator.labeller` is now a dict (`{scaffolding: classify_scaffolding, rapport: classify_rapport}`). String values still work for back-compat. `data/build_ground_truth.py --labeller hybrid` enables the per-type routing for ground truth refresh too.
-
-See [plans/2026-05-20-labeller-validation.md](plans/2026-05-20-labeller-validation.md).
-
----
-
-*Earlier update: 2026-04-16*
-
-For the change log and planned work, see [plans/_summary.md](plans/_summary.md).
-
-## Current State
-
-### Repo Structure
-
-- `annotator/` -- 3-pass annotation pipeline (detect, annotate, label)
-- `benchmark/` -- tutor evaluation pipeline (detect, scenarios, exchange, annotate, score)
-- `prompts/` -- all prompt templates (annotator v4 base, v5 detection, profiles, labeller, benchmark)
-- `config.yaml` -- unified config (model profiles, benchmark settings, storage)
-- `data/` -- private student data (gitignored)
-- `results/` -- all pipeline outputs (gitignored)
-- `history/` -- archived iteration data (gitignored)
-- `tests/` -- storage layer tests (pytest + moto)
-
-### Annotator Pipeline -- Complete
-
-The 3-pass annotation pipeline is stable and validated:
-
-| Version | Model | Detection | Annotation | Eval | Notes |
-|---------|-------|-----------|------------|------|-------|
-| v4 | Gemini | Yes | Yes | Yes | Previous canonical detection prompts |
-| v5 | Claude | Yes | -- | -- | Iterated detection (51.5% recall, 32.3% precision) + cut point guidance for benchmark |
-| v3_gemini | Gemini | Yes | Yes | Yes | Previous best |
-| v3_claude | Claude | Yes | Yes | Yes | Best recall (64.9%) |
-
-**Per-archetype annotator profiles** (labeller v2, ground_truth_v2):
-- Generous (5 annotators, n=705): 3-way kappa 0.3740 (ceiling 0.4081)
-- Balanced (3 annotators, n=1123): 3-way kappa 0.4574 (ceiling 0.2310)
-- Demanding (1 annotator, n=172): 3-way kappa 0.4810
-
-### Benchmark Pipeline -- Redesigned, First Full Run In Progress
-
-The benchmark is now fully ground-truth-free. It uses synthetic detection to find key moments and cut points, then evaluates how an AI tutor handles each moment.
-
-**Pipeline flow:**
-1. v5 detection on all transcripts (finds key moments + `suggested_cut_turn`)
-2. Each detection becomes a scenario (cut at suggested_cut_turn)
-3. Synthetic tutor + student exchange (num_turns: 2, configurable)
-4. 3-style annotation (generous/balanced/demanding profiles)
-5. Per-style scoring (no composite aggregation -- user picks their perspective)
-
-**First run** (`claude-opus-4-6_2026-03-26`): detection complete (2,608 detections from old v5 prompts, avg 25.1/conv). Exchange phase stalled (0 completed rounds). Needs re-run with updated v5 prompts.
-
-**Results naming**: `{tutor_model}_{date}` with `config.json` capturing all run conditions (resolved model names, prompt versions, turn counts).
-
-**Screenshots**: opt-in via `--with-screenshots` (or `benchmark.with_screenshots: true` in `config.yaml`). When on, all three phases (Step 0 detection, Phase 1 exchange, Phase 2 annotation) attach anchored screenshots from `deidentified/screenshots/{conv_id}/`. Default off — text-only runs reproduce prior numbers exactly. Wired but not yet validated end-to-end against real images: S3's `deidentified/screenshots/` has 3 conv UUIDs that have no matching transcripts anywhere accessible, so every screenshot-enabled run currently degrades to text-only. See `docs/lessons_learned.md` for the data-pairing gap.
-
-**Resume**: Phase 1 (exchange) and Phase 2 (annotation) both resumable via per-scenario shard pre-filter + in-flight batch sidecar. A ctrl-C or crash mid-batch is recoverable — re-run with the same `--version` and the pipeline picks up where it left off. Stable version pointer at `_active_runs/{profile}.json` survives midnight resumes.
-
-### Key Technical Decisions
-
-- **Detection ceiling is model-limited**, not prompt-limited. v4 detection prompts are final.
-- **v5 prompts = v4 detection verbatim + cut point guidance appended.** Cut point sections don't affect detection quality -- they add boundary and cut point instructions after the v4 content.
-- **Annotation profiles use per-archetype prompts** (`profiles/{generous,balanced,demanding}/p2/`).
-- **Benchmark is ground-truth-agnostic.** It only reads transcripts. Detection, annotation, and scoring are all synthetic.
-- **Scores are per-style, not composite.** No weighted aggregation across styles. Each annotator perspective is a separate result.
-- **Storage layer is Factor IV compliant.** Backend ABC pattern, env var overrides for all paths. `STORAGE_BACKEND=s3` for production, `local` for development.
-
-### Prompt Organization (cleaned up 2026-04-16)
-
-- `v4/p1/` + `v4/p2/` -- base detection + annotation prompts (fallback for non-styled runs)
-- `v5/p1/` -- detection with cut point guidance (for benchmark). No p2 -- annotation prompts live in profiles.
-- `profiles/{balanced,generous,demanding}/p2/` -- **canonical annotation prompts** (most evolved, used by all `--style` runs)
-- `profiles/{balanced,generous,demanding}/p1/` -- per-style detection prompts
-
-### Current Gold Results (`v5_gold/`)
-
-All regenerated 2026-04-16 with updated profile prompts (inappropriate-timing example added):
-
-| Style | Convs | Annotations | Effective | Partial | Ineffective |
-|-------|-------|-------------|-----------|---------|-------------|
-| No style | 201 | 1688 | 21.6% | 38.7% | 39.3% |
-| Generous | 110 | 756 | 40.7% | 28.0% | 31.2% |
-| Balanced | 161 | 1176 | 43.3% | 28.1% | 28.6% |
-| Demanding | 16 | 172 | 20.3% | 26.2% | 53.5% |
-
-Gemini balanced results also regenerated in `annotator_profiles/balanced/`.
-
-## Token Usage Tracking
-
-All results contain per-call token usage (`input_tokens`, `output_tokens`, `total_tokens`). Results are gitignored and exist only on disk -- see [lessons_learned.md](lessons_learned.md) for why this matters.
+Branch: `main` at HEAD. All multi-PR work from 2026-06-15 (v6/v7/v8 prompts, oracle student, 3-axis scoring, viewer rewrite, decompose in-memory fix) is shipped on `insource/main`. v9 prompts + dir-naming fix are uncommitted on local main — ready to commit when Albert says ship.

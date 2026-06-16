@@ -146,7 +146,7 @@ benchmark:
   exchange:
     max_turns: 5                 # T-S-T-S-T -- scoped to the one moment, no replay-stopper needed
     poll_interval: 60
-    prompt_version: v7           # v7 = v6 with [PROBLEM_CHANGE] / ending instructions stripped (max_turns=5 caps replays) + oracle student mode
+    prompt_version: v9           # v9 = v8 with rewritten default tutor (scaffold↔rigor framing, over-scaffolding warning, ZPD)
 
   tutor_profiles:
     - anthropic

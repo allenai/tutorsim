@@ -21,14 +21,16 @@ Modes (mirrors synth-students):
 Placeholders consumed (one or more per mode):
 - [[NEXT_CONVERSATION_INFORMATION_HERE]]  <- student_context
 - [[EXAMPLE_CONVERSATION_HERE]]           <- transcript_prefix
-- [[PERSONA_DESCRIPTION_HERE]]            <- persona (trait mode)
+- [[PERSONA_DESCRIPTION_HERE]]            <- persona (trait + oracle modes)
 - [[STUDENT_DESCRIPTION_HERE]]            <- persona (trait_with_example)
-- [[MOMENT_REFERENCE_HERE]]               <- moment_reference (oracle mode)
+- [[REFERENCE_TRANSCRIPT_HERE]]           <- reference_transcript (oracle mode)
 
 The function is pure: no file I/O, no model clients, no scenario object.
 Trait persona generation lives in `benchmark.core.traits` (cache wrapper
-around synth_students.TraitGenerator). Oracle moment reference is built
-by the caller (exchange.py) from the conversation + scenario.detection.turn_end.
+around synth_students.TraitGenerator). Oracle student's reference_transcript
+is the same post-cut transcript oracle tutor uses (full conversation after
+the cut, NOT bounded by moment turn_end) -- built by the caller via
+`benchmark.core.exchange._build_reference_transcript`.
 """
 from __future__ import annotations
 
@@ -48,6 +50,21 @@ _NEEDS_EXAMPLE = {"imitate_example", "paraphrase_with_example", "trait_with_exam
 _NEEDS_PERSONA_TRAIT = "trait"
 _NEEDS_PERSONA_TRAIT_WITH_EXAMPLE = "trait_with_example"
 _NEEDS_MOMENT_REFERENCE = "oracle"
+# Oracle student gets BOTH a generated persona (from pre-cut, oracle-safe) AND
+# the in-moment post-cut turns. The persona is what trait-mode generates by
+# default (joined-3); oracle's role is to ADD the moment reference on top.
+_NEEDS_PERSONA = {_NEEDS_PERSONA_TRAIT, _NEEDS_PERSONA_TRAIT_WITH_EXAMPLE, _NEEDS_MOMENT_REFERENCE}
+
+
+def needs_persona(student_mode: str) -> bool:
+    """True if `student_mode` requires a generated trait persona.
+
+    Includes the bare trait modes ('trait', 'trait_with_example', '<dim>-<n>',
+    'joined-<n>') AND the oracle mode (which combines persona + moment ref).
+    """
+    if student_mode in _NEEDS_PERSONA:
+        return True
+    return is_trait_mode(student_mode)
 
 
 def is_trait_mode(student_mode: str) -> bool:
@@ -88,7 +105,7 @@ def build_student_system_prompt(
     student_context: str,
     transcript_prefix: str,
     persona: str | None = None,
-    moment_reference: str | None = None,
+    reference_transcript: str | None = None,
     num_turns: int | None = None,
 ) -> str:
     """Assemble the STUDENT system prompt for `student_mode`.
@@ -98,10 +115,9 @@ def build_student_system_prompt(
         student_context: text to substitute for [[NEXT_CONVERSATION_INFORMATION_HERE]].
         transcript_prefix: text to substitute for [[EXAMPLE_CONVERSATION_HERE]]
             on modes that need an example.
-        persona: trait persona text (required for trait modes).
-        moment_reference: real student post-cut turns within the moment range
-            (required for oracle mode). Built by the caller from
-            conversation + scenario.detection.turn_end.
+        persona: trait persona text (required for trait + oracle modes).
+        reference_transcript: full post-cut real transcript (required for
+            oracle mode). Same data oracle tutor sees.
         num_turns: passed through to the prompt class constructor.
 
     Returns:
@@ -120,7 +136,7 @@ def build_student_system_prompt(
             )
         out = out.replace("[[EXAMPLE_CONVERSATION_HERE]]", transcript_prefix)
 
-    if is_trait_mode(student_mode):
+    if needs_persona(student_mode):
         if not persona:
             raise ValueError(
                 f"student_mode={student_mode!r} requires a persona to "
@@ -130,12 +146,11 @@ def build_student_system_prompt(
         out = out.replace("[[STUDENT_DESCRIPTION_HERE]]", persona)
 
     if student_mode == _NEEDS_MOMENT_REFERENCE:
-        # moment_reference can legitimately be empty when the scenario was
-        # role-adjusted (cut_turn = turn_end-1) or when the moment span is so
-        # tight there are no further turns to show. Substitute a noop string
-        # rather than raising -- the LM just has no in-moment reference and
-        # falls back to its general "imitate a K-12 student" instruction.
-        ref = moment_reference or "(no further turns in this moment)"
-        out = out.replace("[[MOMENT_REFERENCE_HERE]]", ref)
+        if not reference_transcript:
+            raise ValueError(
+                "student_mode='oracle' requires reference_transcript "
+                "(full post-cut conversation, same as oracle tutor sees)"
+            )
+        out = out.replace("[[REFERENCE_TRANSCRIPT_HERE]]", reference_transcript)
 
     return out

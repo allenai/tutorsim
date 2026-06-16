@@ -196,8 +196,9 @@ def load_data(version: str, profile: str):
             for t in original_turns if t["turn_number"] <= cut_turn
         )
 
+        # Oracle tutor AND oracle student both use the same post-cut reference.
         reference_transcript = None
-        if tutor_mode == "oracle" and transcript_data:
+        if (tutor_mode == "oracle" or student_mode == "oracle") and transcript_data:
             reference_transcript = _build_reference_transcript(
                 transcript_data, cut_turn,
             )
@@ -213,12 +214,17 @@ def load_data(version: str, profile: str):
         persona = None
         if is_trait_mode(student_mode):
             persona = _trait_persona_for(conv_id, cut_turn, resolved_trait_mode)
+        elif student_mode == "oracle":
+            # Oracle student uses the joined-3 persona ('trait' default) plus
+            # the in-moment post-cut turns. Read the cached persona if present.
+            persona = _trait_persona_for(conv_id, cut_turn, "joined-3")
         student_prompt, student_err = _safe_call(
             build_student_system_prompt,
             student_mode,
             student_context=student_context,
             transcript_prefix=transcript_prefix_str,
             persona=persona,
+            reference_transcript=reference_transcript,
         )
 
         suggestion_text = _suggestion_text(detection.get("situation_label_agg"))
@@ -693,12 +699,10 @@ function renderAnnotations(s) {{
                     s.student_system_prompt || (s.student_prompt_error || ''),
                     charsStudent ? `${{charsStudent}} chars` : null);
   // Note: trait_persona is already substituted into student_system_prompt
-  // (replaces [[PERSONA_DESCRIPTION_HERE]]), so we don't show it as a
-  // separate reveal -- would just duplicate the same text.
-  if (s.reference_transcript) {{
-    h += renderReveal('reference', 'Oracle reference (post-cut real transcript)',
-                      s.reference_transcript, `${{s.reference_transcript.length}} chars`);
-  }}
+  // (replaces [[PERSONA_DESCRIPTION_HERE]]), and reference_transcript is
+  // already substituted into whichever system prompt is the oracle one
+  // (tutor's {{reference_transcript}} or student's [[REFERENCE_TRANSCRIPT_HERE]]).
+  // We don't show them as separate reveals -- would just duplicate the text.
   if (det.turn_start != null) {{
     h += '<div class="detection-box">' +
          '<div><span class="label">Moment:</span> turns ' + (det.turn_start || '?') + '&ndash;' + (det.turn_end || '?') + '</div>';

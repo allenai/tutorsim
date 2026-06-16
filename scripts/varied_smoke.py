@@ -64,18 +64,23 @@ def pick_balanced(scenarios, per_label: int, seed: int = 42):
     return chosen
 
 
-def _default_version(profile: str, tutor_mode: str | None, student_mode: str) -> str:
-    """Build a version name that surfaces the tutor MODEL, so replays under
-    a different LM are visually distinct on disk."""
+def _default_version(profile: str, tutor_mode: str | None, student_mode: str,
+                     prompt_version: str) -> str:
+    """Build a version name that surfaces the tutor MODEL + prompt version,
+    so replays under a different LM or prompt iteration are visually distinct
+    on disk (and don't silently overwrite each other)."""
     tutor_model = get_phase_config("tutor", profile)["model"].replace("/", "_")
     tm = tutor_mode or "default"
-    return f"{tutor_model}_{tm}_tutor_{student_mode}_student_{datetime.date.today().strftime('%Y%m%d')}"
+    return (
+        f"{tutor_model}_{prompt_version}_{tm}_tutor_{student_mode}"
+        f"_student_{datetime.date.today().strftime('%Y%m%d')}"
+    )
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--version", default=None,
-                   help="Run directory name. Default: {tutor_model}_{tutor_mode}_tutor_{student_mode}_student_{date}")
+                   help="Run directory name. Default: {tutor_model}_{prompt_version}_{tutor_mode}_tutor_{student_mode}_student_{date}")
     p.add_argument("--per-label", type=int, default=5,
                    help="scenarios per agg label (scaffolding, rigor)")
     p.add_argument("--seed", type=int, default=42)
@@ -93,7 +98,9 @@ def main():
     args = p.parse_args()
 
     if args.version is None:
-        args.version = _default_version(args.profile, args.tutor_mode, args.student_mode)
+        args.version = _default_version(
+            args.profile, args.tutor_mode, args.student_mode, args.prompt_version,
+        )
         logger.info("Auto-generated version: %s", args.version)
 
     # --- Phase 0: pick scenarios ---
@@ -125,7 +132,7 @@ def main():
     })
 
     # --- Phase 1: exchange (sync or batch) ---
-    from benchmark.core.students import is_trait_mode
+    from benchmark.core.students import needs_persona
 
     tutor_cfg = get_phase_config("tutor", args.profile)
     student_cfg = get_phase_config("tutor", args.profile)  # student uses same profile
@@ -134,7 +141,7 @@ def main():
 
     trait_client = None
     trait_model = None
-    if is_trait_mode(args.student_mode):
+    if needs_persona(args.student_mode):
         trait_client = student_client
         trait_model = student_cfg["model"]
 
