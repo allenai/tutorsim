@@ -109,7 +109,22 @@ def _presigned_url(rel_path: str, expires_seconds: int = 172800) -> str:
 
 # Models that use the new adaptive thinking API (no budget_tokens, no
 # output_config in the current SDK). Older models still use enabled+budget.
-_ANTHROPIC_ADAPTIVE_THINKING_MODELS = ("claude-opus-4-8",)
+# Haiku 4.5 + the Opus 4.x family are all on the modern API; legacy enabled+
+# budget_tokens is rejected on these.
+_ANTHROPIC_ADAPTIVE_THINKING_MODELS = (
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-haiku-4-5",
+    "claude-sonnet-4-6",
+    "claude-fable-5",
+)
+
+# Per-model max output token caps (from the model catalog). Requests above
+# the cap are rejected by the API. Keys are matched by startswith().
+_ANTHROPIC_MAX_OUTPUT_CAP = {
+    "claude-haiku-4-5": 64000,
+    "claude-sonnet-4-6": 64000,
+}
 
 
 def _anthropic_thinking_param(model: str, thinking_budget: int) -> dict:
@@ -465,9 +480,16 @@ class ModelClient:
         else:
             content = prompt
 
+        # Clamp max_tokens to the model's per-model output cap (Haiku 4.5 and
+        # Sonnet 4.6 max out at 64K — requests above the cap are rejected).
+        capped_max = max_tokens
+        for prefix, cap in _ANTHROPIC_MAX_OUTPUT_CAP.items():
+            if self.model and self.model.startswith(prefix):
+                capped_max = min(capped_max, cap)
+                break
         kwargs = {
             "model": self.model,
-            "max_tokens": max_tokens,
+            "max_tokens": capped_max,
             "messages": [{"role": "user", "content": content}],
             "timeout": timeout,
         }
@@ -955,6 +977,11 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
 
     anthropic_client = client._client
     max_tokens = MAX_OUTPUT_TOKENS["anthropic"]
+    # Apply per-model output cap (e.g. Haiku 4.5 / Sonnet 4.6 cap at 64K).
+    for prefix, cap in _ANTHROPIC_MAX_OUTPUT_CAP.items():
+        if client.model and client.model.startswith(prefix):
+            max_tokens = min(max_tokens, cap)
+            break
 
     # id_to_key mapping is deterministic in entries order, so it can be rebuilt
     # on resume without re-submitting. Anthropic custom_id has a 64-char limit,
