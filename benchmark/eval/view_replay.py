@@ -382,6 +382,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', san
   text-transform: uppercase; letter-spacing: 0.5px;
 }}
 .ann-badge.scaffolding {{ background: #e3f2fd; color: #1565c0; }}
+.ann-badge.rigor {{ background: #fff3e0; color: #e65100; }}
 .ann-badge.rapport {{ background: #f3e5f5; color: #7b1fa2; }}
 .ann-turns {{ font-size: 11px; color: #888; }}
 
@@ -754,10 +755,17 @@ function renderAnnotations(s) {{
     return h;
   }}
 
+  // Badge reflects the teacher consensus (situation_label_agg) when present
+  // -- scaffolding-gold vs rigor-gold moments get different colors so the
+  // gold direction is eyeball-able. Falls back to annotation_type for
+  // rapport / random scenarios where situation_label_agg is absent.
+  const goldDir = (det && det.situation_label_agg) || '';
+  const useGold = (goldDir === 'scaffolding' || goldDir === 'rigor');
   for (const a of anns) {{
+    const badge = useGold ? goldDir : (a.annotation_type || 'scaffolding');
     h += '<div class="ann-card">';
     h += '<div class="ann-header">';
-    h += '<span class="ann-badge ' + (a.annotation_type || 'scaffolding') + '">' + escapeHtml(a.annotation_type || 'scaffolding') + '</span>';
+    h += '<span class="ann-badge ' + badge + '">' + escapeHtml(badge) + '</span>';
     h += '<span class="ann-turns">turns ' + (a.turn_start || '?') + '&ndash;' + (a.turn_end || '?') + '</span>';
     h += '</div>';
 
