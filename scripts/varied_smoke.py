@@ -65,11 +65,12 @@ def pick_balanced(scenarios, per_label: int, seed: int = 42):
 
 
 def _default_version(profile: str, tutor_mode: str | None, student_mode: str,
-                     prompt_version: str) -> str:
+                     prompt_version: str, tutor_model_override: str | None = None) -> str:
     """Build a version name that surfaces the tutor MODEL + prompt version,
     so replays under a different LM or prompt iteration are visually distinct
     on disk (and don't silently overwrite each other)."""
-    tutor_model = get_phase_config("tutor", profile)["model"].replace("/", "_")
+    tutor_model = (tutor_model_override
+                   or get_phase_config("tutor", profile)["model"]).replace("/", "_")
     tm = tutor_mode or "default"
     return (
         f"{tutor_model}_{prompt_version}_{tm}_tutor_{student_mode}"
@@ -95,11 +96,15 @@ def main():
     p.add_argument("--student-mode", default="imitate_example")
     p.add_argument("--tutor-mode", default=None,
                    help="None=default tutor; 'oracle'=tutor sees post-cut real transcript")
+    p.add_argument("--tutor-model", default=None,
+                   help="Override the tutor model id (e.g. claude-haiku-4-5-20251001). "
+                        "Defaults to config.yaml's profile.tutor.model. Student stays on the profile.")
     args = p.parse_args()
 
     if args.version is None:
         args.version = _default_version(
             args.profile, args.tutor_mode, args.student_mode, args.prompt_version,
+            tutor_model_override=args.tutor_model,
         )
         logger.info("Auto-generated version: %s", args.version)
 
@@ -126,6 +131,7 @@ def main():
         "prompt_version": args.prompt_version,
         "student_mode": args.student_mode,
         "tutor_mode": args.tutor_mode,
+        "tutor_model": args.tutor_model,  # null = use profile default
         "mode": args.mode,
         "max_turns": args.max_turns,
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -136,7 +142,8 @@ def main():
 
     tutor_cfg = get_phase_config("tutor", args.profile)
     student_cfg = get_phase_config("tutor", args.profile)  # student uses same profile
-    tutor_client = ModelClient(tutor_cfg["model"])
+    tutor_model_id = args.tutor_model or tutor_cfg["model"]
+    tutor_client = ModelClient(tutor_model_id)
     student_client = ModelClient(student_cfg["model"])
 
     trait_client = None

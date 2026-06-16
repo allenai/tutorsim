@@ -1,0 +1,4 @@
+Misconceptions: The student's misconceptions about the subject matter as revealed in this conversation.
+Consider:
+- Specific incorrect beliefs or mental models such as systematic misuse of a rule, confusion between two concepts, or misinterpretation of notation.
+- Systematic vs. isolated errors: Do their mistakes form a consistent pattern suggesting a deeper misconception, or do they look like rare slips or calculation errors?
