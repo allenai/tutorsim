@@ -45,7 +45,15 @@ Per-dim F1 is gone. The 5-turn cap doesn't reduce "both" labeling (both rate sta
 - `trait` / `imitate_example` / `simple` / `expert` / `paraphrase_with_example` / `trait_with_example`: verbatim synth-students.
 - `_PROMPT_VERSION` hardcoded in `benchmark/synth_students/prompts.py` decouples student version from tutor version. Currently at v8; v9 students are identical to v8.
 
-## Latest results (n=10, v9, max_turns=5, oracle student)
+## Open bug just fixed (re-run needed)
+
+**Moment scope leaked across the cut.** `benchmark/core/annotator_bridge.py:build_synthetic_detections` set the annotator's moment window to `human_moment_turn_start → last_AI_turn`, so the "ONLY tutor actions between START and END" instruction in `prompts/annotator/v13/p2/scaffolding.md` was scoring the human tutor's pre-cut turns AND the AI replay as one combined strategy. Concretely: a moment where the human tutor pushed for rigor before the cut and the AI scaffolded after came out as `scaffolding + rigor`, inflating both-rates and shifting action_labels off the AI's actual behavior. Lucy's "guided questioning mistaken for rigor" was partly this — the rigor was the human tutor's, not the AI's.
+
+Fix on main: moment now spans `first_AI_turn → last_AI_turn`. Pre-cut human context still reaches the annotator via the surrounding excerpt window (context_window=20), so the situation read still has the setup; only the action/result are scoped to the AI.
+
+**All "Latest results" below are stale** — they were produced with the buggy bridge. Re-run before reading them.
+
+## Latest results (n=10, v9, max_turns=5, oracle student) — STALE, pre-bridge-fix
 
 | | default × oracle (new Expert prompt) | rigor × oracle | 
 |---|---|---|

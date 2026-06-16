@@ -57,24 +57,24 @@ def build_synthetic_conversation(scenario: Scenario, exchange: Exchange) -> dict
 
 
 def build_synthetic_detections(scenario: Scenario, exchange: Exchange) -> dict:
-    """Build detections spanning detected moment + generated turns.
+    """Build detections spanning the AI tutor's generated turns only.
 
-    For detected scenarios, the detection starts at the original detection's
-    turn_start and extends through the last generated turn, so annotation
-    covers both the detected key moment and the AI continuation.
-    For random scenarios, covers only the generated turns.
+    The moment window (turn_start..turn_end) is what the Pass 2 prompt tells
+    the annotator to summarize ("ONLY tutor actions between START and END").
+    We scope it to the AI replay so the annotator scores the AI tutor, not
+    the human tutor's pre-cut actions. Pre-cut context still reaches the
+    annotator via the surrounding excerpt window (context_window turns).
     """
     if not exchange.generated_turns:
         return {}
 
+    first_gen = exchange.generated_turns[0]["turn_number"]
     last_gen = exchange.generated_turns[-1]["turn_number"]
 
-    # Start from detected moment if available, otherwise from first generated turn
     if scenario.detection:
-        first_turn = scenario.detection["turn_start"]
         ann_type = scenario.detection.get("annotation_type", "scaffolding")
         description = (
-            f"Detected moment + AI tutor continuation: "
+            f"AI tutor continuation from cut at turn {scenario.cut_turn}: "
             f"{scenario.detection.get('situation', scenario.mode)}"
         )
         # Use the detection's annotation type (scaffolding or rapport).
@@ -82,24 +82,23 @@ def build_synthetic_detections(scenario: Scenario, exchange: Exchange) -> dict:
         # can render the correct teacher-consensus suggestion.
         detections = [
             {
-                "turn_start": first_turn, "turn_end": last_gen,
+                "turn_start": first_gen, "turn_end": last_gen,
                 "annotation_type": ann_type,
                 "situation": description,
                 "situation_label_agg": scenario.detection.get("situation_label_agg"),
             },
         ]
     else:
-        first_turn = exchange.generated_turns[0]["turn_number"]
         description = f"AI tutor continuation in a {scenario.mode} scenario"
         # Random scenarios: annotate for both types
         detections = [
             {
-                "turn_start": first_turn, "turn_end": last_gen,
+                "turn_start": first_gen, "turn_end": last_gen,
                 "annotation_type": "scaffolding",
                 "situation": description,
             },
             {
-                "turn_start": first_turn, "turn_end": last_gen,
+                "turn_start": first_gen, "turn_end": last_gen,
                 "annotation_type": "rapport",
                 "situation": description,
             },
