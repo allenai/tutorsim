@@ -101,18 +101,19 @@ def score_scenarios(scenarios: list[dict], annotations: list[dict]) -> dict:
     any_overscaffold_field = False
     n_total = 0
 
-    # Calibrated scoring (Albert 2026-06-16):
-    #   scaffold_calibrated = (n_scaffolded_cleanly - n_over_scaffolded_in_scaffold_moments) / n_scaffold_moments
-    #     -- credits clean scaffolding (right action AND no over-scaffold facets),
-    #        penalizes over-scaffolding in moments where scaffolding WAS appropriate.
-    #        Range: [-1, 1]. Higher better.
-    #   rigor_calibrated     = n_rigor_pushed_cleanly / n_rigor_moments
-    #     -- credits clean rigor (right action AND no over-scaffold). No penalty
-    #        column because over-scaffolding in a rigor moment is doubly wrong
-    #        and already shows up as a failed rigor action (action != rigor/both).
-    #        Range: [0, 1]. Higher better.
+    # Calibrated scoring (Lucy + Ryan final spec, 2026-06-17):
+    #   scaffold_calibrated = n_scaffolded_cleanly / n_scaffold_moments
+    #   rigor_calibrated    = n_rigor_pushed_cleanly / n_rigor_moments
+    # "cleanly" = right action direction AND no over-scaffold facets.
+    # Both axes are symmetric: count clean moments / total moments. Range [0, 1].
+    #
+    # NOTE: an earlier version subtracted n_over_scaffolded from the scaffold
+    # numerator. That double-penalized -- a moment that over-scaffolds is
+    # already excluded from n_clean_yes (clean requires no over-scaffold), so
+    # subtracting it again counted it twice. Lucy/Ryan removed the subtraction;
+    # scaf_over_yes is kept as a reported component only (not in the score).
     scaf_clean_yes = 0    # scaffold-gold + action right + no over-scaffold
-    scaf_over_yes = 0     # scaffold-gold + over-scaffold emitted (regardless of action)
+    scaf_over_yes = 0     # scaffold-gold + over-scaffold emitted (reported, not scored)
     rig_clean_yes = 0     # rigor-gold + action right + no over-scaffold
 
     for scenario, ann in zip(scenarios, annotations):
@@ -155,9 +156,6 @@ def score_scenarios(scenarios: list[dict], annotations: list[dict]) -> dict:
     def _rate(yes, total):
         return (yes / total) if total else None
 
-    def _signed_rate(num, total):
-        return (num / total) if total else None
-
     return {
         "n_scenarios": n_total,
         "scaffolding_did": {
@@ -184,7 +182,7 @@ def score_scenarios(scenarios: list[dict], annotations: list[dict]) -> dict:
             "n_clean_yes": scaf_clean_yes,
             "n_overscaffold": scaf_over_yes,
             "n_total": scaf_total,
-            "score": _signed_rate(scaf_clean_yes - scaf_over_yes, scaf_total),
+            "score": _rate(scaf_clean_yes, scaf_total),
         },
         "rigor_calibrated": {
             "n_clean_yes": rig_clean_yes,
