@@ -102,6 +102,15 @@ _TUTOR_RECOMMENDED: list[tuple[str, dict[str, Any]]] = [
         "thinking": True,
         "thinking_budget": -1,
     }),
+    # Together-hosted open-weight models. These reason internally (DeepSeek-V4,
+    # Kimi) or not at all (Gemma); there's no depth knob to pass through the
+    # OpenAI-compatible endpoint, so no extra kwargs. The _generate_together
+    # path ignores thinking/effort regardless.
+    ("deepseek-ai/", {}),
+    ("moonshotai/", {}),
+    ("minimaxai/", {}),
+    ("MiniMaxAI/", {}),
+    ("google/gemma", {}),
 ]
 
 

@@ -45,6 +45,14 @@ PROVIDER_PREFIXES = [
     ("o3", "openai"),
     ("o4", "openai"),
     ("claude", "anthropic"),
+    # Together-hosted open-weight models use vendor/model slash IDs.
+    # infer_provider lowercases the name before matching, so list lowercase.
+    ("deepseek-ai/", "together"),
+    ("moonshotai/", "together"),
+    ("minimaxai/", "together"),
+    ("google/gemma", "together"),
+    ("meta-llama/", "together"),
+    ("qwen/", "together"),
 ]
 
 from .config import get_retry_config, get_batch_timeout
@@ -54,7 +62,10 @@ MAX_OUTPUT_TOKENS = {
     "gemini": 65536,
     "openai": 128000,
     "anthropic": 128000,
+    "together": 16384,  # open-weight reasoners (DeepSeek/Kimi) need room to think
 }
+
+TOGETHER_BASE_URL = "https://api.together.xyz/v1"
 
 
 VISION_CAPABLE_PREFIXES = (
@@ -312,6 +323,14 @@ class ModelClient:
                 raise RuntimeError("ANTHROPIC_API_KEY not found in environment")
             return anthropic.Anthropic(api_key=api_key)
 
+        elif self.provider == "together":
+            # Together is OpenAI-compatible -- same SDK, different base_url + key.
+            from openai import OpenAI
+            api_key = os.getenv("TOGETHER_API_KEY")
+            if not api_key:
+                raise RuntimeError("TOGETHER_API_KEY not found in environment")
+            return OpenAI(api_key=api_key, base_url=TOGETHER_BASE_URL)
+
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -355,6 +374,9 @@ class ModelClient:
                                                      images=images,
                                                      enable_cache=enable_cache,
                                                      cacheable_prefix=cacheable_prefix)
+                elif self.provider == "together":
+                    resp = self._generate_together(prompt, json_mode, max_tokens, timeout,
+                                                    cacheable_prefix=cacheable_prefix)
                 else:
                     raise RuntimeError(f"unknown provider {self.provider}")
                 # Stamp wall-clock latency for the successful attempt only
@@ -462,6 +484,39 @@ class ModelClient:
             "output_tokens": response.usage.completion_tokens or 0,
             "total_tokens": response.usage.total_tokens or 0,
             "cached_tokens": cached,
+        }
+        return ModelResponse(text=text, usage=usage)
+
+    def _generate_together(self, prompt, json_mode, max_tokens, timeout,
+                           cacheable_prefix: str | None = None):
+        """Together (open-weight) call via OpenAI-compatible chat completions.
+
+        Together uses `max_tokens` (not `max_completion_tokens`) and does not
+        accept `reasoning_effort`. Open-weight reasoners (DeepSeek-V4, Kimi)
+        produce their own chain-of-thought internally; there's no depth knob
+        to pass. Caching isn't supported, so the cacheable head is just
+        concatenated into the prompt (same as the Gemini path).
+        """
+        content = (cacheable_prefix or "") + prompt
+        kwargs = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": min(max_tokens, MAX_OUTPUT_TOKENS["together"]),
+            "timeout": timeout,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = self._client.chat.completions.create(**kwargs)
+
+        text = response.choices[0].message.content or ""
+        if json_mode:
+            text = _strip_json_fences(text)
+        u = response.usage
+        usage = {
+            "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
+            "output_tokens": getattr(u, "completion_tokens", 0) or 0,
+            "total_tokens": getattr(u, "total_tokens", 0) or 0,
         }
         return ModelResponse(text=text, usage=usage)
 
