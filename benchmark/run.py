@@ -71,6 +71,41 @@ def _collect_annotation_tokens(per_scenario_results: dict) -> dict:
     return total
 
 
+def _latency_stats(samples: list[float]) -> dict | None:
+    """Mean / p50 / p95 over per-call latency samples. None on empty."""
+    if not samples:
+        return None
+    s = sorted(samples)
+    n = len(s)
+    p50 = s[n // 2]
+    p95_idx = max(0, min(n - 1, int(round(0.95 * n)) - 1))
+    p95 = s[p95_idx]
+    return {
+        "n": n,
+        "total_seconds": round(sum(samples), 3),
+        "mean_seconds": round(sum(samples) / n, 3),
+        "p50_seconds": round(p50, 3),
+        "p95_seconds": round(p95, 3),
+    }
+
+
+def _collect_exchange_latencies(exchanges: dict) -> dict:
+    """Per-role latency stats aggregated across all scenarios.
+
+    Sync mode populates Exchange.tutor_latencies / student_latencies; batch
+    mode leaves them empty (batch wall-clock = queue + processing, not
+    a meaningful model-comparison latency)."""
+    tutor_samples: list[float] = []
+    student_samples: list[float] = []
+    for ex in exchanges.values():
+        tutor_samples.extend(getattr(ex, "tutor_latencies", []) or [])
+        student_samples.extend(getattr(ex, "student_latencies", []) or [])
+    return {
+        "tutor": _latency_stats(tutor_samples),
+        "student": _latency_stats(student_samples),
+    }
+
+
 def run_phase2_and_score(
     version: str,
     profile: str,
@@ -174,6 +209,7 @@ def run_phase2_and_score(
         "annotation": annotation_tokens,
         "total": total_tokens,
     }
+    summary["latency"] = _collect_exchange_latencies(exchanges)
     save_benchmark_result(version, "scores", f"{profile}.json", data=summary)
     def _fmt(rate):
         return f"{rate:.3f}" if isinstance(rate, (int, float)) else "—"
@@ -209,6 +245,13 @@ def run_phase2_and_score(
         tutor_tokens["total_tokens"], student_tokens["total_tokens"],
         annotation_tokens["total_tokens"], total_tokens["total_tokens"],
     )
+    tutor_lat = summary["latency"]["tutor"]
+    if tutor_lat:
+        logger.info(
+            "[%s] tutor per-call latency: n=%d mean=%.2fs p50=%.2fs p95=%.2fs",
+            profile, tutor_lat["n"], tutor_lat["mean_seconds"],
+            tutor_lat["p50_seconds"], tutor_lat["p95_seconds"],
+        )
     return summary
 
 

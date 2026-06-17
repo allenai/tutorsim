@@ -97,6 +97,9 @@ def _row(meta: dict, scores: dict) -> dict:
     tk_tutor = (tokens.get("tutor") or {}).get("total_tokens")
     tk_student = (tokens.get("student") or {}).get("total_tokens")
     tk_ann = (tokens.get("annotation") or {}).get("total_tokens")
+    latency = scores.get("latency", {}) or {}
+    tutor_lat = latency.get("tutor") or {}
+    student_lat = latency.get("student") or {}
     return {
         "tutor_model": meta["tutor_model"],
         "tutor_mode": meta["tutor_mode"],
@@ -126,6 +129,13 @@ def _row(meta: dict, scores: dict) -> dict:
         "tokens_tutor": tk_tutor,
         "tokens_student": tk_student,
         "tokens_annotation": tk_ann,
+        # Per-call latency (only meaningful in sync mode)
+        "tutor_lat_mean": tutor_lat.get("mean_seconds"),
+        "tutor_lat_p50": tutor_lat.get("p50_seconds"),
+        "tutor_lat_p95": tutor_lat.get("p95_seconds"),
+        "student_lat_mean": student_lat.get("mean_seconds"),
+        "student_lat_p50": student_lat.get("p50_seconds"),
+        "student_lat_p95": student_lat.get("p95_seconds"),
         "run_dir": meta["name"],
     }
 
@@ -141,7 +151,8 @@ def _markdown_table(rows: list[dict]) -> str:
         ("outcome_pos_rate", "outcome_pos (higher better)"),
         ("did_scaffold_rate", "did_scaf"),
         ("did_rigor_rate", "did_rig"),
-        ("total_seconds", "total_sec"),
+        ("tutor_lat_p50", "tutor_p50_sec (lower better)"),
+        ("tutor_lat_p95", "tutor_p95_sec (lower better)"),
         ("tokens_total", "tokens_total"),
     ]
     header = "| " + " | ".join(label for _, label in cols) + " |"

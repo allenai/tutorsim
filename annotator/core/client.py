@@ -271,6 +271,10 @@ class ModelResponse:
     usage: dict = field(default_factory=lambda: {
         "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
     })
+    # Wall-clock seconds from the start of the successful generate() attempt
+    # to the response landing. Stamped by ModelClient.generate(). Retries
+    # are not included (they're bookkeeping, not model reasoning time).
+    latency_seconds: float | None = None
 
 
 class ModelClient:
@@ -318,6 +322,7 @@ class ModelClient:
                  thinking: bool = False,
                  thinking_budget: int = 0,
                  reasoning_effort: str = "",
+                 effort: str = "",
                  enable_cache: bool = False,
                  *,
                  cacheable_prefix: str | None = None) -> ModelResponse:
@@ -329,25 +334,33 @@ class ModelClient:
         base_delay = retry_cfg.get("base_delay", 5)
 
         last_error = None
+        call_t0 = time.monotonic()
         for attempt in range(max_retries):
             try:
                 if self.provider == "gemini":
-                    return self._generate_gemini(prompt, json_mode, max_tokens, timeout,
+                    resp = self._generate_gemini(prompt, json_mode, max_tokens, timeout,
                                                  thinking, thinking_budget, images,
                                                  cacheable_prefix=cacheable_prefix)
                 elif self.provider == "openai":
-                    return self._generate_openai(prompt, json_mode, max_tokens, timeout,
+                    resp = self._generate_openai(prompt, json_mode, max_tokens, timeout,
                                                   thinking, thinking_budget,
                                                   reasoning_effort=reasoning_effort,
                                                   images=images,
                                                   cacheable_prefix=cacheable_prefix)
                 elif self.provider == "anthropic":
-                    return self._generate_anthropic(prompt, json_mode, max_tokens, timeout,
+                    resp = self._generate_anthropic(prompt, json_mode, max_tokens, timeout,
                                                      thinking, thinking_budget,
                                                      reasoning_effort=reasoning_effort,
+                                                     effort=effort,
                                                      images=images,
                                                      enable_cache=enable_cache,
                                                      cacheable_prefix=cacheable_prefix)
+                else:
+                    raise RuntimeError(f"unknown provider {self.provider}")
+                # Stamp wall-clock latency for the successful attempt only
+                # (retries are bookkeeping, not the model's reasoning time).
+                resp.latency_seconds = time.monotonic() - call_t0
+                return resp
             except Exception as e:
                 last_error = e
                 delay = base_delay * (2 ** attempt)
@@ -449,7 +462,8 @@ class ModelClient:
 
     def _generate_anthropic(self, prompt, json_mode, max_tokens, timeout,
                             thinking=False, thinking_budget=0,
-                            reasoning_effort="", images=None, enable_cache=False,
+                            reasoning_effort="", effort="",
+                            images=None, enable_cache=False,
                             cacheable_prefix: str | None = None):
         """Anthropic API call via anthropic SDK."""
         system_parts = []
@@ -504,6 +518,14 @@ class ModelClient:
                 budget = kwargs["thinking"]["budget_tokens"]
                 if kwargs["max_tokens"] < budget + 64:
                     kwargs["max_tokens"] = budget + 64
+
+        # effort goes inside output_config and is only valid on adaptive
+        # thinking models that support the effort parameter. Haiku 4.5 will
+        # 400 if effort is sent -- skip there.
+        # SDK <= 0.71 doesn't expose output_config as a top-level kwarg, so
+        # we forward it via extra_body. The server accepts it either way.
+        if effort and self.model and not self.model.startswith("claude-haiku-4-5"):
+            kwargs["extra_body"] = {"output_config": {"effort": effort}}
 
         response = self._client.messages.create(**kwargs)
 

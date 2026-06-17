@@ -88,7 +88,12 @@ def main():
     p.add_argument("--profile", default="anthropic")
     p.add_argument("--style", default="balanced",
                    help="single annotator style to run (one of generous|balanced|demanding); profiles prompt is used")
-    p.add_argument("--mode", default="batch", choices=["sync", "batch"])
+    p.add_argument("--mode", default="sync", choices=["sync", "batch"],
+                   help="sync = per-call latency captured, no batch discount. "
+                        "batch = faster wall-clock + discounted, no latency.")
+    p.add_argument("--sync-workers", type=int, default=8,
+                   help="Threadpool size in sync mode -- scenarios run in "
+                        "parallel; turns within a scenario stay sequential.")
     p.add_argument("--poll-interval", type=int, default=60,
                    help="seconds between batch-job poll checks (batch mode only)")
     p.add_argument("--max-turns", type=int, default=100)
@@ -146,6 +151,12 @@ def main():
     tutor_client = ModelClient(tutor_model_id)
     student_client = ModelClient(student_cfg["model"])
 
+    from benchmark.core.model_configs import tutor_kwargs_for, STUDENT_KWARGS
+    tutor_kwargs = tutor_kwargs_for(tutor_model_id)
+    student_kwargs = dict(STUDENT_KWARGS)
+    logger.info("Tutor (%s) generate kwargs: %s", tutor_model_id, tutor_kwargs)
+    logger.info("Student (%s) generate kwargs: %s", student_cfg["model"], student_kwargs)
+
     trait_client = None
     trait_model = None
     if needs_persona(args.student_mode):
@@ -182,12 +193,20 @@ def main():
             logger.info("  %s: turns=%d ended_via=%s",
                         sid[-30:], len(ex.generated_turns), ex.ended_via)
     else:
+        # Sync mode: scenarios in parallel via threadpool, turns within a
+        # scenario stay sequential. Threadpool size = args.sync_workers.
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         exchanges = {}
-        for i, s in enumerate(chosen, 1):
-            logger.info("[%d/%d] %s (cut %d, agg %s)",
-                        i, len(chosen), s.scenario_id[-30:], s.cut_turn,
-                        s.detection["situation_label_agg"])
-            ex = run_exchange(
+        oracle_transcripts = transcripts if (
+            args.tutor_mode or args.student_mode == "oracle"
+        ) else None
+        logger.info(
+            "Running %d scenarios in sync mode, threadpool=%d",
+            len(chosen), args.sync_workers,
+        )
+
+        def _do_one(s):
+            return s, run_exchange(
                 scenario=s,
                 tutor_client=tutor_client,
                 student_client=student_client,
@@ -199,11 +218,22 @@ def main():
                 trait_client=trait_client,
                 trait_model=trait_model,
                 tutor_mode=args.tutor_mode,
-                transcripts=transcripts if (args.tutor_mode or args.student_mode == "oracle") else None,
+                transcripts=oracle_transcripts,
+                tutor_kwargs=tutor_kwargs,
+                student_kwargs=student_kwargs,
             )
-            exchanges[s.scenario_id] = ex
-            _save_exchange(s.scenario_id, ex)
-            logger.info("  turns=%d ended_via=%s", len(ex.generated_turns), ex.ended_via)
+
+        with ThreadPoolExecutor(max_workers=args.sync_workers) as pool:
+            futures = {pool.submit(_do_one, s): s for s in chosen}
+            done_n = 0
+            for fut in as_completed(futures):
+                done_n += 1
+                s, ex = fut.result()
+                exchanges[s.scenario_id] = ex
+                _save_exchange(s.scenario_id, ex)
+                logger.info("[%d/%d] %s turns=%d ended_via=%s",
+                            done_n, len(chosen), s.scenario_id[-30:],
+                            len(ex.generated_turns), ex.ended_via)
 
     phase1_seconds = _time.monotonic() - phase1_t0
     logger.info("Phase 1 (exchanges) finished in %.1fs", phase1_seconds)

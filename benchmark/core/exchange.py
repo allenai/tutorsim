@@ -81,6 +81,11 @@ class Exchange:
     student_usage: dict = field(default_factory=lambda: {
         "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
     })
+    # Per-call latency samples. Only populated in sync mode (batch latency
+    # = queue + processing, not useful for model comparison). Each list is
+    # one float per LLM call.
+    tutor_latencies: list[float] = field(default_factory=list)
+    student_latencies: list[float] = field(default_factory=list)
     completed: bool = False
     # "END" | "PROBLEM_CHANGE" | "MAX_TURNS" | "" (older runs may have "NEXT_PROBLEM")
     ended_via: str = ""
@@ -248,6 +253,8 @@ def run_exchange(
     trait_model: str | None = None,
     tutor_mode: str | None = None,
     transcripts: dict[str, dict] | None = None,
+    tutor_kwargs: dict | None = None,
+    student_kwargs: dict | None = None,
 ) -> Exchange:
     """Sync mode multi-turn exchange.
 
@@ -300,8 +307,11 @@ def run_exchange(
         response = tutor_client.generate(
             tail, json_mode=False, max_tokens=tutor_max_tokens,
             images=images, cacheable_prefix=head,
+            **(tutor_kwargs or {}),
         )
         _add_usage(exchange.tutor_usage, response.usage)
+        if response.latency_seconds is not None:
+            exchange.tutor_latencies.append(response.latency_seconds)
         speaking_turns += 1
 
         text, ended, problem_change = _parse_tutor_tokens(response.text)
@@ -333,8 +343,11 @@ def run_exchange(
         response = student_client.generate(
             tail, json_mode=False, max_tokens=student_max_tokens,
             images=images, cacheable_prefix=head,
+            **(student_kwargs or {}),
         )
         _add_usage(exchange.student_usage, response.usage)
+        if response.latency_seconds is not None:
+            exchange.student_latencies.append(response.latency_seconds)
         speaking_turns += 1
 
         messages = _split_messages(response.text) or ["..."]
