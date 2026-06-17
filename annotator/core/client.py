@@ -386,7 +386,12 @@ class ModelClient:
         if json_mode:
             config["response_mime_type"] = "application/json"
         if thinking:
-            budget = thinking_budget if thinking_budget > 0 else 16384
+            # thinking_budget = -1 means "dynamic" (model self-paces).
+            # 0 = no thinking. Positive = fixed budget. None/unset = default 16384.
+            if thinking_budget is None or thinking_budget == 0:
+                budget = 16384
+            else:
+                budget = thinking_budget  # may be -1 (dynamic) or positive
             config["thinking_config"] = {"include_thoughts": True, "thinking_budget": budget}
 
         # TODO(gemini-cache): wire CachedContent.create/refresh/delete here.

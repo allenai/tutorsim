@@ -128,6 +128,14 @@ def main():
         sys.exit(f"Could not find {args.per_label} distinct-conv scenarios per label.")
 
     save_benchmark_result(args.version, "scenarios.json", data=[s.to_dict() for s in chosen])
+
+    # Resolve generate-kwargs early so we can record them in config.json
+    # alongside the rest of the run's setup, before we start hitting the API.
+    from benchmark.core.model_configs import tutor_kwargs_for, STUDENT_KWARGS
+    _resolved_tutor_model = args.tutor_model or get_phase_config("tutor", args.profile)["model"]
+    _tutor_kwargs_for_config = tutor_kwargs_for(_resolved_tutor_model)
+    _student_kwargs_for_config = dict(STUDENT_KWARGS)
+
     save_benchmark_result(args.version, "config.json", data={
         "smoke_script": "varied_smoke.py",
         "per_label": args.per_label,
@@ -137,7 +145,11 @@ def main():
         "student_mode": args.student_mode,
         "tutor_mode": args.tutor_mode,
         "tutor_model": args.tutor_model,  # null = use profile default
+        "resolved_tutor_model": _resolved_tutor_model,
+        "tutor_kwargs": _tutor_kwargs_for_config,
+        "student_kwargs": _student_kwargs_for_config,
         "mode": args.mode,
+        "sync_workers": args.sync_workers,
         "max_turns": args.max_turns,
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
     })

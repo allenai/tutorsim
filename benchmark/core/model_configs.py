@@ -34,15 +34,17 @@ from typing import Any
 # Per-model recommended config when the model is used as the TUTOR.
 # Longer/more specific prefixes must appear first.
 _TUTOR_RECOMMENDED: list[tuple[str, dict[str, Any]]] = [
-    # Anthropic Opus 4.8 (newest opus)
+    # Anthropic Opus 4.8 (newest opus) -- xhigh is the Claude Code default
+    # and the documented "best for coding and agentic use cases" setting.
+    # Tutoring is agentic (multi-turn pedagogical decision-making).
     ("claude-opus-4-8", {
         "thinking": True,
-        "effort": "high",
+        "effort": "xhigh",
     }),
-    # Anthropic Opus 4.7
+    # Anthropic Opus 4.7 -- same family, xhigh was introduced here.
     ("claude-opus-4-7", {
         "thinking": True,
-        "effort": "high",
+        "effort": "xhigh",
     }),
     # Anthropic Opus 4.6 (also used as annotator default)
     ("claude-opus-4-6", {
@@ -52,7 +54,7 @@ _TUTOR_RECOMMENDED: list[tuple[str, dict[str, Any]]] = [
     # Anthropic Sonnet 4.6
     ("claude-sonnet-4-6", {
         "thinking": True,
-        "effort": "medium",
+        "effort": "high",
     }),
     # Anthropic Haiku 4.5 -- effort is not supported on Haiku and will 400.
     ("claude-haiku-4-5", {
@@ -63,32 +65,37 @@ _TUTOR_RECOMMENDED: list[tuple[str, dict[str, Any]]] = [
         "thinking": True,
         "effort": "high",
     }),
-    # OpenAI GPT-5.5 + mini variants
+    # OpenAI GPT-5.5 + mini variants -- high for consistency with the
+    # Claude family. medium is the API default but "high" is documented
+    # as best for "most demanding tasks."
     ("gpt-5.5", {
         "thinking": True,
-        "reasoning_effort": "medium",
+        "reasoning_effort": "high",
     }),
-    # Google Gemini pro tier
+    # Google Gemini -- dynamic thinking (-1) lets the model self-pace,
+    # the analog to Claude adaptive thinking. Google docs recommend this
+    # over a fixed budget unless you have a specific reason to cap.
+    # Maxing the budget tends to overthink, same failure mode Anthropic
+    # flags for "effort: max".
     ("gemini-2.5-pro", {
         "thinking": True,
-        "thinking_budget": 16384,
+        "thinking_budget": -1,
     }),
     ("gemini-3.1-pro", {
         "thinking": True,
-        "thinking_budget": 16384,
+        "thinking_budget": -1,
     }),
     ("gemini-3.5-pro", {
         "thinking": True,
-        "thinking_budget": 16384,
+        "thinking_budget": -1,
     }),
-    # Google Gemini flash tier
     ("gemini-2.5-flash", {
         "thinking": True,
-        "thinking_budget": 8192,
+        "thinking_budget": -1,
     }),
     ("gemini-3.5-flash", {
         "thinking": True,
-        "thinking_budget": 8192,
+        "thinking_budget": -1,
     }),
 ]
 
