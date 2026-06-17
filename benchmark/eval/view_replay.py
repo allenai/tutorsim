@@ -258,6 +258,17 @@ def load_data(version: str, profile: str):
             "annotator_suggestion": suggestion_text,
         })
 
+    aggregate = _aggregate_from_annotations(scenarios, annotations_by_scenario)
+    # Merge in latency/tokens/timings from scores/{profile}.json if present.
+    # The recomputation above doesn't have access to exchanges, so it can't
+    # produce per-call latency stats. The saved scores file does -- it was
+    # written by run.py with the full picture.
+    scores_doc = load_benchmark_result(version, "scores", f"{profile}.json")
+    if scores_doc:
+        for key in ("latency", "tokens", "timings"):
+            if key in scores_doc:
+                aggregate[key] = scores_doc[key]
+
     run_meta = {
         "version": version,
         "profile": profile,
@@ -265,7 +276,7 @@ def load_data(version: str, profile: str):
         "student_mode": student_mode,
         "prompt_version": prompt_version,
         "config": cfg,
-        "aggregate": _aggregate_from_annotations(scenarios, annotations_by_scenario),
+        "aggregate": aggregate,
     }
     return scenarios, run_meta
 
@@ -553,12 +564,51 @@ function renderRunHeader() {{
   // Lucy's three axes (2026-06-15): two recall-style "did the tutor do X?"
   // rates + over-scaffold rate. Over-scaffold rate may say "not available"
   // when the decompose_overscaffold step hasn't been run on the annotations.
+  // Model-config strip (resolved tutor model + its generate kwargs + the
+  // student's kwargs). Helps reviewers see what config produced these
+  // annotations without spelunking through config.json.
+  const cfg = m.config || {{}};
+  const tutorModel = cfg.resolved_tutor_model || cfg.tutor_model || '?';
+  const tutorKwargs = cfg.tutor_kwargs || {{}};
+  const studentKwargs = cfg.student_kwargs || {{}};
+  function _kwargsBadge(kw) {{
+    const parts = [];
+    if (kw.thinking === true) parts.push('thinking=on');
+    else if (kw.thinking === false) parts.push('thinking=off');
+    if (kw.effort) parts.push('effort=' + escapeHtml(kw.effort));
+    if (kw.reasoning_effort) parts.push('reasoning_effort=' + escapeHtml(kw.reasoning_effort));
+    if (kw.thinking_budget !== undefined && kw.thinking_budget !== null) {{
+      parts.push('thinking_budget=' + (kw.thinking_budget === -1 ? 'dynamic' : kw.thinking_budget));
+    }}
+    return parts.length ? parts.join(' · ') : '(no extras)';
+  }}
+  const latencyBlock = (() => {{
+    const lat = (agg.latency || {{}}).tutor || null;
+    if (!lat) return '';
+    return '<span style="margin-left:18px;color:#666;">tutor latency: ' +
+           'mean ' + lat.mean_seconds.toFixed(2) + 's · ' +
+           'p50 ' + lat.p50_seconds.toFixed(2) + 's · ' +
+           'p95 ' + lat.p95_seconds.toFixed(2) + 's · ' +
+           'n=' + lat.n + '</span>';
+  }})();
+  const tokensBlock = (() => {{
+    const tk = (agg.tokens || {{}}).total || null;
+    if (!tk) return '';
+    return '<span style="margin-left:18px;color:#666;">tokens: ' +
+           (tk.total_tokens || 0).toLocaleString() + ' total</span>';
+  }})();
+
   const html = (
     '<div class="row">' +
       '<div class="version-name">' + escapeHtml(m.version || '') + '</div>' +
       tutorPill + studentPill +
       '<div style="margin-left:auto;color:#888;font-size:12px;">prompt_version=' + escapeHtml(m.prompt_version || '') +
         ' · profile=' + escapeHtml(m.profile || '') + '</div>' +
+    '</div>' +
+    '<div class="row" style="margin-top:4px;font-size:12px;color:#444;">' +
+      '<span><b>tutor</b> ' + escapeHtml(tutorModel) + ' · ' + _kwargsBadge(tutorKwargs) + '</span>' +
+      '<span style="margin-left:18px;"><b>student</b> ' + escapeHtml(cfg.student_mode || '') + ' · ' + _kwargsBadge(studentKwargs) + '</span>' +
+      latencyBlock + tokensBlock +
     '</div>' +
     '<div class="row" style="margin-top:8px;">' +
       '<div class="scores">' +
