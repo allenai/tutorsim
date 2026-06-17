@@ -65,9 +65,14 @@ _TUTOR_RECOMMENDED: list[tuple[str, dict[str, Any]]] = [
         "thinking": True,
         "effort": "high",
     }),
-    # OpenAI GPT-5.5 + mini variants -- high for consistency with the
-    # Claude family. medium is the API default but "high" is documented
-    # as best for "most demanding tasks."
+    # OpenAI -- high for consistency with the Claude family. medium is the
+    # API default but "high" is documented as best for "most demanding tasks."
+    # Latest mini (weak GPT) is gpt-5.4-mini per the models-list endpoint;
+    # there is no gpt-5.5-mini. More specific prefix first.
+    ("gpt-5.4-mini", {
+        "thinking": True,
+        "reasoning_effort": "high",
+    }),
     ("gpt-5.5", {
         "thinking": True,
         "reasoning_effort": "high",
