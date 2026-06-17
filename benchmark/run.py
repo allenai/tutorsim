@@ -16,6 +16,7 @@ Usage:
 import argparse
 import datetime
 import logging
+import time
 from pathlib import Path
 
 from common.logging_setup import setup_logging
@@ -37,6 +38,39 @@ logger = logging.getLogger(__name__)
 
 
 
+def _sum_usage(*usages: dict) -> dict:
+    """Sum input/output/total tokens across N usage dicts."""
+    out = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for u in usages:
+        if not isinstance(u, dict):
+            continue
+        for k in out:
+            out[k] += int(u.get(k, 0) or 0)
+    return out
+
+
+def _collect_exchange_tokens(exchanges: dict) -> tuple[dict, dict]:
+    """Aggregate tutor + student tokens across all exchanges in this run."""
+    tutor = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    student = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for ex in exchanges.values():
+        tutor = _sum_usage(tutor, getattr(ex, "tutor_usage", {}) or {})
+        student = _sum_usage(student, getattr(ex, "student_usage", {}) or {})
+    return tutor, student
+
+
+def _collect_annotation_tokens(per_scenario_results: dict) -> dict:
+    """Aggregate annotator tokens (Pass 2 / decompose / structure share the
+    same `usage` accumulator inside each scenario's result block)."""
+    total = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    for outer in per_scenario_results.values():
+        # outer = {scenario_id: {annotations: [...], usage: {...}}}
+        for inner in outer.values() if isinstance(outer, dict) else []:
+            if isinstance(inner, dict):
+                total = _sum_usage(total, inner.get("usage", {}))
+    return total
+
+
 def run_phase2_and_score(
     version: str,
     profile: str,
@@ -47,6 +81,7 @@ def run_phase2_and_score(
     scenarios: list,
     exchanges: dict,
     with_screenshots: bool = False,
+    phase1_seconds: float | None = None,
 ) -> dict:
     """Phase 2 (annotate -> decompose -> structure) + Phase 3 (score).
 
@@ -68,6 +103,7 @@ def run_phase2_and_score(
     # them to "the tutor" despite the >>> DETECTED MOMENT <<< markers.
     # This is a benchmark-only override; the annotator pipeline still uses
     # the configured context_window for its own (non-cut) runs.
+    phase2_t0 = time.monotonic()
     entries, all_detections, _ = prepare_bulk_entries(
         scenarios=scenarios,
         exchanges=exchanges,
@@ -102,6 +138,7 @@ def run_phase2_and_score(
     logger.info("Phase 2: decomposed")
     per_scenario_results = structure_bulk(per_scenario_results, annotator_profile, mode=annotator_mode)
     logger.info("Phase 2: structured")
+    phase2_seconds = time.monotonic() - phase2_t0
 
     # Save per-scenario annotations (flat, no styles subdir).
     for scenario_id, results in per_scenario_results.items():
@@ -118,6 +155,25 @@ def run_phase2_and_score(
 
     summary = score_scenarios(scenario_dicts, annotation_dicts)
     summary["profile"] = profile
+
+    # Latency + token roll-up.
+    tutor_tokens, student_tokens = _collect_exchange_tokens(exchanges)
+    annotation_tokens = _collect_annotation_tokens(per_scenario_results)
+    total_tokens = _sum_usage(tutor_tokens, student_tokens, annotation_tokens)
+    summary["timings"] = {
+        "phase1_exchange_seconds": phase1_seconds,
+        "phase2_annotate_seconds": phase2_seconds,
+        "total_seconds": (
+            (phase1_seconds or 0.0) + phase2_seconds
+            if phase1_seconds is not None else None
+        ),
+    }
+    summary["tokens"] = {
+        "tutor": tutor_tokens,
+        "student": student_tokens,
+        "annotation": annotation_tokens,
+        "total": total_tokens,
+    }
     save_benchmark_result(version, "scores", f"{profile}.json", data=summary)
     def _fmt(rate):
         return f"{rate:.3f}" if isinstance(rate, (int, float)) else "—"
@@ -144,6 +200,14 @@ def run_phase2_and_score(
         _fmt(summary["rigor_calibrated"]["score"]),
         summary["rigor_calibrated"]["n_clean_yes"],
         summary["rigor_calibrated"]["n_total"],
+    )
+    p1 = phase1_seconds or 0.0
+    p2 = phase2_seconds
+    logger.info(
+        "[%s] phase1=%.0fs phase2=%.0fs total=%.0fs | tokens tutor=%d student=%d annotation=%d total=%d",
+        profile, p1, p2, p1 + p2,
+        tutor_tokens["total_tokens"], student_tokens["total_tokens"],
+        annotation_tokens["total_tokens"], total_tokens["total_tokens"],
     )
     return summary
 

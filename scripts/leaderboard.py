@@ -91,6 +91,12 @@ def _row(meta: dict, scores: dict) -> dict:
     did_s = scores.get("scaffolding_did", {}) or {}
     did_r = scores.get("rigor_did", {}) or {}
     over = scores.get("overscaffold", {}) or {}
+    timings = scores.get("timings", {}) or {}
+    tokens = scores.get("tokens", {}) or {}
+    tk_total = (tokens.get("total") or {}).get("total_tokens")
+    tk_tutor = (tokens.get("tutor") or {}).get("total_tokens")
+    tk_student = (tokens.get("student") or {}).get("total_tokens")
+    tk_ann = (tokens.get("annotation") or {}).get("total_tokens")
     return {
         "tutor_model": meta["tutor_model"],
         "tutor_mode": meta["tutor_mode"],
@@ -112,6 +118,14 @@ def _row(meta: dict, scores: dict) -> dict:
         "did_rigor_rate": did_r.get("rate"),
         "overscaffold_rate": over.get("rate"),
         "outcome_pos_rate": scores.get("outcome_pos_rate"),
+        # Latency + tokens
+        "phase1_seconds": timings.get("phase1_exchange_seconds"),
+        "phase2_seconds": timings.get("phase2_annotate_seconds"),
+        "total_seconds": timings.get("total_seconds"),
+        "tokens_total": tk_total,
+        "tokens_tutor": tk_tutor,
+        "tokens_student": tk_student,
+        "tokens_annotation": tk_ann,
         "run_dir": meta["name"],
     }
 
@@ -127,6 +141,8 @@ def _markdown_table(rows: list[dict]) -> str:
         ("outcome_pos_rate", "outcome_pos (higher better)"),
         ("did_scaffold_rate", "did_scaf"),
         ("did_rigor_rate", "did_rig"),
+        ("total_seconds", "total_sec"),
+        ("tokens_total", "tokens_total"),
     ]
     header = "| " + " | ".join(label for _, label in cols) + " |"
     sep = "|" + "|".join("---" for _ in cols) + "|"

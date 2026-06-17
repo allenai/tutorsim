@@ -156,6 +156,8 @@ def main():
         save_benchmark_result(args.version, "exchanges", args.profile,
                               f"{scenario_id}.json", data=ex.to_dict())
 
+    import time as _time
+    phase1_t0 = _time.monotonic()
     if args.mode == "batch":
         logger.info("Running %d scenarios in batch mode (poll=%ds)",
                     len(chosen), args.poll_interval)
@@ -203,6 +205,9 @@ def main():
             _save_exchange(s.scenario_id, ex)
             logger.info("  turns=%d ended_via=%s", len(ex.generated_turns), ex.ended_via)
 
+    phase1_seconds = _time.monotonic() - phase1_t0
+    logger.info("Phase 1 (exchanges) finished in %.1fs", phase1_seconds)
+
     # --- Phase 2 + 3: annotate -> decompose -> structure -> score ---
     summary = run_phase2_and_score(
         version=args.version,
@@ -214,6 +219,7 @@ def main():
         scenarios=chosen,
         exchanges=exchanges,
         with_screenshots=False,
+        phase1_seconds=phase1_seconds,
     )
     def _fmt(rate):
         return f"{rate:.3f}" if isinstance(rate, (int, float)) else "—"
