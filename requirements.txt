@@ -1,0 +1,8 @@
+google-genai
+python-dotenv
+openai
+anthropic
+pyyaml
+boto3
+pytest
+moto[s3]

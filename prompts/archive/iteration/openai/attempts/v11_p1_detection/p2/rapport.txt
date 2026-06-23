@@ -1,0 +1,96 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a rapport-related moment. Your task is to analyze it in detail.
+
+## Rapport (Social-Psychological Support)
+
+Rapport is the connection that creates a safe, conducive learning environment. It involves showing interest in the student as a person, managing emotions, and celebrating success.
+
+- **Goal**: Rapport should **support learning**, not displace it.
+- **Positive Rapport**: Checking in on feelings, validating frustration, using student interests, authentic praise, specific follow-up questions.
+- **Negative/Ineffective Rapport**: Ignoring frustration (missed cue), allowing social chat to consume academic time (displacement), generic/robotic praise.
+
+## Critical Principle: Look Ahead
+
+Effectiveness is determined by the student's reaction — not the tutor's intent. **Look at what happens AFTER the detected moment** in the surrounding context provided.
+
+- After rapport-building, does the student become more engaged, talkative, or willing to try?
+- If the tutor ignores frustration, does the student check out?
+- If the positive effect is short-lived (student reverts to disengagement shortly after), rate as partial.
+- If rapport displaces all academic content, rate as ineffective regardless of student enjoyment.
+
+## Effectiveness Criteria
+
+- **effective**: The student **volunteers information unprompted**, shares something personal without being asked, shows a measurable shift in academic engagement, or takes initiative. A student answering a direct question politely is compliance, not evidence of effective rapport.
+
+- **partial**: Good intent but the student's response is flat/minimal, the interaction stays one-sided, the positive effect is short-lived, or rapport goes on too long displacing academic time.
+
+- **ineffective**: Generic questions with no follow-up, missed emotional cues, ignoring student frustration/disengagement, or rapport activities that consume the session with no academic content.
+
+## Examples
+
+### Example 1: Effective — tutor adapts to student's needs
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 3,
+  "turn_end": 9,
+  "situation": "This is a good place for rapport building because it's the beginning of the session so it's a good idea for the tutor to check in and set a positive tone for the work session.",
+  "action": "The tutor noticed that the student sounded sick or sad (I'm guessing sick based on the wording), and immediately changed course to offer some support to the student.  This shows that the tutor cares about the student as a person.  It seems like the tutor may have had a lesson planned, and possibly a check-in, but when they noticed something was wrong with the student the tutor decided to change course.  This seems like an appropriate and kind move.  I think the tutor wanted to offer the student a review of something they already know in order to help the student feel successful even though they were not doing well.  The only thing I would consider doing differently is having the tutor ask the student whether they prefer to do a review day or cover new material.  The tutor sort of decided for the student that they would do review, which is fine, but since the student is in 6th grade I think they are old enough to give input on what they are feeling up to.  The tutor did, however, do a nice job of quickly changing gears and asking the student to work on a specific topic.  I think the tutor quickly thought of a topic that the student knows but possibly needed some review on anyway, and thought that this session would be a good one for reviewing since the student wasn't at their best.",
+  "result": "This seems to be effective because the tutor shows the student that they care about their well-being.  The tutor adapts their lesson to account for the fact that the student is not well on this day.  This is an effective strategy because the student will still be learning and practicing something productive, but hopefully won't feel overwhelmed with complicated new material when they're already not feeling or doing well.",
+  "effectiveness": "effective"
+}
+```
+
+### Example 2: Partial — warm but surface-level
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 17,
+  "turn_end": 25,
+  "situation": "This is a good place for rapport building to happen because it's the beginning of the lesson.  From the dialogue before the tutor logged in, I can tell that this student enjoys sharing about their interests and is probably holding some Pokemon cards - if the tutor saw the cards, they could have asked the student to share about them a little bit before getting started.  They could have even talked a little about how math is used when playing Pokemon.",
+  "action": "The tutor chose to ask the student some questions to learn how the student is doing and what the student did over the weekend. ",
+  "result": "The tutor's strategy was a little bit effective.  The student shared that they went to a Descendants and Zombies concert, and the tutor moved straight into a math problem after that response.  It could have been nice to ask the student to share something about the concert (What was your favorite song?  How was it going to the concert, were there a lot of people?  Who did you go with to the concert?  Who are the Descendants and Zombies, can you tell me a little about them?).  Asking one follow-up question about the concert would show interest and allow the student to share about something that was probably meaningful for them.  By moving straight into a math problem without acknowledging the student's response, the student might feel ignored.",
+  "effectiveness": "partial"
+}
+```
+
+### Example 3: Ineffective — missed emotional cue
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 5,
+  "turn_end": 66,
+  "situation": "This is a place where rapport building should take place because it is the beginning of the tutoring session. ",
+  "action": "The first thing the tutor did was check in to see how the student is doing. The strategy the tutor used was taking genuine interest in what the student is doing in school. The tutor asked for specifics about their work and what vocabulary and math questions they were being asked. The tutor also asked the student to self assess how they felt about those topics, which can help the tutor see whether or not the student could use more support with those topics. ",
+  "result": "When prompted, the student shared information about the work they are doing in school. The tutor missed an opportunity to dig deeper or acknowledge that the student said they've been better. Instead the tutor changed topics to which the student answered but didn't necessarily volunteer information without prompting. When a student responds this way (I've been better) it is an opportunity for them to feel heard. The tutor can say something like, \"You've been better. Is there anything you want to share or talk about?\" If the student says no, the tutor can say that they hope they feel better and that they will circle back at the end to see if their work together helped to change their feeling. ",
+  "effectiveness": "ineffective"
+}
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript.
+2. Determine the situation, action, result, and effectiveness.
+3. Your result field MUST reference what happens in the turns AFTER the detected moment. Cite specific turn numbers.
+4. If the detected moment does not contain a meaningful rapport event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "...",
+  "effectiveness": "effective"
+}
+```

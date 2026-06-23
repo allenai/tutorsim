@@ -1,0 +1,5 @@
+Active Learning: How much initiative the student takes in their own learning during this conversation.
+Consider:
+- Question asking: Do they ask clarifying or exploratory questions to resolve confusion or deepen understanding, or do they mainly answer when prompted?
+- Initiation of ideas: Do they propose their own approaches, checks, or hypotheses, or mostly follow the tutor's suggested steps?
+- Response depth: Do they explain their reasoning and reflect on their choices, or give brief, surface-level answers?

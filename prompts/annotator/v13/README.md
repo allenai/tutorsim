@@ -1,0 +1,1 @@
+Created `p2/scaffolding.md` using annotation advisor --mode annotation_excerpt and --mode annotation. Triaged changes manually and also inspected outputs to determine additional advice. 

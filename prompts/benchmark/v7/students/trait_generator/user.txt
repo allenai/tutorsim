@@ -1,0 +1,8 @@
+{conversation_text}
+
+First, think step by step about the student's behavior in the conversation. Then, output 'DESCRIPTION:' followed by your final description of the student's behavior. The description should be {num_sentences} sentences long.
+
+Your output should be formatted as follows:
+[optional step-by-step thinking]
+DESCRIPTION:
+[description]

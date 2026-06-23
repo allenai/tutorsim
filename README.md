@@ -1,84 +1,60 @@
-# tutor-bench
+# AI Tutor Benchmark
 
-[![CI](https://github.com/allenai/tutor-bench/actions/workflows/main.yml/badge.svg)](https://github.com/allenai/tutor-bench/actions/workflows/main.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+Evaluates AI tutor models on real K-12 tutoring transcripts using an LLM-based synthetic annotation pipeline.
 
-A lightweight benchmarking and evaluation framework for AI tutoring systems.
+## How It Works
 
-## What this repo optimizes for
+1. **Extract scenarios** from real tutoring transcripts -- cut at pedagogically interesting moments
+2. **Generate exchanges** -- AI tutor continues the conversation with a synthetic student
+3. **Annotate** -- 3-pass pipeline detects key moments, analyzes tutor strategies, labels effectiveness
+4. **Score** -- Three annotator styles (generous/balanced/demanding) produce a weighted composite score
+5. **Leaderboard** -- Rank tutor models across all scenarios
 
-- Minimal, readable codebase for NLP researchers.
-- Fast contributor loop with a small quality gate: `ruff`, `pyright`, `pytest`.
-- Local experiment artifacts are intentionally untracked by default.
-
-## Installation
+## Quick Start
 
 ```bash
-git clone https://github.com/allenai/tutor-bench.git
-cd tutor-bench
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# Install dependencies
+pip install -r requirements.txt
+
+# Set API keys in .env
+echo "GEMINI_API_KEY=..." >> .env
+echo "OPENAI_API_KEY=..." >> .env
+echo "ANTHROPIC_API_KEY=..." >> .env
+
+# Run benchmark (small test)
+python -m benchmark --version test --tutor-profile anthropic --max-scenarios 2 --num-turns 2 --mode sync
+
+# Run full benchmark
+python -m benchmark --version v1
+
+# View results
+python -m benchmark.eval.eval --version v1 --profile anthropic
+python -m benchmark.eval.view --version v1 --profile anthropic
 ```
 
-## Quick usage
+## Annotator Pipeline (standalone)
 
-```python
-from tutor_bench import Annotator, Evaluator
-
-annotator = Annotator(model="gpt-4")
-annotations = annotator.process_transcripts("path/to/transcripts.jsonl")
-annotations.save("path/to/annotations.jsonl")
-
-evaluator = Evaluator()
-metrics = evaluator.evaluate(
-    transcripts="path/to/transcripts.jsonl",
-    annotations="path/to/annotations.jsonl",
-)
-print(metrics.summary())
-```
-
-## Development commands
+The annotation pipeline can also run independently on raw transcripts:
 
 ```bash
-# Run all local checks
-make run-checks
+# Full 3-pass pipeline
+python -m annotator --version v4 --profile anthropic
 
-# Individual checks
-make lint
-make format-check
-make typecheck
-make test-fast
+# Evaluate against human ground truth
+python -m annotator.eval.eval --version v4 --mode full
 ```
 
-## Repository layout
+## Configuration
 
-```text
-tutor-bench/
-├── tutor_bench/           # library code
-├── tests/                 # test suite and fixtures
-├── scripts/               # utility scripts
-├── configs/               # config assets
-├── plans/_summary.md      # developer log summary
-├── .github/workflows/     # CI config
-└── pyproject.toml         # packaging + tool config
-```
+All model profiles and benchmark settings live in `config.yaml` at the repo root.
 
-## Notes on local artifacts
+Supported providers: Gemini, OpenAI, Anthropic. Each supports batch API for efficient large-scale runs.
 
-The following directories are ignored by default and intended for local experimentation only:
+## Project Structure
 
-- `data/`
-- `output/`
-- most of `plans/` (except `plans/_summary.md`)
-
-## Testing
-
-```bash
-python -m pytest -q tests -m "not slow and not integration and not gpu"
-```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the minimal contributor workflow.
+- `annotator/` -- Synthetic annotation pipeline (detect, annotate, label)
+- `benchmark/` -- Tutor model evaluation (scenarios, exchange, scoring)
+- `prompts/` -- All prompt templates (annotator, benchmark, archived iterations)
+- `config.yaml` -- Model profiles and benchmark settings
+- `data/` -- Private student transcripts and ground truth (gitignored)
+- `results/` -- Generated outputs (gitignored)

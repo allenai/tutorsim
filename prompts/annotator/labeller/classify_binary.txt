@@ -1,0 +1,10 @@
+Classify this tutoring strategy evaluation into exactly one category.
+
+Categories:
+- "effective": The strategy worked well, had positive impact on the student
+- "ineffective": The strategy did not work, had mixed results, missed the mark, or was counterproductive
+
+Annotator's evaluation:
+"{result_text}"
+
+Respond with ONLY one word: effective or ineffective

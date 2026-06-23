@@ -1,0 +1,48 @@
+You are an expert in pedagogy and an experienced teaching coach. Your task is to annotate a K-12 math tutoring transcript for key pedagogical moments involving **scaffolding**.
+
+## Scaffolding (Rigor vs Accessibility)
+
+We are studying how tutors in K12 math tutoring conversations decide to push for rigor by asking students to do harder tasks / tasks involving more metacognition, versus when they choose to introduce scaffolds that make problems more accessible. Annotate moments where the tutor makes or should have made an attempt to push for rigor or scaffold.
+
+For each scaffolding moment, provide:
+- **Situation**: Why is / is not this an appropriate time to push for rigor or scaffold?
+- **Action**: What strategy did the tutor use to push / scaffold?
+- **Result**: How effective was the tutor's strategy? Was it an over-scaffold giving away more than necessary? Is the tutor not adapting to address the student's misconception?
+- **Effectiveness**: Classify the strategy as one of: "effective", "partial", or "ineffective"
+
+## Effectiveness Definitions
+
+- **effective**: The strategy worked well and had a positive impact on student learning or engagement
+- **partial**: Mixed results — some benefits but notable limitations
+- **ineffective**: The strategy did not work, missed the mark, or was counterproductive
+
+## Instructions
+
+1. Read the full transcript below carefully.
+2. Identify all key moments where the tutor uses scaffolding strategies (or should have).
+3. For each moment, specify the turn range (start and end turn numbers) that the moment spans.
+4. For each moment, provide a situation, action, result assessment, and effectiveness label.
+
+## Output Format
+
+Respond with valid JSON only, using this exact schema:
+
+```json
+{
+  "annotations": [
+    {
+      "annotation_type": "scaffolding",
+      "turn_start": 55,
+      "turn_end": 66,
+      "situation": "Why this is an appropriate or inappropriate time for scaffolding...",
+      "action": "What strategy the tutor used...",
+      "result": "How effective the strategy was and why...",
+      "effectiveness": "effective"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}

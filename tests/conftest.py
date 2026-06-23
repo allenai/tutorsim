@@ -1,85 +1,63 @@
-"""Pytest configuration and fixtures for tutor-bench tests."""
-
-import asyncio
-import os
-import sys
-from pathlib import Path
-
+import json
 import pytest
-import torch
-
-# Add the project root to the path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an event loop for async tests."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.fixture
-def sample_data_dir(tmp_path) -> Path:
-    """Create a temporary directory with sample data for testing."""
-    data_dir = tmp_path / "test_data"
-    data_dir.mkdir(exist_ok=True)
-    return data_dir
+def temp_data(tmp_path):
+    """Create a temp data layout matching config paths."""
+    t_dir = tmp_path / "data" / "transcripts"
+    t_dir.mkdir(parents=True)
+    conv = {"conversation_id": "2024-t1_2024-s1_099bf759-abcd", "turns": [
+        {"turn_number": 1, "role": "TUTOR", "text": "Hi", "timestamp": "00:00-00:03", "type": "DIALOGUE"},
+        {"turn_number": 2, "role": "STUDENT", "text": "hey", "timestamp": "00:03-00:05", "type": "DIALOGUE"},
+        {"turn_number": 3, "role": "TUTOR", "text": "look here", "timestamp": "00:10-00:12", "type": "DIALOGUE"},
+    ]}
+    (t_dir / "2024-t1_2024-s1_099bf759-abcd.json").write_text(
+        json.dumps(conv), encoding="utf-8"
+    )
+    # Keep the older conv_001 fixture for backward-compat with existing tests
+    conv_simple = {"conversation_id": "conv_001", "turns": [
+        {"turn_number": 1, "role": "TUTOR", "text": "Hi", "timestamp": "", "type": "DIALOGUE"},
+    ]}
+    (t_dir / "conv_001.json").write_text(json.dumps(conv_simple), encoding="utf-8")
+
+    gt_dir = tmp_path / "data" / "ground_truth"
+    gt_dir.mkdir(parents=True)
+    gt = {"conversation_id": "conv_001", "num_turns": 1, "key_moments": []}
+    (gt_dir / "conv_001.json").write_text(json.dumps(gt), encoding="utf-8")
+
+    # Screenshot layout keyed by UUID (matches S3 convention)
+    ss_dir = tmp_path / "deidentified" / "screenshots" / "099bf759-abcd"
+    ss_dir.mkdir(parents=True)
+    (ss_dir / "4.000.jpg").write_bytes(b"fake-jpg-1")
+    (ss_dir / "11.500.jpg").write_bytes(b"fake-jpg-2")
+    (ss_dir / "_metadata.json").write_text(json.dumps({
+        "transcript_id": "099bf759-abcd",
+        "images": {
+            "4.000.jpg":  {"verified": True, "flagged": False, "eedi_ip": False},
+            "11.500.jpg": {"verified": True, "flagged": False, "eedi_ip": True,
+                           "eedi_ip_evidence": "Eedi branding visible"},
+        },
+    }), encoding="utf-8")
+
+    (tmp_path / "results" / "annotator" / "v1").mkdir(parents=True)
+    (tmp_path / "results" / "benchmark" / "v1").mkdir(parents=True)
+
+    return tmp_path
 
 
 @pytest.fixture
-def mock_model():
-    """Provide a mock model for testing."""
-
-    class MockModel:
-        def __init__(self):
-            self.device = torch.device("cpu")
-
-        def predict(self, text: str) -> str:
-            return f"Mock prediction for: {text}"
-
-        def evaluate(self, data):
-            return {"accuracy": 0.95, "loss": 0.05}
-
-    return MockModel()
-
-
-@pytest.fixture(autouse=True)
-def reset_environment():
-    """Reset environment variables before each test."""
-    original_env = os.environ.copy()
-    yield
-    os.environ.clear()
-    os.environ.update(original_env)
-
-
-@pytest.fixture
-def gpu_available():
-    """Check if GPU is available for tests."""
-    return torch.cuda.is_available()
-
-
-def pytest_configure(config):
-    """Configure custom markers."""
-    config.addinivalue_line("markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')")
-    config.addinivalue_line("markers", "integration: marks tests as integration tests")
-    config.addinivalue_line("markers", "unit: marks tests as unit tests")
-    config.addinivalue_line("markers", "gpu: marks tests that require GPU")
-
-
-def pytest_collection_modifyitems(config, items):
-    """Modify test collection to add markers and skip conditions."""
-    for item in items:
-        # Add unit marker to all tests in test files starting with "unit_"
-        if "unit_" in item.nodeid:
-            item.add_marker(pytest.mark.unit)
-
-        # Add integration marker to all tests in test files starting with "integration_"
-        if "integration_" in item.nodeid:
-            item.add_marker(pytest.mark.integration)
-
-        # Skip GPU tests if no GPU is available
-        if "gpu" in item.keywords and not torch.cuda.is_available():
-            skip_gpu = pytest.mark.skip(reason="GPU not available")
-            item.add_marker(skip_gpu)
+def local_storage(temp_data, monkeypatch):
+    """Configure storage for local backend against temp dir."""
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    monkeypatch.setenv("STORAGE_ROOT", str(temp_data))
+    monkeypatch.setenv("STORAGE_GROUND_TRUTH", "data/ground_truth")
+    monkeypatch.setenv("STORAGE_SCREENSHOTS", "deidentified/screenshots")
+    import annotator.core.config as cfg_mod
+    cfg_mod._loaded_config = None
+    import annotator.core.storage as st
+    st._cache.clear()
+    st._backend = None
+    yield temp_data
+    st._backend = None
+    st._cache.clear()

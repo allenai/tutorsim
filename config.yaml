@@ -1,0 +1,203 @@
+# Storage backend config (Factor IV: backing services as attached resources)
+#
+# Config provides defaults for local development.
+# All values overridable by env vars for deployment -- see .env.example.
+storage:
+  backend: local          # Override: STORAGE_BACKEND
+  bucket: kylel-alexisr-edu  # Override: S3_BUCKET
+  prefix: ""  # Override: S3_PREFIX (empty = paths are relative to bucket root)
+  root: ""                # Override: STORAGE_ROOT (local only, empty = repo root)
+  paths:
+    transcripts:
+      - data/transcripts
+      - data/transcripts/step_up.jsonl
+    ground_truth:
+      - data/ground_truth_hybrid
+    annotator_results: results/annotator
+    benchmark_results: results/benchmark
+    screenshots: deidentified/screenshots
+
+# Annotator model config
+
+profile: anthropic
+
+# Annotator archetype assignments (from classify_annotators.py analysis)
+archetype_annotators:
+  generous:
+    - Gerber
+    - Jones
+    - Shields
+    - Stobbe
+    - Trujillo
+  balanced:
+    - Forbes
+    - Mann
+    - Padgett
+  demanding:
+    - Flick
+
+# Annotator pipeline defaults (override any of these with CLI flags)
+annotator:
+  prompt_version: v13          # prompt version for detection + annotation
+  # Labeller routes per annotation_type. Each value names a file in
+  # prompts/annotator/labeller/ (without .txt). Scaffolding and rapport humans
+  # rate the partial cell differently; this routing was validated on the
+  # labeller_validation hold-out (test_v2 kappa 0.725 -> 0.782, no binary
+  # regression). See docs/plans/2026-05-20-labeller-validation.md.
+  # For a single-template labeller pass a string instead of a dict.
+  labeller:
+    scaffolding: classify_scaffolding
+    rapport: classify_rapport
+  style: null                  # null = no style. Set to generous/balanced/demanding
+  version: null                # null = auto-generate as {profile}_{date}
+  annotation_types:
+    - scaffolding
+    - rapport
+
+# Model profiles -- profile-level defaults apply to all phases.
+# Per-phase sections override specific keys only where they differ.
+profiles:
+  gemini:
+    model: gemini-3.1-pro-preview
+    max_tokens: 65536
+    mode: batch
+    poll_interval: 30
+    thinking: true
+    thinking_budget: 16384
+    annotate:
+      context_window: 50
+    advisor:
+      timeout: 300
+
+  openai:
+    model: gpt-5.5-2026-04-23
+    max_tokens: 128000
+    mode: batch
+    poll_interval: 60
+    thinking: true
+    thinking_budget: 16384
+    reasoning_effort: medium   # OpenAI-specific: low | medium | high
+    tutor:
+      max_tokens: 65536
+    annotate:
+      context_window: 50
+    advisor:
+      timeout: 300
+
+  anthropic:
+    # Profile default is the *evaluation infrastructure* model: annotator,
+    # decompose, structure, label, trait generator, advisor, and student
+    # all inherit this. Pinned to opus-4-6 for stability across runs --
+    # never swap this when you're A/B'ing tutor models, or you'll bake
+    # annotator drift into the comparison. The tutor model is decoupled:
+    # pass --tutor-model on varied_smoke or set tutor.model below.
+    model: claude-opus-4-6
+    max_tokens: 128000
+    mode: batch
+    poll_interval: 60
+    # opus 4.6 supports both adaptive thinking and the legacy enabled+
+    # budget_tokens shape. The client routes 4.6 to adaptive (see
+    # _ANTHROPIC_ADAPTIVE_THINKING_MODELS in annotator/core/client.py).
+    thinking: true
+    tutor:
+      # Tutor model is the moving piece -- override per run with
+      # --tutor-model on varied_smoke. The default below is only used
+      # when no override is passed.
+      max_tokens: 65536
+    annotate:
+      context_window: 20
+    advisor:
+      timeout: 300
+
+  openai_claude:
+    model: gpt-5.5-2026-04-23     # default model (tutor + detect)
+    max_tokens: 128000
+    mode: batch
+    poll_interval: 60
+    thinking: true
+    thinking_budget: 16384
+    reasoning_effort: medium   # OpenAI-specific: low | medium | high
+    tutor:
+      max_tokens: 65536
+    annotate:
+      model: claude-opus-4-6         # annotation uses Claude (4-6, matches anthropic profile)
+      context_window: 50
+    label:
+      model: claude-opus-4-6
+    advisor:
+      model: claude-opus-4-6
+      timeout: 300
+
+# Retry settings
+retry:
+  max_retries: 5
+  base_delay: 5
+
+# Evaluation settings
+eval:
+  iou_threshold: 0.3
+
+# Batch API settings
+batch:
+  timeout: 86400     # max seconds to poll a batch job (24h)
+
+# Benchmark model config
+benchmark:
+  version: null                # null = auto-generate as {tutor_model}_{date} (model not profile, so swapping LMs creates a visually distinct run dir)
+  scenarios:
+    mode: human                   # detected | random | both | human
+    max_scenarios: 0
+    random_count: 50
+    random_seed: 42
+    min_turn: 10
+
+  exchange:
+    max_turns: 5                 # T-S-T-S-T -- scoped to the one moment, no replay-stopper needed
+    poll_interval: 60
+    prompt_version: v9           # v9 = v8 with rewritten default tutor (scaffold↔rigor framing, over-scaffolding warning, ZPD)
+
+  tutor_profiles:
+    - anthropic
+
+  student:
+    profile: anthropic
+    # Student prompts live in prompts/benchmark/{prompt_version}/students/.
+    # Accepted modes (dispatched by benchmark/core/students.py):
+    #   simple                    - generic K-12 student persona
+    #   expert                    - strong student, no mistakes (upper-bound control)
+    #   imitate_example           - imitate the real student from the transcript prefix (strongest realism, pre-cut only)
+    #   paraphrase_with_example   - paraphrase the real student's style
+    #   trait                     - LLM-generated joined-3 persona (oracle-safe, prefix-only)
+    #   trait_with_example        - trait persona + real student example
+    #   oracle                    - sees the real student's POST-CUT turns within the moment range as a
+    #                               reference. Student-side analog of oracle tutor. Post-cut aware.
+    #   <dimension>-<n>           - single-dimension persona, n sentences
+    #                               (dimensions: distractedness, active_vs_passive_learning,
+    #                                affect, misconceptions, learning_efficiency)
+    #   joined-<n>                - all-dimension persona, n sentences per dimension
+    # null falls back to "simple" (see benchmark/core/exchange.py:_build_role_prompt).
+    mode: imitate_example
+
+  tutor:
+    # Tutor prompt templates live in prompts/benchmark/{prompt_version}/tutors/.
+    # Accepted modes (dispatched by benchmark/core/tutors.py):
+    #   null / default            - prompts/benchmark/{version}/tutors/default.txt
+    #                               (v5 and earlier: tutor_system.txt at the version root)
+    #   oracle                    - prompts/benchmark/{version}/tutors/oracle.txt
+    #                               (requires the real post-cut transcript as reference)
+    #   rigor                     - prompts/benchmark/{version}/tutors/rigor.txt
+    #                               (rigor-only: ablation cell to isolate the rigor push)
+    mode: null
+
+  detect:
+    profile: anthropic
+    prompt_version: v5
+
+  annotator:
+    profile: anthropic
+    prompt_version: v13            # single-prompt v13 with decompose+structure pipeline (was: profiles)
+    context_window: 20             # matches Lucy's revert + the value all v13 results were generated with (was: 50)
+    mode: batch
+    poll_interval: 60
+
+  with_screenshots: false  # opt-in; requires vision-capable models on tutor, student, annotator, detector, labeller

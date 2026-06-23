@@ -1,0 +1,72 @@
+You are an expert in pedagogy analyzing a K-12 tutoring transcript. Your task is to identify ALL turn ranges where rapport-related pedagogical events occur.
+
+## What to Look For
+
+Scan the ENTIRE transcript for ANY moment involving social-psychological dynamics:
+
+- Session opening / greeting / check-in
+- Session closing / goodbye / wrap-up
+- Transitions between activities
+- Student expresses emotion (frustration, excitement, tiredness, boredom, anxiety)
+- Tutor acknowledges or ignores student emotional state
+- Sustained patient scaffolding: tutor maintains calm, supportive tone across an extended sequence of student confusion or repeated wrong answers — the patience itself is a rapport event, especially when the tutor could reasonably show frustration but doesn't
+- Small talk, personal sharing, off-topic conversation
+- Praise (generic or specific)
+- Humor, playfulness, jokes, or tension
+- Student resistance, refusal, or disengagement
+- Tutor builds on student interests or remembers personal details
+- Power dynamics (tutor flexibility or rigidity about rules, posture, time)
+- Student shares personal information unprompted
+- Moments where the tutor's rapport attempt falls flat or creates awkwardness
+- **Missed opportunities**: Tutor fails to notice or respond to student signals — student says "Hello?" (possible audio issue), student doodles or goes off-task, student expresses confusion that goes unaddressed, student does all the talking while tutor is silent or only interacts via screen
+- **Rapport-damaging behavior**: Tutor shows frustration, impatience, or flat affect during student struggle; tutor dismisses student effort; tutor erases student work without acknowledgment; tutor uses problematic praise (e.g., calling student "smart" rather than praising effort)
+- Academic content used as rapport: making problems personal using student interests, connecting concepts to student's real-life experiences (e.g., relating milliliters to medicine or science class), using student's preferred items in word problems
+- Motivational structuring: tutor uses student interests as rewards or incentives (e.g., "every correct answer earns drawing time"), tutor reviews prior material to build student confidence before new content, tutor offers student choices about what to work on
+- Brief but specific praise tied to student effort or correctness ("You remembered that from last time!" or "Good, you got it") — flag these only when the praise is specific and marks a meaningful moment, not routine acknowledgment
+
+## Important: Be Selective but Thorough
+
+Identify **3-8 moments** per session. Scan the ENTIRE transcript, not just the beginning and end.
+
+A moment is worth flagging if it involves a DISTINCT interpersonal exchange, emotional event, or notable shift in the social dynamic. Do NOT flag:
+- Routine encouragement within normal instruction (e.g., "Good job", "Let's try this", "You can do it")
+- Standard transitions ("Let's move on to the next problem") without social content
+- The tutor merely explaining content in an engaging way, unless they explicitly personalize it to the student's life or interests
+- A tutor being flexible about one small thing (e.g., allowing a calculator) unless it's part of a larger power-sharing exchange
+
+When in doubt about whether something is a distinct rapport moment or just good teaching practice, lean toward excluding it.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "detections": [
+    {
+      "turn_start": 1,
+      "turn_end": 25,
+      "annotation_type": "rapport",
+      "brief_description": "Session opening with check-in about student's weekend"
+    }
+  ]
+}
+```
+
+## Transcript
+
+{transcript}
+
+
+## Critical: Merge Continuous Moments
+
+If a rapport-relevant interaction flows continuously across many turns (e.g., a greeting that leads into small talk that leads into a game), annotate it as ONE detection spanning the full range. Do NOT split a continuous exchange into separate detections for the greeting, the game, and the follow-up. A single conversation thread = a single detection. Only create separate detections when there is a clear break (return to academic content, a pause, or a topic change) between rapport moments.
+
+## Boundary Guidance
+
+When setting turn_start and turn_end for a detection:
+- Include the FULL arc of the interaction: the setup/trigger, the core exchange, and the resolution/transition out
+- For extended scaffolding moments where the tutor patiently works through student confusion across many turns, include the entire sequence from when confusion begins to when it resolves — the sustained patience IS the rapport
+- For session openings, start at the first greeting; for closings, include the wrap-up through the final goodbye
+- If a negotiation or emotional exchange spans 15+ turns, that's normal — don't truncate to just the peak moment
+- Err on the side of slightly wider boundaries rather than too narrow

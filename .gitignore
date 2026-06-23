@@ -1,56 +1,47 @@
-# build artifacts
-.eggs/
-*.egg-info/
-build/
-dist/
-pip-wheel-metadata/
-
-# virtualenvs and local tooling
-.envrc
-.python-version
-.idea/
-.venv/
-.vscode/
-/*.iml
-.claude/settings.local.json
-
-# environment / secret files
 .env
-.env.*
-
-# notebook and cache artifacts
-.ipynb_checkpoints/
-.cache/
-__pycache__/
-*.pyc
-*.pyo
-
-# local OS/editor noise
-*.swp
+.envrc
+notes.txt
 .DS_Store
 
-# git worktrees
-worktrees/
-.claude/worktrees/
+# Python bytecode
+__pycache__/
+*.pyc
 
-# test, lint, typing artifacts
+# Test cache
 .pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-.coverage*
-htmlcov/
-.benchmarks/
 
-# docs artifacts
-site/
-docs/build/
-docs/superhuman/
+# Local virtualenv
+.venv/
 
-# local research artifacts (keep only dev log summary)
+# Per-run log files
 logs/
-data/
-output/
+
+# Raw S3 data (14GB videos + transcripts)
+data/raw/s3/
+
+# Local S3 bucket mirror
+s3_bucket/
+
+# All data and results (private student data + generated outputs)
+data/*
+!data/*.py
+!data/README.md
+data/temp_decompose.py
 results/
-plans/*
-!plans/_summary.md
+benchmark/results/
+
+# API request/response logs
+*.jsonl
+
+# Old directory (replaced by annotator/)
+synthetic_annotator/
+
+# History archive (restored from git, too large to track)
+history/
+
+# Claude Code session data (harness state — local only)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+*.html
+*.pdf

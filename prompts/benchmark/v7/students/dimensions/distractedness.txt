@@ -1,0 +1,6 @@
+Distractedness: How consistently the student stays focused on the learning task over the course of the conversation.
+Consider:
+- Topical focus: Are their responses generally tied to the current problem or concept, or do they drift to unrelated topics?
+- Evidence of listening: Do they reference, paraphrase, or build on what the tutor has said, or do they ignore key information and repeat earlier confusion?
+- Topic shifting: When topics change, is this motivated by the learning task (e.g., trying a new strategy), or abrupt and unrelated to the goal?
+- Signs of divided attention: Do delays, very short replies, or obviously rushed answers suggest that their attention is split?

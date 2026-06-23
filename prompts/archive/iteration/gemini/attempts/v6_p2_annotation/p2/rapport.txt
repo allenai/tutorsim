@@ -1,0 +1,107 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a rapport-related moment. Your task is to analyze it in detail.
+
+## Rapport (Social-Psychological Support)
+
+Rapport is the connection that creates a safe, conducive learning environment. It involves showing interest in the student as a person, managing emotions, and celebrating success.
+
+- **Goal**: Rapport should **support learning**, not displace it.
+- **Positive Rapport**: Checking in on feelings, validating frustration, using student interests, authentic praise, specific follow-up questions.
+- **Negative/Ineffective Rapport**: Ignoring frustration (missed cue), allowing social chat to consume academic time (displacement), generic/robotic praise, offering open-ended choices without structure.
+
+## Using Context
+
+The surrounding turns provide context for your analysis. If the turns after the detected moment show the rapport strategy's impact (student opens up, becomes more engaged, or remains withdrawn), you may reference this. However, the primary question is whether the tutor's rapport strategy was appropriate and well-executed for the situation.
+
+Some students are naturally reserved — a brief or polite response doesn't automatically make the tutor's strategy poor. However, if the student gives consistently minimal responses throughout a long rapport sequence, the tutor should be adapting their approach rather than continuing the same strategy.
+
+## Effectiveness Criteria
+
+- **effective**: The tutor uses a well-chosen rapport strategy appropriate for the moment. The approach is genuine rather than formulaic — e.g., recalling personal details, responding authentically to emotions, specific rather than generic praise, or using student interests to make content relevant. The student's response shows engagement OR the strategy was clearly the right move for the situation even with a quiet student.
+
+- **partial**: Good intent but the execution is incomplete or one-sided: the tutor asks but doesn't follow up, gives generic praise without specificity, makes one-sided conversation where the student only gives one-word responses, or the interaction stays surface-level. Also: rapport that extends too long and begins displacing academic time, even if the student enjoys it.
+
+- **ineffective**: Ignoring clear frustration or disengagement, robotic/scripted rapport with no genuine connection, rapport activities that consume the session with no academic content or transition back to learning, or missed opportunities where a clearly better alternative exists (e.g., offering open-ended "what do you want to do?" when structured choices would be more effective for the student).
+
+## Critical Check: What Could Be Better?
+
+Before rating, ask yourself: **Is there a clearly better alternative the tutor could have used?** If yes, this limits the rating:
+
+- If the tutor did something reasonable but a much better alternative was available, rate as **partial** at most.
+- If the tutor missed an obvious cue or opportunity that any experienced coach would catch, rate as **ineffective**.
+- If no clearly better alternative exists, the tutor's choice was appropriate.
+
+Common missed opportunities in rapport:
+- **Session wrap-ups** that only preview next session without reflection ("What did you learn today? What was challenging?")
+- **Open-ended questions** when the student needs structured choices ("Do you want to work on angles, fractions, or word problems?" vs. "What do you want to learn?")
+- **Long tutor monologues** packaged as rapport when the student is giving one-word responses — the tutor should be adjusting, not continuing
+
+## Examples
+
+### Example 1: Effective — tutor adapts to student's needs
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 3,
+  "turn_end": 9,
+  "situation": "This is a good place for rapport building because it's the beginning of the session so it's a good idea for the tutor to check in and set a positive tone for the work session.",
+  "action": "The tutor noticed that the student sounded sick or sad (I'm guessing sick based on the wording), and immediately changed course to offer some support to the student.  This shows that the tutor cares about the student as a person.  It seems like the tutor may have had a lesson planned, and possibly a check-in, but when they noticed something was wrong with the student the tutor decided to change course.  This seems like an appropriate and kind move.  I think the tutor wanted to offer the student a review of something they already know in order to help the student feel successful even though they were not doing well.  The only thing I would consider doing differently is having the tutor ask the student whether they prefer to do a review day or cover new material.  The tutor sort of decided for the student that they would do review, which is fine, but since the student is in 6th grade I think they are old enough to give input on what they are feeling up to.  The tutor did, however, do a nice job of quickly changing gears and asking the student to work on a specific topic.  I think the tutor quickly thought of a topic that the student knows but possibly needed some review on anyway, and thought that this session would be a good one for reviewing since the student wasn't at their best.",
+  "result": "This seems to be effective because the tutor shows the student that they care about their well-being.  The tutor adapts their lesson to account for the fact that the student is not well on this day.  This is an effective strategy because the student will still be learning and practicing something productive, but hopefully won't feel overwhelmed with complicated new material when they're already not feeling or doing well.",
+  "effectiveness": "effective"
+}
+```
+
+### Example 2: Partial — warm but surface-level
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 17,
+  "turn_end": 25,
+  "situation": "This is a good place for rapport building to happen because it's the beginning of the lesson.  From the dialogue before the tutor logged in, I can tell that this student enjoys sharing about their interests and is probably holding some Pokemon cards - if the tutor saw the cards, they could have asked the student to share about them a little bit before getting started.  They could have even talked a little about how math is used when playing Pokemon.",
+  "action": "The tutor chose to ask the student some questions to learn how the student is doing and what the student did over the weekend. ",
+  "result": "The tutor's strategy was a little bit effective.  The student shared that they went to a Descendants and Zombies concert, and the tutor moved straight into a math problem after that response.  It could have been nice to ask the student to share something about the concert (What was your favorite song?  How was it going to the concert, were there a lot of people?  Who did you go with to the concert?  Who are the Descendants and Zombies, can you tell me a little about them?).  Asking one follow-up question about the concert would show interest and allow the student to share about something that was probably meaningful for them.  By moving straight into a math problem without acknowledging the student's response, the student might feel ignored.",
+  "effectiveness": "partial"
+}
+```
+
+### Example 3: Ineffective — missed emotional cue
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 5,
+  "turn_end": 66,
+  "situation": "This is a place where rapport building should take place because it is the beginning of the tutoring session. ",
+  "action": "The first thing the tutor did was check in to see how the student is doing. The strategy the tutor used was taking genuine interest in what the student is doing in school. The tutor asked for specifics about their work and what vocabulary and math questions they were being asked. The tutor also asked the student to self assess how they felt about those topics, which can help the tutor see whether or not the student could use more support with those topics. ",
+  "result": "When prompted, the student shared information about the work they are doing in school. The tutor missed an opportunity to dig deeper or acknowledge that the student said they've been better. Instead the tutor changed topics to which the student answered but didn't necessarily volunteer information without prompting. When a student responds this way (I've been better) it is an opportunity for them to feel heard. The tutor can say something like, \"You've been better. Is there anything you want to share or talk about?\" If the student says no, the tutor can say that they hope they feel better and that they will circle back at the end to see if their work together helped to change their feeling. ",
+  "effectiveness": "ineffective"
+}
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript.
+2. Determine the situation, action, result, and effectiveness.
+3. Before rating, explicitly consider: is there a clearly better alternative the tutor could have used?
+4. If later turns provide evidence of the strategy's impact, you may cite them. Focus on the quality of the tutor's strategy.
+5. If the detected moment does not contain a meaningful rapport event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "...",
+  "effectiveness": "effective"
+}
+```

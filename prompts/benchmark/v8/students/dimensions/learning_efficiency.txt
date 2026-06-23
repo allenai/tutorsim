@@ -1,0 +1,5 @@
+Learning Efficiency: How readily the student revises incorrect beliefs and integrates new understanding when provided with feedback or guidance.
+Consider:
+- Speed of learning: How many explanations or examples does the student need before showing signs of understanding? Do they quickly grasp corrections or require repeated instruction?
+- Generalization: When they correct one instance of an error, do they apply that correction to similar problems, or does the misconception resurface in new contexts?
+- Evidence of conceptual change: Do their later responses show genuine understanding of why their initial approach was wrong, or do they mechanically follow corrections without deeper insight?

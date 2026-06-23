@@ -1,0 +1,103 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a scaffolding-related moment. Your task is to analyze it in detail.
+
+## Scaffolding (Push for Rigor vs. Support)
+
+You are analyzing the tradeoff tutors face between making a task accessible (scaffolding) and maintaining cognitive demand (pushing for rigor).
+
+- **Push for Rigor**: Challenging the student, asking for explanations, requiring metacognition, and removing support to foster independence.
+- **Scaffold**: Breaking problems into steps, providing hints, modeling, using visuals, or simplifying the task to address a struggle.
+
+Types of moments:
+
+1. **Effective Scaffolding/Rigor**: The tutor correctly identifies the student's need and responds with an appropriate strategy. If the student is stuck, the tutor provides just enough support. If the student is coasting, the tutor increases the challenge.
+
+2. **Missed Opportunity (Ineffective)**:
+   - **Missed Scaffold**: Student is stuck, but the tutor offers no help or repeats the same ineffective strategy.
+   - **Missed Rigor (difficulty gap)**: Student solves problems easily, but the tutor keeps the task too simple.
+   - **Missed Rigor (depth gap)**: Student demonstrates thinking beyond what was asked, but the tutor responds with generic praise and moves on. (Note: It is perfectly acceptable and "effective" to simply confirm a correct answer and move on for standard practice problems. Do not penalize tutors for failing to ask "why?" or "how did you get that?" after every correct answer unless the student explicitly signals a deeper insight).
+
+## Using Context
+
+The surrounding turns provide context for your analysis. If the turns after the detected moment show evidence of the strategy's impact, you must factor this into your effectiveness rating. If a pedagogical move sounds good in theory but leaves the student visibly confused, guessing randomly, or highly distracted, it was poorly executed for that specific student and is not 'effective'. A strategy is only effective if it actually helps the student progress or meaningfully engage with the math.
+
+A strategy can be effective even if the student's visible response is brief — some students show understanding through correct answers rather than verbal elaboration. Conversely, a strategy can be ineffective even if the student gets the right answer — if the tutor did all the thinking.
+
+## Effectiveness Criteria
+
+- **effective**: The tutor reads the student's level correctly and responds appropriately. If the student is stuck, confused, or learning a new topic, heavy scaffolding is **Effective**. This includes breaking the problem down into simple micro-computations (e.g., 'What is 9 minus 4?'), explicitly directing the student's attention ('Look at the y-coordinates'), or setting up the equation for them. Do not penalize the tutor for 'doing the conceptual thinking' or 'reducing the problem to basic arithmetic' if they are guiding a struggling student through a new or difficult process. Modeling and direct instruction are valid, highly effective scaffolds here.
+
+- **partial**: The tutor's strategy helps but is flawed. Examples: (a) the tutor provides a reasonable scaffold but misses the core misconception, (b) the student arrives at the correct answer but their conceptual understanding remains unclear, (c) the tutor mixes good questioning with a bit too much telling, or (d) the tutor provides slightly too much scaffolding on a new problem, but the student still actively engages and benefits.
+
+- **ineffective**: The tutor explicitly states or writes the final answers before the student can, reducing the student to a passive observer. Over-scaffolding a task the student has **already practiced successfully** in previous turns (e.g., walking them step-by-step through a process they should now do independently). Giving away the strategy or answers immediately on a task the student already knows how to solve. Or, entirely missing an obvious opportunity to address a misconception.
+
+## Examples
+
+### Example 1: Effective — concept connection with transfer
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 45,
+  "turn_end": 48,
+  "situation": "Student was intimidated by large numbers in division (5600 / 70).",
+  "action": "Tutor connected the problem to a known fact (56 / 7 = 8) and the strategy of canceling zeros.",
+  "result": "Effective. The tutor correctly identified that the student's block was intimidation, not lack of knowledge, and chose a strategy that built on existing skills. The student articulated the simplified problem.",
+  "effectiveness": "effective"
+}
+```
+
+### Example 2: Partial — good start, no verification
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 76,
+  "turn_end": 86,
+  "situation": "Student added denominators incorrectly (1/4 + 1/4 = 2/8).",
+  "action": "Tutor explained the rule, used a hands analogy. Student self-corrected. But the tutor confirmed with 'perfect' and moved on without verifying understanding.",
+  "result": "Partial. The analogy was well-chosen and the student self-corrected, but the tutor never checked if the student internalized the rule — a follow-up question or new example would have strengthened this.",
+  "effectiveness": "partial"
+}
+```
+
+### Example 3: Ineffective — missed depth opportunity
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 29,
+  "turn_end": 41,
+  "situation": "Student shared academic success and mentioned using 'strategies' — signaling metacognitive awareness.",
+  "action": "Tutor asked who taught the strategies but never asked what they were. Gave generic praise and pivoted to an unrelated topic.",
+  "result": "Ineffective. The student was ready to explain their reasoning. Asking 'What strategies did you use?' would have pushed for metacognition. The opportunity was dropped entirely.",
+  "effectiveness": "ineffective"
+}
+```
+
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript.
+2. Determine the situation, action, result, and effectiveness.
+3. If later turns provide evidence of the strategy's impact, you may cite them. Focus your analysis on the quality of the tutor's strategy.
+4. If the detected moment does not contain a meaningful scaffolding event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "...",
+  "effectiveness": "effective"
+}
+```
