@@ -1,0 +1,11 @@
+{
+  "name": "mini_set",
+  "version": "fixture",
+  "schema_version": 1,
+  "record_count": 2,
+  "content_hash": "fff9e0682590012365c4f79bcbf73ce1678a779ef46032f523df1aba473ccc7e",
+  "created": "2026-06-27",
+  "provenance": {
+    "source_tags": ["fixture"]
+  }
+}

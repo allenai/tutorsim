@@ -8,3 +8,7 @@ away) and rigor (holding the student to the cognitive work).
 
 The public registration decorators are re-exported from the top-level package.
 """
+
+from tutor_bench.benchmark.config import register_student, register_tutor
+
+__all__ = ["register_tutor", "register_student"]

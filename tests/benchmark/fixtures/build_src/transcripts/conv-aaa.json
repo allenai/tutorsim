@@ -1,0 +1,13 @@
+{
+  "conversation_id": "conv-aaa",
+  "context": "Grade 5, Mathematics, fractions",
+  "turns": [
+    {"turn_number": 1, "role": "TUTOR", "text": "What is half of 6?"},
+    {"turn_number": 2, "role": "STUDENT", "text": "I think it might be 3?"},
+    {"turn_number": 3, "role": "TUTOR", "text": "Can you explain how you got that?"},
+    {"turn_number": 4, "role": "STUDENT", "text": "I split it into two groups"},
+    {"turn_number": 5, "role": "TUTOR", "text": "Great reasoning! Now what about half of 8?"},
+    {"turn_number": 6, "role": "STUDENT", "text": "4!"},
+    {"turn_number": 7, "role": "TUTOR", "text": "Exactly right!"}
+  ]
+}

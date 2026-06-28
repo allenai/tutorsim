@@ -1,0 +1,11 @@
+{
+  "conversation_id": "conv-bbb",
+  "context": "Grade 7, Algebra",
+  "turns": [
+    {"turn_number": 1, "role": "TUTOR", "text": "Solve for x: 2x + 3 = 11"},
+    {"turn_number": 2, "role": "STUDENT", "text": "x = 4"},
+    {"turn_number": 3, "role": "TUTOR", "text": "How did you find that?"},
+    {"turn_number": 4, "role": "STUDENT", "text": "I subtracted 3 then divided by 2"},
+    {"turn_number": 5, "role": "TUTOR", "text": "Perfect method!"}
+  ]
+}
