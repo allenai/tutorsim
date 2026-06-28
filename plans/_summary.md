@@ -248,7 +248,19 @@ the mock `Annotator`/`Evaluator` stubs, apply Kyle's terminology (LM step = "sco
 released contract). Offline only — live 520 reproduction explicitly deferred. Phased: foundations →
 scoring → rollout → orchestration/reporting → human baseline + docs.
 
-**Result:** TBD (design stage).
+**Result:** In progress on branch `feat/benchmark-port`. Done + committed (each verified byte-identical
+via ported tests + AST logic-diff vs `insource/main`, ruff clean):
+- Phase 0: scaffold `tutor_bench/benchmark/` + packaged prompts/`default_config.yaml` (checksum-verified, LF-pinned), pyproject wiring.
+- Phase 1: `resources, client, config (env var TUTOR_BENCH_CONFIG), scenarios`.
+- Phase 2: `scoring` (3-pass judge; `Annotation`→`Judgment`; wire keys kept). `conversation.py` Transcript stub.
+- Phase 3: `tutor, student, conversation` (full rollout).
+- Phase 4a: `results` (byte-identical JSON), `report` (leaderboard md/csv + HTML viewer).
+Suite: 295 passed / 10 skipped (10 skip = external balanced_520 dataset absent; expected).
+Remaining: Phase 4b `cli.py` (run/report/view/dataset{build,validate}; drop dup `build-scenarios`; env var renamed);
+Phase 5 human baseline (additive, from uncommitted Insource `human.py`) + README rewrite + remove mock
+`Annotator`/`Evaluator` stubs + update top-level `tutor_bench/cli.py` console entry + `__init__` exports;
+Phase 6 data pipeline (build_ground_truth/split_ground_truth/build_consolidated/sort_ground_truth) + configs.
+Source-of-truth = `insource/main`. Live 520 reproduction still out of scope (offline).
 
 ---
 
