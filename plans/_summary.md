@@ -248,19 +248,33 @@ the mock `Annotator`/`Evaluator` stubs, apply Kyle's terminology (LM step = "sco
 released contract). Offline only — live 520 reproduction explicitly deferred. Phased: foundations →
 scoring → rollout → orchestration/reporting → human baseline + docs.
 
-**Result:** In progress on branch `feat/benchmark-port`. Done + committed (each verified byte-identical
-via ported tests + AST logic-diff vs `insource/main`, ruff clean):
-- Phase 0: scaffold `tutor_bench/benchmark/` + packaged prompts/`default_config.yaml` (checksum-verified, LF-pinned), pyproject wiring.
-- Phase 1: `resources, client, config (env var TUTOR_BENCH_CONFIG), scenarios`.
-- Phase 2: `scoring` (3-pass judge; `Annotation`→`Judgment`; wire keys kept). `conversation.py` Transcript stub.
+**Result:** Phases 0–5 DONE + committed on branch `feat/benchmark-port` (each verified byte-identical via
+ported tests + AST logic-diff vs `insource/main`; ruff check + format clean). The full benchmark package is
+ported and integrated:
+- Phase 0: scaffold + packaged prompts/`default_config.yaml` (checksum-verified, LF-pinned via `.gitattributes`).
+- Phase 1: `resources, client, config` (env var `TUTOR_BENCH_CONFIG`), `scenarios`.
+- Phase 2: `scoring` (3-pass judge; `Annotation`→`Judgment`; wire keys incl. `annotation_type` kept).
 - Phase 3: `tutor, student, conversation` (full rollout).
-- Phase 4a: `results` (byte-identical JSON), `report` (leaderboard md/csv + HTML viewer).
-Suite: 295 passed / 10 skipped (10 skip = external balanced_520 dataset absent; expected).
-Remaining: Phase 4b `cli.py` (run/report/view/dataset{build,validate}; drop dup `build-scenarios`; env var renamed);
-Phase 5 human baseline (additive, from uncommitted Insource `human.py`) + README rewrite + remove mock
-`Annotator`/`Evaluator` stubs + update top-level `tutor_bench/cli.py` console entry + `__init__` exports;
-Phase 6 data pipeline (build_ground_truth/split_ground_truth/build_consolidated/sort_ground_truth) + configs.
-Source-of-truth = `insource/main`. Live 520 reproduction still out of scope (offline).
+- Phase 4: `results` (byte-identical JSON), `report`, `cli` (run/report/view/dataset{build,validate};
+  dropped dup `build-scenarios`; config.json provenance key `tutorsim_version`→`tutor_bench_version`).
+- Phase 5: human baseline (`human.py` + runner script, serializer routed through `results.write_score`);
+  top-level wiring (`tutor_bench.__init__` exports register_tutor/student; `tutor_bench/cli.py` → benchmark CLI);
+  removed mock `Annotator`/`Evaluator` stubs + demo scripts + 1 mock test; README rewritten (benchmark-first,
+  scorer/judge terminology, no `tutorsim`, verified accurate to code).
+- **Suite: 344 passed / 10 skipped** (10 skip = external `balanced_520` absent; expected). Full `tests/` (benchmark + toolkit).
+
+**Remaining — Phase 6 (data pipeline + configs):** port the dataset-build pipeline from `insource/main`
+(`data/build_ground_truth.py`, `data/split_ground_truth.py`, `data/build_consolidated.py`,
+`data/sort_ground_truth.py`, `data/README.md`) into a clean tutor-bench home (recommend `scripts/dataset/`),
+with the same transformation discipline (rename `tutorsim`→`tutor_bench.benchmark`; strip provenance/internal
+refs; deterministic — `split_ground_truth` is already `sorted()`+seeded). Decide placement of `split.json`
+(tracked, reproducibility artifact) and `stats.ipynb` (tracked, rerunnable stats) with explicit `.gitignore`
+allowlist entries. This also resolves Ryan's Insource hygiene questions (no orphan top-level `prompts/`,
+scripts out of `data/`, intentional split.json/stats.ipynb). Then open the PR.
+
+Source-of-truth = `insource/main` (+ uncommitted Insource working-tree `human.py`/`score_human_baseline.py`).
+Live 520 reproduction against real APIs still out of scope (offline); it remains the one decisive check before
+publishing leaderboard numbers.
 
 ---
 
