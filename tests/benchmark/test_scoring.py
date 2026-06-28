@@ -24,14 +24,17 @@ from tutor_bench.benchmark.scoring import (
 )
 
 
-@pytest.mark.parametrize("rel", [
-    "annotate/scaffolding.md",
-    "decompose/decompose_action.md",
-    "decompose/decompose_result.md",
-    "decompose/decompose_overscaffold.md",
-    "structure/classify_action.md",
-    "structure/classify_student_result.md",
-])
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "annotate/scaffolding.md",
+        "decompose/decompose_action.md",
+        "decompose/decompose_result.md",
+        "decompose/decompose_overscaffold.md",
+        "structure/classify_action.md",
+        "structure/classify_student_result.md",
+    ],
+)
 def test_scorer_prompt_exists_and_nonempty(rel):
     text = resource_text(f"prompts/scorer/{rel}")
     assert text.strip(), f"empty prompts/scorer/{rel}"
@@ -88,6 +91,7 @@ def fixture_transcript(fixture_scenario):
 
 # --- Judgment round-trip ---
 
+
 def test_annotation_to_dict_has_all_fields():
     ann = Judgment(
         scenario_id="testset:conv-abc__hum_5_12",
@@ -105,10 +109,18 @@ def test_annotation_to_dict_has_all_fields():
     )
     d = ann.to_dict()
     expected_fields = {
-        "scenario_id", "annotation_type", "turn_start", "turn_end",
-        "situation", "action", "result",
-        "action_decomposed", "result_decomposed", "overscaffold_decomposed",
-        "action_label", "result_label",
+        "scenario_id",
+        "annotation_type",
+        "turn_start",
+        "turn_end",
+        "situation",
+        "action",
+        "result",
+        "action_decomposed",
+        "result_decomposed",
+        "overscaffold_decomposed",
+        "action_label",
+        "result_label",
     }
     assert expected_fields.issubset(set(d.keys()))
     assert d["scenario_id"] == "testset:conv-abc__hum_5_12"
@@ -141,6 +153,7 @@ def test_annotation_to_dict_round_trips_values():
 
 
 # --- _build_synthetic_conversation ---
+
 
 def test_build_synthetic_conversation_keyed_by_scenario_id(fixture_scenario, fixture_transcript):
     conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
@@ -238,6 +251,7 @@ def test_build_synthetic_conversation_detection_situation_hint(fixture_scenario,
 
 # --- _format_excerpt (context_window=0) ---
 
+
 def test_format_excerpt_markers_present(fixture_scenario, fixture_transcript):
     """The excerpt must contain START and END markers."""
     conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
@@ -305,6 +319,7 @@ def test_format_excerpt_golden_string(fixture_scenario, fixture_transcript):
 
 # --- _suggestion_text ---
 
+
 def test_suggestion_text_scaffolding():
     assert _suggestion_text("scaffolding") == (
         "A team of teachers believe that this moment is appropriate for scaffolding."
@@ -348,6 +363,7 @@ def test_suggestion_text_unrecognized():
 
 
 # --- _build_annotate_entries: golden-prompt test ---
+
 
 def test_build_annotate_entries_key_scheme(fixture_scenario, fixture_transcript):
     """Key must be '{scenario_id}__scaffolding__0' for the first detection."""
@@ -427,6 +443,7 @@ def test_build_annotate_entries_golden_prompt(fixture_scenario, fixture_transcri
 
 
 # --- _parse_and_merge ---
+
 
 def test_parse_and_merge_extracts_fields():
     """Parse extracts situation/action/result from JSON response."""
@@ -560,6 +577,7 @@ JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 
 # --- _coerce_facets ---
 
+
 def test_coerce_facets_bare_array():
     """A bare JSON array should return the list of strings."""
     result = _coerce_facets(["a", "b", "c"])
@@ -604,6 +622,7 @@ def test_coerce_facets_returns_none_for_invalid():
 
 
 # --- _build_decompose_entries: action prompt ---
+
 
 def test_build_decompose_entries_action_substitutes_action():
     """Action entry prompt must contain the action text via {action} substitution."""
@@ -766,9 +785,7 @@ def test_build_decompose_entries_json_mode_enabled():
         entries, _ = _build_decompose_entries(annotations, pass_type)
         assert len(entries) == 1
         gen_config = entries[0]["request"]["generation_config"]
-        assert gen_config.get("response_mime_type") == "application/json", (
-            f"{pass_type} entry missing json_mode"
-        )
+        assert gen_config.get("response_mime_type") == "application/json", f"{pass_type} entry missing json_mode"
 
 
 def test_build_decompose_entries_overscaffold_both_junk_skipped():
@@ -796,6 +813,7 @@ def test_build_decompose_entries_overscaffold_both_junk_skipped():
 
 
 # --- _parse_action_label ---
+
 
 def test_parse_action_label_scaffolding_only():
     label, err = _parse_action_label('{"scaffolding":"yes","rigor":"no"}')
@@ -872,6 +890,7 @@ def test_parse_action_label_invalid_value_unclear():
 
 # --- _parse_result_label ---
 
+
 def test_parse_result_label_A_returns_pos():
     label, err = _parse_result_label("A")
     assert label == "pos"
@@ -945,6 +964,7 @@ def test_parse_result_label_letter_after_text_not_matched():
 
 
 # --- _build_structure_entries: mixed json_mode in one batch ---
+
 
 def _make_decomposed_results(action_facets, result_facets, ann_type="scaffolding"):
     """Helper: build results dict with one annotation having given facets."""
@@ -1081,6 +1101,7 @@ def test_build_structure_entries_target_filter_rapport():
 
 # --- Default labels (no facets) ---
 
+
 def test_no_action_facets_default_label_neither():
     """No action facets -> default action_label 'neither'."""
     # This tests the convention the caller must apply after _build_structure_entries.
@@ -1101,8 +1122,10 @@ def test_no_result_facets_default_label_no_evidence():
 def _make_raw_entries(mapping):
     """Build a run_batch-style {key: {text, usage}} dict from a plain dict."""
     return {
-        k: {"text": v if isinstance(v, str) else _json.dumps(v),
-            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}
+        k: {
+            "text": v if isinstance(v, str) else _json.dumps(v),
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        }
         for k, v in mapping.items()
     }
 
@@ -1127,6 +1150,7 @@ def _patch_score(fake_run_batch, fake_client=None):
     if fake_client is None:
         fake_client = _make_fake_score_client()
     from contextlib import ExitStack
+
     stack = ExitStack()
     stack.enter_context(patch("tutor_bench.benchmark.client.run_batch", side_effect=fake_run_batch))
     stack.enter_context(patch("tutor_bench.benchmark.client.ModelClient", return_value=fake_client))
@@ -1139,7 +1163,11 @@ def test_score_returns_annotation(fixture_scenario, fixture_transcript):
     sid = fixture_scenario.id  # "testset:conv-abc__hum_5_12"
 
     annotate_key = f"{sid}__scaffolding__0"
-    annotate_resp = {"situation": "Student stuck on division.", "action": "Tutor guided step-by-step.", "result": "Student made progress."}
+    annotate_resp = {
+        "situation": "Student stuck on division.",
+        "action": "Tutor guided step-by-step.",
+        "result": "Student made progress.",
+    }
     decompose_action_key = f"action__{sid}__0"
     decompose_result_key = f"result__{sid}__0"
     decompose_overscaffold_key = f"overscaffold__{sid}__0"
@@ -1152,17 +1180,21 @@ def test_score_returns_annotation(fixture_scenario, fixture_transcript):
             return _make_raw_entries({annotate_key: annotate_resp})
         elif decompose_overscaffold_key in keys:
             # Decompose pass: action + result + overscaffold entries
-            return _make_raw_entries({
-                decompose_action_key: ["guided student", "broke down problem"],
-                decompose_result_key: ["student improved"],
-                decompose_overscaffold_key: [],
-            })
+            return _make_raw_entries(
+                {
+                    decompose_action_key: ["guided student", "broke down problem"],
+                    decompose_result_key: ["student improved"],
+                    decompose_overscaffold_key: [],
+                }
+            )
         else:
             # Structure pass: action (JSON) + result (bare letter)
-            return _make_raw_entries({
-                structure_action_key: {"scaffolding": "yes", "rigor": "no"},
-                structure_result_key: "A",
-            })
+            return _make_raw_entries(
+                {
+                    structure_action_key: {"scaffolding": "yes", "rigor": "no"},
+                    structure_result_key: "A",
+                }
+            )
 
     with _patch_score(fake_run_batch)[0]:
         result = score(fixture_scenario, fixture_transcript)
@@ -1202,17 +1234,21 @@ def test_score_three_passes_in_order(fixture_scenario, fixture_transcript):
             return _make_raw_entries({annotate_key: {"situation": "s", "action": "Tutor helped.", "result": "r"}})
         elif overscaffold_key in keys:
             call_order.append("decompose")
-            return _make_raw_entries({
-                f"action__{sid}__0": ["facet1"],
-                f"result__{sid}__0": ["res1"],
-                overscaffold_key: [],
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": ["facet1"],
+                    f"result__{sid}__0": ["res1"],
+                    overscaffold_key: [],
+                }
+            )
         else:
             call_order.append("structure")
-            return _make_raw_entries({
-                f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
-                f"result__{sid}__0": "A",
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
+                    f"result__{sid}__0": "A",
+                }
+            )
 
     with _patch_score(fake_run_batch)[0]:
         score(fixture_scenario, fixture_transcript)
@@ -1233,19 +1269,25 @@ def test_score_scorer_model_is_claude_opus_4_6(fixture_scenario, fixture_transcr
         if annotate_key in keys:
             return _make_raw_entries({annotate_key: {"situation": "s", "action": "Tutor guided.", "result": "r"}})
         elif f"overscaffold__{sid}__0" in keys:
-            return _make_raw_entries({
-                f"action__{sid}__0": ["facet1"],
-                f"result__{sid}__0": ["res1"],
-                f"overscaffold__{sid}__0": [],
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": ["facet1"],
+                    f"result__{sid}__0": ["res1"],
+                    f"overscaffold__{sid}__0": [],
+                }
+            )
         else:
-            return _make_raw_entries({
-                f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
-                f"result__{sid}__0": "A",
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
+                    f"result__{sid}__0": "A",
+                }
+            )
 
-    with patch("tutor_bench.benchmark.client.run_batch", side_effect=fake_run_batch), \
-         patch("tutor_bench.benchmark.client.ModelClient") as mock_mc:
+    with (
+        patch("tutor_bench.benchmark.client.run_batch", side_effect=fake_run_batch),
+        patch("tutor_bench.benchmark.client.ModelClient") as mock_mc,
+    ):
         # Make the mock instance have the right model attribute
         fake_client = MagicMock()
         fake_client.model = "claude-opus-4-6"
@@ -1258,9 +1300,7 @@ def test_score_scorer_model_is_claude_opus_4_6(fixture_scenario, fixture_transcr
         assert mock_mc.called, "ModelClient was not instantiated"
         init_args = mock_mc.call_args
         model_arg = init_args.args[0] if init_args.args else init_args.kwargs.get("model")
-        assert model_arg == "claude-opus-4-6", (
-            f"Expected scorer model 'claude-opus-4-6', got {model_arg!r}"
-        )
+        assert model_arg == "claude-opus-4-6", f"Expected scorer model 'claude-opus-4-6', got {model_arg!r}"
 
 
 def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcript):
@@ -1273,7 +1313,11 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
         return {
             k: {
                 "text": v if isinstance(v, str) else _json.dumps(v),
-                "usage": {"input_tokens": tokens_per_key, "output_tokens": tokens_per_key, "total_tokens": tokens_per_key * 2}
+                "usage": {
+                    "input_tokens": tokens_per_key,
+                    "output_tokens": tokens_per_key,
+                    "total_tokens": tokens_per_key * 2,
+                },
             }
             for k, v in keys_vals.items()
         }
@@ -1283,16 +1327,22 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
         if annotate_key in keys:
             return make_resp({annotate_key: {"situation": "s", "action": "Tutor helped.", "result": "r"}}, 100)
         elif f"overscaffold__{sid}__0" in keys:
-            return make_resp({
-                f"action__{sid}__0": ["f1"],
-                f"result__{sid}__0": ["r1"],
-                f"overscaffold__{sid}__0": [],
-            }, 200)
+            return make_resp(
+                {
+                    f"action__{sid}__0": ["f1"],
+                    f"result__{sid}__0": ["r1"],
+                    f"overscaffold__{sid}__0": [],
+                },
+                200,
+            )
         else:
-            return make_resp({
-                f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
-                f"result__{sid}__0": "A",
-            }, 300)
+            return make_resp(
+                {
+                    f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
+                    f"result__{sid}__0": "A",
+                },
+                300,
+            )
 
     with _patch_score(fake_run_batch)[0]:
         result = score(fixture_scenario, fixture_transcript)

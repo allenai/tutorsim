@@ -1,4 +1,5 @@
 """Tests for tutor_bench.benchmark.conversation: multi-turn orchestration."""
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -7,6 +8,7 @@ from tutor_bench.benchmark.scenarios import Scenario
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _resp(text, usage=None, latency=None):
     """Build a fake LLM response."""
@@ -81,9 +83,11 @@ def _patch_all(monkeypatch, tutor_responses, student_responses, *, trait_persona
 # Tests: module imports and Transcript dataclass
 # ---------------------------------------------------------------------------
 
+
 def test_imports():
     """Module and Transcript are importable."""
     from tutor_bench.benchmark.conversation import Transcript, run_conversation
+
     assert Transcript is not None
     assert run_conversation is not None
 
@@ -91,6 +95,7 @@ def test_imports():
 def test_transcript_defaults():
     """Transcript has sensible defaults."""
     from tutor_bench.benchmark.conversation import Transcript
+
     t = Transcript(scenario_id="abc", tutor_model="m")
     assert t.scenario_id == "abc"
     assert t.tutor_model == "m"
@@ -106,6 +111,7 @@ def test_transcript_defaults():
 def test_transcript_to_dict():
     """to_dict() returns all fields."""
     from tutor_bench.benchmark.conversation import Transcript
+
     t = Transcript(scenario_id="x", tutor_model="y")
     d = t.to_dict()
     assert d["scenario_id"] == "x"
@@ -117,8 +123,10 @@ def test_transcript_to_dict():
 # Tests: private helpers
 # ---------------------------------------------------------------------------
 
+
 def test_parse_tutor_tokens_no_tokens():
     from tutor_bench.benchmark.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("Hello there!")
     assert text == "Hello there!"
     assert ended is False
@@ -127,6 +135,7 @@ def test_parse_tutor_tokens_no_tokens():
 
 def test_parse_tutor_tokens_end():
     from tutor_bench.benchmark.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("Great work! [END]")
     assert "[END]" not in text
     assert ended is True
@@ -135,6 +144,7 @@ def test_parse_tutor_tokens_end():
 
 def test_parse_tutor_tokens_problem_change():
     from tutor_bench.benchmark.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("OK, let's move on. [PROBLEM_CHANGE]")
     assert "[PROBLEM_CHANGE]" not in text
     assert ended is False
@@ -144,6 +154,7 @@ def test_parse_tutor_tokens_problem_change():
 def test_parse_tutor_tokens_next_problem_legacy():
     """[NEXT_PROBLEM] is the legacy alias for [PROBLEM_CHANGE]."""
     from tutor_bench.benchmark.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("Done! [NEXT_PROBLEM]")
     assert "[NEXT_PROBLEM]" not in text
     assert ended is False
@@ -153,6 +164,7 @@ def test_parse_tutor_tokens_next_problem_legacy():
 def test_parse_tutor_tokens_end_takes_precedence():
     """When both END and PROBLEM_CHANGE appear, ended wins."""
     from tutor_bench.benchmark.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("[END] [PROBLEM_CHANGE]")
     assert ended is True
     assert changed is False
@@ -160,33 +172,39 @@ def test_parse_tutor_tokens_end_takes_precedence():
 
 def test_split_messages_single():
     from tutor_bench.benchmark.conversation import _split_messages
+
     assert _split_messages("Hello") == ["Hello"]
 
 
 def test_split_messages_next_delimiter():
     from tutor_bench.benchmark.conversation import _split_messages
+
     result = _split_messages("Msg1 [NEXT] Msg2")
     assert result == ["Msg1", "Msg2"]
 
 
 def test_split_messages_new_message_delimiter():
     from tutor_bench.benchmark.conversation import _split_messages
+
     result = _split_messages("Msg1 [NEW_MESSAGE] Msg2")
     assert result == ["Msg1", "Msg2"]
 
 
 def test_split_messages_empty_string():
     from tutor_bench.benchmark.conversation import _split_messages
+
     assert _split_messages("") == []
 
 
 def test_split_messages_whitespace_only():
     from tutor_bench.benchmark.conversation import _split_messages
+
     assert _split_messages("   ") == []
 
 
 def test_add_usage():
     from tutor_bench.benchmark.conversation import _add_usage
+
     total = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
     _add_usage(total, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})
     assert total == {"input_tokens": 13, "output_tokens": 7, "total_tokens": 20}
@@ -195,6 +213,7 @@ def test_add_usage():
 def test_add_usage_missing_keys():
     """Missing keys in new dict are treated as 0."""
     from tutor_bench.benchmark.conversation import _add_usage
+
     total = {"input_tokens": 10, "output_tokens": 0, "total_tokens": 10}
     _add_usage(total, {})
     assert total["input_tokens"] == 10
@@ -203,6 +222,7 @@ def test_add_usage_missing_keys():
 def test_format_transcript_prefix():
     """_format_transcript_prefix uses real turn_number and UPPERCASE role."""
     from tutor_bench.benchmark.conversation import _format_transcript_prefix
+
     context = [
         {"turn_number": 26, "role": "tutor", "text": "Hello!"},
         {"turn_number": 27, "role": "student", "text": "Hi there."},
@@ -214,6 +234,7 @@ def test_format_transcript_prefix():
 def test_format_transcript_prefix_real_turn_numbers():
     """Non-sequential turn numbers (e.g. from enrichments) are preserved exactly."""
     from tutor_bench.benchmark.conversation import _format_transcript_prefix
+
     context = [
         {"turn_number": 5, "role": "tutor", "text": "A"},
         {"turn_number": 7, "role": "student", "text": "B"},
@@ -225,12 +246,14 @@ def test_format_transcript_prefix_real_turn_numbers():
 
 def test_format_transcript_prefix_empty():
     from tutor_bench.benchmark.conversation import _format_transcript_prefix
+
     assert _format_transcript_prefix([]) == ""
 
 
 # ---------------------------------------------------------------------------
 # Tests: run_conversation happy path
 # ---------------------------------------------------------------------------
+
 
 def test_run_conversation_single_round_end(monkeypatch):
     """Tutor says [END] after first turn -> conversation stops after 1 tutor turn."""
@@ -373,6 +396,7 @@ def test_run_conversation_multi_message_split(monkeypatch):
 # Tests: usage accumulation
 # ---------------------------------------------------------------------------
 
+
 def test_run_conversation_usage_accumulated(monkeypatch):
     """Token usage is summed across all tutor calls."""
     from tutor_bench.benchmark.conversation import run_conversation
@@ -426,6 +450,7 @@ def test_run_conversation_none_latency_not_appended(monkeypatch):
 # Tests: scenario_id and tutor_model on Transcript
 # ---------------------------------------------------------------------------
 
+
 def test_run_conversation_transcript_ids(monkeypatch):
     """Transcript carries correct scenario_id and tutor_model."""
     from tutor_bench.benchmark.conversation import run_conversation
@@ -442,6 +467,7 @@ def test_run_conversation_transcript_ids(monkeypatch):
 # ---------------------------------------------------------------------------
 # Tests: registered (callable) tutor/student
 # ---------------------------------------------------------------------------
+
 
 def test_registered_tutor(monkeypatch):
     """Registered tutor callable is invoked with generated_turns."""
@@ -516,6 +542,7 @@ def test_registered_student(monkeypatch):
 # Tests: cacheable prefix passed to generate
 # ---------------------------------------------------------------------------
 
+
 def test_cacheable_prefix_passed_to_client(monkeypatch):
     """Client.generate is called with cacheable_prefix (the static head)."""
     from tutor_bench.benchmark.conversation import run_conversation
@@ -555,6 +582,7 @@ def test_cacheable_prefix_passed_to_client(monkeypatch):
 # Tests: _TraitScenario compat shim
 # ---------------------------------------------------------------------------
 
+
 def test_trait_scenario_attributes():
     """_TraitScenario exposes conv_id, cut_turn, transcript_prefix."""
     from tutor_bench.benchmark.conversation import _format_transcript_prefix, _TraitScenario
@@ -572,9 +600,11 @@ def test_trait_scenario_attributes():
 # Helpers for batch tests
 # ---------------------------------------------------------------------------
 
+
 def _make_scenario_id(sid: str, cut_turn: int = 5) -> "Scenario":
     """Like _make_scenario but with a custom scenario id."""
     from tutor_bench.benchmark.scenarios import Scenario
+
     context = [
         {"turn_number": i + 1, "role": "tutor" if i % 2 == 0 else "student", "text": f"text {i + 1}"}
         for i in range(cut_turn)
@@ -663,9 +693,11 @@ def _patch_batch(monkeypatch, tutor_batch_results: list[dict], student_batch_res
 # Tests: run_conversations_batch
 # ---------------------------------------------------------------------------
 
+
 def test_batch_import():
     """run_conversations_batch is importable."""
     from tutor_bench.benchmark.conversation import run_conversations_batch
+
     assert run_conversations_batch is not None
 
 
@@ -683,9 +715,7 @@ def test_batch_two_scenarios_returns_two_transcripts(monkeypatch):
 
     _patch_batch(monkeypatch, [tutor_round1], [student_round1])
 
-    results = run_conversations_batch(
-        [s1, s2], tutor_id="fake-tutor", max_turns=2, poll_interval=0
-    )
+    results = run_conversations_batch([s1, s2], tutor_id="fake-tutor", max_turns=2, poll_interval=0)
 
     assert len(results) == 2
     assert results[0].scenario_id == "sid-1"
@@ -710,9 +740,7 @@ def test_batch_ended_via_tracked_per_scenario(monkeypatch):
     # With max_turns=4, s1 ends in round 1 via END; s2 ends via MAX_TURNS.
     _patch_batch(monkeypatch, [tutor_round1], [student_round1])
 
-    results = run_conversations_batch(
-        [s1, s2], tutor_id="fake-tutor", max_turns=2, poll_interval=0
-    )
+    results = run_conversations_batch([s1, s2], tutor_id="fake-tutor", max_turns=2, poll_interval=0)
 
     by_id = {r.scenario_id: r for r in results}
     assert by_id["sid-1"].ended_via == "END"
@@ -738,9 +766,7 @@ def test_batch_ended_scenario_pruned_from_later_rounds(monkeypatch):
 
     run_batch_mock = _patch_batch(monkeypatch, [tutor_round1, tutor_round2], [student_round1])
 
-    results = run_conversations_batch(
-        [s1, s2], tutor_id="fake-tutor", max_turns=6, poll_interval=0
-    )
+    results = run_conversations_batch([s1, s2], tutor_id="fake-tutor", max_turns=6, poll_interval=0)
 
     # run_batch calls: tutor_r1, student_r1, tutor_r2 (student_r2 skipped since all ended).
     # Total calls: 3
@@ -762,9 +788,7 @@ def test_batch_latencies_omitted(monkeypatch):
 
     _patch_batch(monkeypatch, [tutor_round1], [student_round1])
 
-    results = run_conversations_batch(
-        [s1], tutor_id="fake-tutor", max_turns=2, poll_interval=0
-    )
+    results = run_conversations_batch([s1], tutor_id="fake-tutor", max_turns=2, poll_interval=0)
 
     r = results[0]
     assert r.tutor_latencies == []
@@ -783,9 +807,7 @@ def test_batch_round_based_ordering(monkeypatch):
 
     _patch_batch(monkeypatch, [tutor_round1, tutor_round2], [student_round1])
 
-    results = run_conversations_batch(
-        [s1], tutor_id="fake-tutor", max_turns=6, poll_interval=0
-    )
+    results = run_conversations_batch([s1], tutor_id="fake-tutor", max_turns=6, poll_interval=0)
 
     turns = results[0].generated_turns
     roles = [t["role"] for t in turns]
@@ -795,6 +817,7 @@ def test_batch_round_based_ordering(monkeypatch):
 # ---------------------------------------------------------------------------
 # End-to-end integration test: tutor.py + student.py + conversation.py
 # ---------------------------------------------------------------------------
+
 
 def test_run_conversation_e2e_mocked_models(monkeypatch):
     """End-to-end mocked conversation: verifies tutor + student + conversation compose.
@@ -815,22 +838,17 @@ def test_run_conversation_e2e_mocked_models(monkeypatch):
     tutor_resps = [
         _resp(
             "Great start! [NEW_MESSAGE] Keep thinking about that.",
-            usage={"input_tokens": 100, "output_tokens": 30, "total_tokens": 130}
+            usage={"input_tokens": 100, "output_tokens": 30, "total_tokens": 130},
         ),
-        _resp("[END]", usage={"input_tokens": 95, "output_tokens": 5, "total_tokens": 100})
+        _resp("[END]", usage={"input_tokens": 95, "output_tokens": 5, "total_tokens": 100}),
     ]
 
     # Student returns a canned reply
     student_resps = [
-        _resp(
-            "I see. Let me try again.",
-            usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100}
-        )
+        _resp("I see. Let me try again.", usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100})
     ]
 
-    tutor_client, student_client = _patch_all(
-        monkeypatch, tutor_resps, student_resps, trait_persona="oracle-persona"
-    )
+    tutor_client, student_client = _patch_all(monkeypatch, tutor_resps, student_resps, trait_persona="oracle-persona")
 
     # Run the conversation
     result = run_conversation(scenario, "fake-tutor", max_turns=8)

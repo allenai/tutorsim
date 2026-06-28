@@ -14,6 +14,7 @@ Placeholders:
 - {student_context}        <- student_context (always available)
 - {reference_transcript}   <- reference_transcript (oracle only)
 """
+
 from tutor_bench.benchmark.resources import resource_text
 
 SUPPORTED_MODES = {"plain", "scaffolding_rigor", "oracle"}
@@ -59,9 +60,7 @@ def build_tutor_system_prompt(
     # Oracle-specific: substitute reference_transcript
     if mode == "oracle":
         if not reference_transcript:
-            raise ValueError(
-                "mode='oracle' requires a non-empty reference_transcript"
-            )
+            raise ValueError("mode='oracle' requires a non-empty reference_transcript")
         out = out.replace("{reference_transcript}", reference_transcript)
 
     return out

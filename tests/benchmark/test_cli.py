@@ -3,6 +3,7 @@
 All tests mock run_conversation and score so there are no network calls.
 Uses tmp_path as results_root so nothing writes to the real results/ directory.
 """
+
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ from tutor_bench.benchmark.scoring import Judgment
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_scenario(sid: str, dimension: str = "scaffolding") -> Scenario:
     """Build a minimal Scenario for testing."""
@@ -48,8 +50,9 @@ def _make_judgment(sid: str) -> Judgment:
     )
 
 
-def _make_transcript(sid: str, tutor_latencies=None, student_latencies=None,
-                     tutor_usage=None, student_usage=None) -> MagicMock:
+def _make_transcript(
+    sid: str, tutor_latencies=None, student_latencies=None, tutor_usage=None, student_usage=None
+) -> MagicMock:
     """Build a mock Transcript-like object with optional latency/usage data."""
     t = MagicMock()
     t.scenario_id = sid
@@ -58,12 +61,12 @@ def _make_transcript(sid: str, tutor_latencies=None, student_latencies=None,
     t.to_dict.return_value = {"scenario_id": sid, "completed": True, "generated_turns": []}
     t.tutor_latencies = tutor_latencies if tutor_latencies is not None else []
     t.student_latencies = student_latencies if student_latencies is not None else []
-    t.tutor_usage = tutor_usage if tutor_usage is not None else {
-        "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
-    }
-    t.student_usage = student_usage if student_usage is not None else {
-        "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
-    }
+    t.tutor_usage = (
+        tutor_usage if tutor_usage is not None else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    )
+    t.student_usage = (
+        student_usage if student_usage is not None else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    )
     return t
 
 
@@ -103,6 +106,7 @@ def _make_run_config(sample=2, dataset="test_ds", max_turns=4):
 # ---------------------------------------------------------------------------
 # Test 1: run_cell writes all expected files and correct summary
 # ---------------------------------------------------------------------------
+
 
 def test_run_cell_writes_all_files(tmp_path):
     """run_cell over a 2-scenario fixture writes 2 transcripts + 2 scores +
@@ -144,13 +148,11 @@ def test_run_cell_writes_all_files(tmp_path):
 
     # 2 transcripts
     for s in scenarios:
-        assert (run_dir / "transcripts" / f"{s.id}.json").exists(), \
-            f"Missing transcript for {s.id}"
+        assert (run_dir / "transcripts" / f"{s.id}.json").exists(), f"Missing transcript for {s.id}"
 
     # 2 scores
     for s in scenarios:
-        assert (run_dir / "scores" / f"{s.id}.json").exists(), \
-            f"Missing score for {s.id}"
+        assert (run_dir / "scores" / f"{s.id}.json").exists(), f"Missing score for {s.id}"
 
     # summary.json
     assert (run_dir / "summary.json").exists()
@@ -168,6 +170,7 @@ def test_run_cell_writes_all_files(tmp_path):
 # ---------------------------------------------------------------------------
 # Test 1b: run_cell writes latency + tokens blocks into summary.json (spec S7)
 # ---------------------------------------------------------------------------
+
 
 def test_run_cell_writes_latency_and_tokens(tmp_path):
     """run_cell aggregates tutor_latencies/usage from transcripts into
@@ -244,6 +247,7 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
 # Test 2: run_cell resumes (second call skips already-done scenarios)
 # ---------------------------------------------------------------------------
 
+
 def test_run_cell_resumes(tmp_path):
     """Second run_cell call finds both scenarios already done; 0 new conversation
     calls are made (is_done returns True for both)."""
@@ -299,6 +303,7 @@ def test_run_cell_resumes(tmp_path):
 # ---------------------------------------------------------------------------
 # Test 3: score error -> logged + skipped; run completes with partial summary
 # ---------------------------------------------------------------------------
+
 
 def test_run_cell_skips_on_score_error(tmp_path):
     """A scenario whose score() raises is logged + skipped; run still completes
@@ -387,6 +392,7 @@ def test_run_cell_raises_when_all_scenarios_fail(tmp_path):
 # Test 4: cell expansion -- tutors x modes = cells with correct lane assignment
 # ---------------------------------------------------------------------------
 
+
 def test_cell_expansion_and_lane_assignment():
     """3 tutors x 2 modes = 6 cells; each cell gets the correct provider lane."""
     from tutor_bench.benchmark.cli import expand_cells
@@ -414,6 +420,7 @@ def test_cell_expansion_and_lane_assignment():
 # ---------------------------------------------------------------------------
 # Test 5: scheduler -- within-lane sequential, lanes can run independently
 # ---------------------------------------------------------------------------
+
 
 def test_scheduler_within_lane_sequential(tmp_path):
     """Cells within a lane are called in order; all 6 run_cell calls complete."""
@@ -477,6 +484,7 @@ def test_scheduler_multiple_lanes_all_cells_run(tmp_path):
 # ---------------------------------------------------------------------------
 # Test 6: --trials N -- conversation+score called N times; summary has mean+spread
 # ---------------------------------------------------------------------------
+
 
 def _make_run_config_trials(n_trials: int, sample=2, dataset="test_ds", max_turns=4):
     cfg = MagicMock()
@@ -615,6 +623,7 @@ def test_trials_1_summary_matches_single_run(tmp_path):
 # Helper: build a fake run directory with a summary.json
 # ---------------------------------------------------------------------------
 
+
 def _make_fake_run(
     root: Path,
     run_id: str,
@@ -639,15 +648,14 @@ def _make_fake_run(
         "latency": {"tutor": {"p50_seconds": 1.0, "p95_seconds": 2.5, "mean_seconds": 1.2, "n": n}},
         "tokens": {"total": {"total_tokens": 100000, "input_tokens": 80000, "output_tokens": 20000}},
     }
-    (run_dir / "summary.json").write_text(
-        json.dumps(summary, indent=2), encoding="utf-8"
-    )
+    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return run_dir
 
 
 # ---------------------------------------------------------------------------
 # Test 7: report subcommand writes leaderboard.md + .csv with both rows
 # ---------------------------------------------------------------------------
+
 
 def test_report_writes_leaderboard_md_and_csv(tmp_path):
     """main(['report', '--results-root', ..., '--out', ...]) writes leaderboard.md + .csv
@@ -686,6 +694,7 @@ def test_report_writes_leaderboard_md_and_csv(tmp_path):
 # Test 8: view subcommand writes non-empty HTML
 # ---------------------------------------------------------------------------
 
+
 def test_view_writes_html(tmp_path):
     """main(['view', '--results-root', ..., '--out', ...]) writes a non-empty HTML file."""
     from tutor_bench.benchmark.cli import main
@@ -709,6 +718,7 @@ def test_view_writes_html(tmp_path):
 # Test 9: dataset build subcommand dispatches to scenarios._cli_build
 # ---------------------------------------------------------------------------
 
+
 def test_dataset_build_dispatches(tmp_path):
     """main(['dataset', 'build', ...]) calls _cmd_build_scenarios with correct args."""
     from tutor_bench.benchmark.cli import main
@@ -722,15 +732,22 @@ def test_dataset_build_dispatches(tmp_path):
     tx_dir.mkdir()
 
     with patch("tutor_bench.benchmark.cli._cmd_build_scenarios") as mock_bs:
-        main([
-            "dataset",
-            "build",
-            "--set", "balanced_520",
-            "--ids", str(ids_file),
-            "--ground-truth", str(gt_dir),
-            "--transcripts", str(tx_dir),
-            "--created", "2026-06-26",
-        ])
+        main(
+            [
+                "dataset",
+                "build",
+                "--set",
+                "balanced_520",
+                "--ids",
+                str(ids_file),
+                "--ground-truth",
+                str(gt_dir),
+                "--transcripts",
+                str(tx_dir),
+                "--created",
+                "2026-06-26",
+            ]
+        )
 
     mock_bs.assert_called_once()
     # Verify the args namespace passed in has the expected fields
@@ -746,12 +763,16 @@ def test_dataset_validate_cli(capsys):
     """main(['dataset', 'validate', ...]) validates the mini fixture dataset."""
     from tutor_bench.benchmark.cli import main
 
-    main([
-        "dataset",
-        "validate",
-        "--set", "mini_set",
-        "--root", "tests/benchmark/fixtures",
-    ])
+    main(
+        [
+            "dataset",
+            "validate",
+            "--set",
+            "mini_set",
+            "--root",
+            "tests/benchmark/fixtures",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert "Dataset valid: mini_set" in captured.out
@@ -761,9 +782,11 @@ def test_dataset_validate_cli(capsys):
 # Test 10: --help and run --help exit 0 and list subcommands
 # ---------------------------------------------------------------------------
 
+
 def test_main_help_exits_0():
     """main(['--help']) raises SystemExit(0)."""
     from tutor_bench.benchmark.cli import main
+
     with pytest.raises(SystemExit) as exc_info:
         main(["--help"])
     assert exc_info.value.code == 0
@@ -772,6 +795,7 @@ def test_main_help_exits_0():
 def test_run_help_exits_0():
     """main(['run', '--help']) raises SystemExit(0)."""
     from tutor_bench.benchmark.cli import main
+
     with pytest.raises(SystemExit) as exc_info:
         main(["run", "--help"])
     assert exc_info.value.code == 0
@@ -780,6 +804,7 @@ def test_run_help_exits_0():
 # ---------------------------------------------------------------------------
 # Test 11: end-to-end smoke -- main(['run', ...]) with mocks
 # ---------------------------------------------------------------------------
+
 
 def test_main_run_smoke(tmp_path):
     """main(['run', '--tutors', 'claude-opus-4-8', '--sample', '1', ...]) with mocked
@@ -801,13 +826,19 @@ def test_main_run_smoke(tmp_path):
     ):
         # run_sweep returns a list of run_ids; stub it so we test main() wiring
         mock_sweep.return_value = ["claude-opus-4-8_plain_test_ds_20260626"]
-        main([
-            "run",
-            "--tutors", "claude-opus-4-8",
-            "--sample", "1",
-            "--dataset", "test_ds",
-            "--trait-cache-dir", str(tmp_path / "_trait_cache"),
-        ])
+        main(
+            [
+                "run",
+                "--tutors",
+                "claude-opus-4-8",
+                "--sample",
+                "1",
+                "--dataset",
+                "test_ds",
+                "--trait-cache-dir",
+                str(tmp_path / "_trait_cache"),
+            ]
+        )
 
     # Verify run_sweep was called (proving main() wired through correctly)
     mock_sweep.assert_called_once()
@@ -825,12 +856,17 @@ def test_main_run_missing_dataset_exits_cleanly(capsys):
         patch("tutor_bench.benchmark.cli.run_sweep", side_effect=DatasetNotFoundError("missing dataset")),
     ):
         with pytest.raises(SystemExit) as exc_info:
-            main([
-                "run",
-                "--tutors", "claude-opus-4-8",
-                "--sample", "1",
-                "--dataset", "missing_ds",
-            ])
+            main(
+                [
+                    "run",
+                    "--tutors",
+                    "claude-opus-4-8",
+                    "--sample",
+                    "1",
+                    "--dataset",
+                    "missing_ds",
+                ]
+            )
 
     assert exc_info.value.code == 2
     captured = capsys.readouterr()
@@ -878,12 +914,17 @@ batch: { timeout: 60 }
     _reset_config_cache()
 
     try:
-        main([
-            "run",
-            "--config", str(config_path),
-            "--tutors", "gpt-4o-mini",
-            "--dataset", "readme_mock",
-        ])
+        main(
+            [
+                "run",
+                "--config",
+                str(config_path),
+                "--tutors",
+                "gpt-4o-mini",
+                "--dataset",
+                "readme_mock",
+            ]
+        )
 
         assert observed == {
             "provider": "openai",

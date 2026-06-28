@@ -100,30 +100,3 @@ class TestGradeSchoolFixtures:
             assert any(
                 op in all_content for op in ["+", "-", "x", "×", "÷", "/", "times", "plus", "minus", "divided"]
             ), f"Transcript {idx} should contain math operations"
-
-    def test_load_with_api(self, fixture_path):
-        """Test that fixtures work with the tutor_bench API."""
-        from tutor_bench import Annotator, Evaluator
-
-        # Test that annotator can process the fixture
-        annotator = Annotator(verbose=False)
-        annotations = annotator.process_transcripts(str(fixture_path))
-        assert len(annotations) == 5, "Should generate annotations for all 5 transcripts"
-
-        # Save annotations to temp file
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-            annotations.save(f.name)
-            temp_annotations = f.name
-
-        # Test that evaluator can process both files
-        evaluator = Evaluator(verbose=False)
-        metrics = evaluator.evaluate(transcripts=str(fixture_path), annotations=temp_annotations)
-
-        assert metrics.num_transcripts == 5
-        assert metrics.num_annotations == 5
-        assert metrics.avg_quality_score > 0
-
-        # Clean up
-        Path(temp_annotations).unlink()

@@ -34,6 +34,7 @@ VALID_ANNOTATION_TYPES = {"scaffolding", "rapport"}
 # The benchmark forces context_window=0 (context_before=0, context_after=0).
 # ---------------------------------------------------------------------------
 
+
 def _format_excerpt(
     conversation: dict,
     turn_start: int,
@@ -115,9 +116,7 @@ _SUGGESTION_UNKNOWN = "It's unclear to a team of teachers whether this moment is
 
 def _suggestion_text(situation_label_agg: str | None) -> str:
     """Map situation_label_agg to the suggestion sentence injected into the prompt."""
-    return _SITUATION_LABEL_AGG_TO_SUGGESTION.get(
-        situation_label_agg or "", _SUGGESTION_UNKNOWN
-    )
+    return _SITUATION_LABEL_AGG_TO_SUGGESTION.get(situation_label_agg or "", _SUGGESTION_UNKNOWN)
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +124,7 @@ def _suggestion_text(situation_label_agg: str | None) -> str:
 # The benchmark always uses context_window=0 (no surrounding context turns) and
 # always injects annotator_style as "" (style is controlled by prompt selection).
 # ---------------------------------------------------------------------------
+
 
 def _load_annotate_prompt(ann_type: str) -> str:
     """Load the scorer annotate prompt for the given annotation type."""
@@ -199,6 +199,7 @@ def _build_annotate_entries(
 # Scoring pass 1: parse and merge
 # ---------------------------------------------------------------------------
 
+
 def _parse_and_merge(
     raw_entries: dict,
     detections_by_conv: dict,
@@ -263,27 +264,31 @@ def _parse_and_merge(
 
             if key in analyses:
                 a = analyses[key]
-                annotations.append({
-                    "annotation_type": ann_type,
-                    "turn_start": det.get("turn_start"),
-                    "turn_end": det.get("turn_end"),
-                    "situation": a.get("situation", ""),
-                    "action": a.get("action", ""),
-                    "result": a.get("result", ""),
-                })
+                annotations.append(
+                    {
+                        "annotation_type": ann_type,
+                        "turn_start": det.get("turn_start"),
+                        "turn_end": det.get("turn_end"),
+                        "situation": a.get("situation", ""),
+                        "action": a.get("action", ""),
+                        "result": a.get("result", ""),
+                    }
+                )
 
                 p2_usage = a.get("_usage", {})
                 for field in ("input_tokens", "output_tokens", "total_tokens"):
                     total_usage[field] = total_usage.get(field, 0) + p2_usage.get(field, 0)
             else:
-                annotations.append({
-                    "annotation_type": ann_type,
-                    "turn_start": det.get("turn_start", 0),
-                    "turn_end": det.get("turn_end", 0),
-                    "situation": "",
-                    "action": "[Analysis unavailable -- batch failed for this moment]",
-                    "result": "",
-                })
+                annotations.append(
+                    {
+                        "annotation_type": ann_type,
+                        "turn_start": det.get("turn_start", 0),
+                        "turn_end": det.get("turn_end", 0),
+                        "situation": "",
+                        "action": "[Analysis unavailable -- batch failed for this moment]",
+                        "result": "",
+                    }
+                )
 
         results[conv_id] = {
             "conversation_id": conv_id,
@@ -291,7 +296,8 @@ def _parse_and_merge(
             "usage": total_usage,
             "pass1_detections": len(detections),
             "pass2_analyzed": sum(
-                1 for i, d in enumerate(detections)
+                1
+                for i, d in enumerate(detections)
                 if f"{conv_id}__{d.get('annotation_type', 'scaffolding')}__{i}" in analyses
             ),
         }
@@ -303,6 +309,7 @@ def _parse_and_merge(
 # Judgment dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Judgment:
     """The LLM judge's verdict produced by the three-pass scoring pipeline.
@@ -312,17 +319,17 @@ class Judgment:
     """
 
     scenario_id: str
-    annotation_type: str          # "scaffolding" | "rapport"
+    annotation_type: str  # "scaffolding" | "rapport"
     turn_start: int
     turn_end: int
     situation: str
     action: str
     result: str
-    action_decomposed: list       # action decomposition phrases
-    result_decomposed: list       # result decomposition phrases
-    overscaffold_decomposed: list # over-scaffolding decomposition phrases
-    action_label: str             # "scaffolding" | "rigor" | "both" | "neither" | "unclear"
-    result_label: str             # "pos" | "neg" | "unclear" | "no_evidence"
+    action_decomposed: list  # action decomposition phrases
+    result_decomposed: list  # result decomposition phrases
+    overscaffold_decomposed: list  # over-scaffolding decomposition phrases
+    action_label: str  # "scaffolding" | "rigor" | "both" | "neither" | "unclear"
+    result_label: str  # "pos" | "neg" | "unclear" | "no_evidence"
     usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
 
     def to_dict(self) -> dict[str, Any]:
@@ -333,6 +340,7 @@ class Judgment:
 # ---------------------------------------------------------------------------
 # Synthetic conversation builder
 # ---------------------------------------------------------------------------
+
 
 def _build_synthetic_conversation(
     scenario: Any,
@@ -354,23 +362,27 @@ def _build_synthetic_conversation(
     # Prefix turns from scenario.context: [{turn_number, role, text}]
     # Role stored lowercase in the scenario schema; the scorer expects uppercase.
     for ctx_turn in scenario.context:
-        turns.append({
-            "turn_number": ctx_turn["turn_number"],
-            "role": ctx_turn["role"].upper(),
-            "text": ctx_turn["text"],
-            "type": "DIALOGUE",
-            "timestamp": "",
-        })
+        turns.append(
+            {
+                "turn_number": ctx_turn["turn_number"],
+                "role": ctx_turn["role"].upper(),
+                "text": ctx_turn["text"],
+                "type": "DIALOGUE",
+                "timestamp": "",
+            }
+        )
 
     # Generated turns from transcript.generated_turns: already {turn_number, role, text}
     for gen_turn in transcript.generated_turns:
-        turns.append({
-            "turn_number": gen_turn["turn_number"],
-            "role": gen_turn["role"],
-            "text": gen_turn["text"],
-            "type": "DIALOGUE",
-            "timestamp": "",
-        })
+        turns.append(
+            {
+                "turn_number": gen_turn["turn_number"],
+                "role": gen_turn["role"],
+                "text": gen_turn["text"],
+                "type": "DIALOGUE",
+                "timestamp": "",
+            }
+        )
 
     # ---- Build conversation dict (conversation_id = scenario.id) ----
     # scenario.id is the scenario_id and scenario.provenance["conv_id"] is the
@@ -395,9 +407,7 @@ def _build_synthetic_conversation(
 
     cut_turn = scenario.provenance.get("cut_turn", "?")
     hint = scenario.rubric.get("hint", "")
-    description = (
-        f"AI tutor continuation from cut at turn {cut_turn}: {hint}"
-    )
+    description = f"AI tutor continuation from cut at turn {cut_turn}: {hint}"
 
     # situation_label_agg from scenario.dimension (= rubric["gold"])
     situation_label_agg = scenario.dimension
@@ -533,10 +543,11 @@ def _build_decompose_entries(
             elif pass_type == "result":
                 if result_text.strip().lower() in JUNK_TEXTS:
                     continue
-                prompt = (template
-                          .replace("{situation}", situation)
-                          .replace("{action}", action)
-                          .replace("{result}", result_text))
+                prompt = (
+                    template.replace("{situation}", situation)
+                    .replace("{action}", action)
+                    .replace("{result}", result_text)
+                )
                 key = f"result__{conv_id}__{idx}"
 
             elif pass_type == "overscaffold":
@@ -544,13 +555,13 @@ def _build_decompose_entries(
                 if ann_type != "scaffolding":
                     continue
                 # Skip when both action and result are junk (no tutor behavior to analyze)
-                if (action.strip().lower() in JUNK_TEXTS
-                        and result_text.strip().lower() in JUNK_TEXTS):
+                if action.strip().lower() in JUNK_TEXTS and result_text.strip().lower() in JUNK_TEXTS:
                     continue
-                prompt = (template
-                          .replace("{situation}", situation)
-                          .replace("{action}", action)
-                          .replace("{result}", result_text))
+                prompt = (
+                    template.replace("{situation}", situation)
+                    .replace("{action}", action)
+                    .replace("{result}", result_text)
+                )
                 key = f"overscaffold__{conv_id}__{idx}"
 
             entries.append(build_batch_entry(key, prompt, json_mode=True))
@@ -610,6 +621,7 @@ def _parse_action_label(text: str) -> tuple:
     Returns (label, had_error). Falls back to "unclear" if either dimension
     is missing or isn't "yes"/"no".
     """
+
     def _coerce(val) -> str | None:
         v = str(val).strip().lower()
         return v if v in ("yes", "no") else None
@@ -929,8 +941,8 @@ def score(scenario: Any, transcript: Any) -> "Judgment":
     # Pass 3: Structure (action + result classification in one batch)
     # Mixed json_mode: action entries use json_mode=True, result entries use json_mode=False.
     # -------------------------------------------------------------------------
-    action_struct_entries, result_struct_entries, skip_action, skip_result = (
-        _build_structure_entries(results, target="scaffolding")
+    action_struct_entries, result_struct_entries, skip_action, skip_result = _build_structure_entries(
+        results, target="scaffolding"
     )
     structure_entries = action_struct_entries + result_struct_entries
 
@@ -950,12 +962,12 @@ def score(scenario: Any, transcript: Any) -> "Judgment":
         accumulated_usage = _sum_usage(accumulated_usage, entry_result.get("usage", {}))
 
     # Apply default labels to skipped (no-facet) annotations.
-    for (conv_id, idx) in skip_action:
+    for conv_id, idx in skip_action:
         anns = results.get(conv_id, {}).get("annotations", [])
         if idx < len(anns):
             anns[idx]["action_label"] = DEFAULT_ACTION_LABEL
 
-    for (conv_id, idx) in skip_result:
+    for conv_id, idx in skip_result:
         anns = results.get(conv_id, {}).get("annotations", [])
         if idx < len(anns):
             anns[idx]["result_label"] = DEFAULT_RESULT_LABEL
@@ -969,12 +981,12 @@ def score(scenario: Any, transcript: Any) -> "Judgment":
         text = raw.get("text", "")
         label, _ = _parse_action_label(text)
         # Strip leading "action__" prefix, then rsplit once to get (conv_id, idx_str)
-        without_prefix = key[len("action__"):]
+        without_prefix = key[len("action__") :]
         last_sep = without_prefix.rfind("__")
         if last_sep == -1:
             continue
         conv_id = without_prefix[:last_sep]
-        idx_str = without_prefix[last_sep + 2:]
+        idx_str = without_prefix[last_sep + 2 :]
         try:
             idx = int(idx_str)
         except ValueError:
@@ -990,12 +1002,12 @@ def score(scenario: Any, transcript: Any) -> "Judgment":
         raw = structure_raw.get(key, {})
         text = raw.get("text", "")
         label, _ = _parse_result_label(text)
-        without_prefix = key[len("result__"):]
+        without_prefix = key[len("result__") :]
         last_sep = without_prefix.rfind("__")
         if last_sep == -1:
             continue
         conv_id = without_prefix[:last_sep]
-        idx_str = without_prefix[last_sep + 2:]
+        idx_str = without_prefix[last_sep + 2 :]
         try:
             idx = int(idx_str)
         except ValueError:

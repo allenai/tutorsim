@@ -1,4 +1,5 @@
 """Tests for tutor_bench.benchmark.tutor module."""
+
 import os
 from unittest.mock import patch
 
@@ -36,11 +37,7 @@ def test_oracle_mode_substitutes_reference_transcript():
     """Test that 'oracle' mode substitutes {reference_transcript}."""
     context = "Grade 4, geometry"
     reference = "Tutor: Great job! Now let's try the next one."
-    prompt = build_tutor_system_prompt(
-        "oracle",
-        student_context=context,
-        reference_transcript=reference
-    )
+    prompt = build_tutor_system_prompt("oracle", student_context=context, reference_transcript=reference)
 
     assert context in prompt
     assert reference in prompt
@@ -53,10 +50,7 @@ def test_oracle_mode_substitutes_reference_transcript():
 def test_oracle_mode_requires_reference_transcript():
     """Test that oracle mode raises ValueError if reference_transcript is not provided."""
     with pytest.raises(ValueError, match="reference_transcript"):
-        build_tutor_system_prompt(
-            "oracle",
-            student_context="Grade 5"
-        )
+        build_tutor_system_prompt("oracle", student_context="Grade 5")
 
 
 def test_default_mode_with_none():

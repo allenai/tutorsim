@@ -1,4 +1,5 @@
 """Tests for tutor_bench.benchmark.student module - trait generation (TraitGenerator live path)."""
+
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -6,6 +7,7 @@ from unittest.mock import MagicMock
 # ---------------------------------------------------------------------------
 # Helpers / stubs
 # ---------------------------------------------------------------------------
+
 
 def _make_client(response_text: str) -> MagicMock:
     """Return a mock ModelClient whose .generate() returns a ModelResponse stub."""
@@ -15,8 +17,9 @@ def _make_client(response_text: str) -> MagicMock:
     return client
 
 
-def _make_scenario(conv_id: str = "conv-test", cut_turn: int = 5,
-                   prefix: str = "Turn 1. TUTOR: Hello\nTurn 2. STUDENT: Hi") -> object:
+def _make_scenario(
+    conv_id: str = "conv-test", cut_turn: int = 5, prefix: str = "Turn 1. TUTOR: Hello\nTurn 2. STUDENT: Hi"
+) -> object:
     """Minimal scenario stub with the fields used by get_or_generate_trait."""
     return SimpleNamespace(
         conv_id=conv_id,
@@ -28,6 +31,7 @@ def _make_scenario(conv_id: str = "conv-test", cut_turn: int = 5,
 # ---------------------------------------------------------------------------
 # Tests: generate_trait ("joined-3" mode)
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateTrait:
     """Tests for the module-level generate_trait() function."""
@@ -48,10 +52,7 @@ class TestGenerateTrait:
         from tutor_bench.benchmark.student import generate_trait
 
         # Each of the 5 calls returns a distinct description.
-        responses = [
-            SimpleNamespace(text=f"Some thinking\nDESCRIPTION: Dimension {i} desc.")
-            for i in range(5)
-        ]
+        responses = [SimpleNamespace(text=f"Some thinking\nDESCRIPTION: Dimension {i} desc.") for i in range(5)]
         client = MagicMock()
         client.generate = MagicMock(side_effect=responses)
 
@@ -145,6 +146,7 @@ class TestGenerateTrait:
 # Tests: get_or_generate_trait (disk cache)
 # ---------------------------------------------------------------------------
 
+
 class TestGetOrGenerateTrait:
     """Tests for get_or_generate_trait() -- cache miss + hit."""
 
@@ -156,7 +158,10 @@ class TestGetOrGenerateTrait:
         client = _make_client("DESCRIPTION: A careful student.")
 
         result = get_or_generate_trait(
-            scenario, "joined-3", client, "claude-opus-4-8",
+            scenario,
+            "joined-3",
+            client,
+            "claude-opus-4-8",
             cache_dir=str(tmp_path),
         )
 
@@ -185,21 +190,25 @@ class TestGetOrGenerateTrait:
 
         # First call -- populates cache.
         first_result = get_or_generate_trait(
-            scenario, "joined-3", client, "claude-opus-4-8",
+            scenario,
+            "joined-3",
+            client,
+            "claude-opus-4-8",
             cache_dir=str(tmp_path),
         )
         first_call_count = client.generate.call_count
 
         # Second call -- must not invoke model.
         second_result = get_or_generate_trait(
-            scenario, "joined-3", client, "claude-opus-4-8",
+            scenario,
+            "joined-3",
+            client,
+            "claude-opus-4-8",
             cache_dir=str(tmp_path),
         )
 
         assert second_result == first_result, "Cache hit returned different value"
-        assert client.generate.call_count == first_call_count, (
-            "Model was called on cache hit (should not be)"
-        )
+        assert client.generate.call_count == first_call_count, "Model was called on cache hit (should not be)"
 
     def test_cache_key_includes_mode(self, tmp_path):
         """Different modes must produce separate cache files."""
@@ -209,13 +218,19 @@ class TestGetOrGenerateTrait:
 
         client_a = _make_client("DESCRIPTION: Affect desc.")
         get_or_generate_trait(
-            scenario, "affect-3", client_a, "claude-opus-4-8",
+            scenario,
+            "affect-3",
+            client_a,
+            "claude-opus-4-8",
             cache_dir=str(tmp_path),
         )
 
         client_b = _make_client("DESCRIPTION: Misconceptions desc.")
         get_or_generate_trait(
-            scenario, "misconceptions-3", client_b, "claude-opus-4-8",
+            scenario,
+            "misconceptions-3",
+            client_b,
+            "claude-opus-4-8",
             cache_dir=str(tmp_path),
         )
 
@@ -231,14 +246,20 @@ class TestGetOrGenerateTrait:
 
         # Call with 'trait' alias.
         result_trait = get_or_generate_trait(
-            scenario, "trait", client, "claude-opus-4-8",
+            scenario,
+            "trait",
+            client,
+            "claude-opus-4-8",
             cache_dir=str(tmp_path),
         )
         first_call_count = client.generate.call_count
 
         # Call again with explicit 'joined-3' -- should hit the same cache.
         result_joined3 = get_or_generate_trait(
-            scenario, "joined-3", client, "claude-opus-4-8",
+            scenario,
+            "joined-3",
+            client,
+            "claude-opus-4-8",
             cache_dir=str(tmp_path),
         )
         assert result_trait == result_joined3
@@ -254,11 +275,17 @@ class TestGetOrGenerateTrait:
         client = _make_client("DESCRIPTION: Consistent persona.")
 
         cold = get_or_generate_trait(
-            scenario, "joined-3", client, "m1",
+            scenario,
+            "joined-3",
+            client,
+            "m1",
             cache_dir=str(tmp_path),
         )
         warm = get_or_generate_trait(
-            scenario, "joined-3", client, "m1",
+            scenario,
+            "joined-3",
+            client,
+            "m1",
             cache_dir=str(tmp_path),
         )
         assert cold == warm
@@ -267,6 +294,7 @@ class TestGetOrGenerateTrait:
 # ---------------------------------------------------------------------------
 # Tests: build_student_system_prompt (oracle mode)
 # ---------------------------------------------------------------------------
+
 
 class TestBuildStudentSystemPrompt:
     """Tests for build_student_system_prompt() -- oracle prompt render + substitutions."""
@@ -360,6 +388,7 @@ class TestBuildStudentSystemPrompt:
 # Tests: resolve_student
 # ---------------------------------------------------------------------------
 
+
 class TestResolveStudent:
     """Tests for resolve_student() -- hosted model resolution + registry."""
 
@@ -369,8 +398,10 @@ class TestResolveStudent:
 
         # Patch anthropic.Anthropic so no real HTTP call is made.
         import unittest.mock as mock
+
         with mock.patch("anthropic.Anthropic"):
             from tutor_bench.benchmark.student import resolve_student
+
             result = resolve_student()
 
         assert result["kind"] == "hosted"
@@ -391,6 +422,7 @@ class TestResolveStudent:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         with mock.patch("anthropic.Anthropic"):
             from tutor_bench.benchmark.student import resolve_student
+
             result = resolve_student("dummy")
 
         assert result["kind"] == "registered"

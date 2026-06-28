@@ -18,6 +18,7 @@ from pathlib import Path
 # Run-id naming
 # ---------------------------------------------------------------------------
 
+
 def make_run_id(tutor: str, mode: str, dataset: str, date: str) -> str:
     """Build a self-documenting run id: ``{tutor}_{mode}_{dataset}_{date}``.
 
@@ -38,6 +39,7 @@ def make_run_id(tutor: str, mode: str, dataset: str, date: str) -> str:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _run_dir(run_id: str, results_root: str = "results") -> Path:
     return Path(results_root) / run_id
@@ -63,6 +65,7 @@ def _read_json(path: Path) -> dict | None:
 # Config
 # ---------------------------------------------------------------------------
 
+
 def write_config(run_id: str, config: dict, results_root: str = "results") -> None:
     """Write ``config.json`` for *run_id*."""
     _write_json(_run_dir(run_id, results_root) / "config.json", config)
@@ -77,15 +80,14 @@ def read_config(run_id: str, results_root: str = "results") -> dict | None:
 # Transcripts
 # ---------------------------------------------------------------------------
 
-def write_transcript(run_id: str, scenario_id: str, transcript_dict: dict,
-                     results_root: str = "results") -> None:
+
+def write_transcript(run_id: str, scenario_id: str, transcript_dict: dict, results_root: str = "results") -> None:
     """Write ``transcripts/<scenario_id>.json`` for *run_id*."""
     path = _run_dir(run_id, results_root) / "transcripts" / f"{scenario_id}.json"
     _write_json(path, transcript_dict)
 
 
-def read_transcript(run_id: str, scenario_id: str,
-                    results_root: str = "results") -> dict | None:
+def read_transcript(run_id: str, scenario_id: str, results_root: str = "results") -> dict | None:
     """Read transcript for *scenario_id*; returns ``None`` if missing."""
     path = _run_dir(run_id, results_root) / "transcripts" / f"{scenario_id}.json"
     return _read_json(path)
@@ -95,15 +97,14 @@ def read_transcript(run_id: str, scenario_id: str,
 # Scores
 # ---------------------------------------------------------------------------
 
-def write_score(run_id: str, scenario_id: str, annotation_dict: dict,
-                results_root: str = "results") -> None:
+
+def write_score(run_id: str, scenario_id: str, annotation_dict: dict, results_root: str = "results") -> None:
     """Write ``scores/<scenario_id>.json`` for *run_id*."""
     path = _run_dir(run_id, results_root) / "scores" / f"{scenario_id}.json"
     _write_json(path, annotation_dict)
 
 
-def read_score(run_id: str, scenario_id: str,
-               results_root: str = "results") -> dict | None:
+def read_score(run_id: str, scenario_id: str, results_root: str = "results") -> dict | None:
     """Read score for *scenario_id*; returns ``None`` if missing."""
     path = _run_dir(run_id, results_root) / "scores" / f"{scenario_id}.json"
     return _read_json(path)
@@ -112,6 +113,7 @@ def read_score(run_id: str, scenario_id: str,
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
+
 
 def write_summary(run_id: str, summary: dict, results_root: str = "results") -> None:
     """Write ``summary.json`` for *run_id*."""
@@ -127,22 +129,22 @@ def read_summary(run_id: str, results_root: str = "results") -> dict | None:
 # Resume guard
 # ---------------------------------------------------------------------------
 
+
 def is_done(run_id: str, scenario_id: str, results_root: str = "results") -> bool:
     """Return True iff BOTH transcript AND score exist for *scenario_id*.
 
     A scenario is considered done only when the conversation has been saved
     AND scoring is present -- meaning nothing needs to be re-run.
     """
-    transcript_path = (_run_dir(run_id, results_root)
-                       / "transcripts" / f"{scenario_id}.json")
-    score_path = (_run_dir(run_id, results_root)
-                  / "scores" / f"{scenario_id}.json")
+    transcript_path = _run_dir(run_id, results_root) / "transcripts" / f"{scenario_id}.json"
+    score_path = _run_dir(run_id, results_root) / "scores" / f"{scenario_id}.json"
     return transcript_path.exists() and score_path.exists()
 
 
 # ---------------------------------------------------------------------------
 # Listing runs
 # ---------------------------------------------------------------------------
+
 
 def list_runs(results_root: str = "results") -> list[str]:
     """Return run_ids present on disk under *results_root*.

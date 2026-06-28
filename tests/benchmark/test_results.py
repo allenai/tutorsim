@@ -18,6 +18,7 @@ from tutor_bench.benchmark.results import (
 # make_run_id
 # ---------------------------------------------------------------------------
 
+
 def test_make_run_id_basic():
     result = make_run_id("claude-opus-4-8", "plain", "balanced_520", "20260626")
     assert result == "claude-opus-4-8_plain_balanced_520_20260626"
@@ -38,6 +39,7 @@ def test_make_run_id_multiple_slashes():
 # config round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_write_read_config(tmp_path):
     run_id = "testrun_plain_ds_20260626"
     cfg = {"tutor": "claude", "mode": "plain", "dataset": "ds"}
@@ -53,6 +55,7 @@ def test_read_config_missing_returns_none(tmp_path):
 # ---------------------------------------------------------------------------
 # transcript round-trip
 # ---------------------------------------------------------------------------
+
 
 def test_write_read_transcript(tmp_path):
     run_id = "testrun_plain_ds_20260626"
@@ -71,6 +74,7 @@ def test_read_transcript_missing_returns_none(tmp_path):
 # score round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_write_read_score(tmp_path):
     run_id = "testrun_plain_ds_20260626"
     scenario_id = "conv-abc_m1"
@@ -88,6 +92,7 @@ def test_read_score_missing_returns_none(tmp_path):
 # summary round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_write_read_summary(tmp_path):
     run_id = "testrun_plain_ds_20260626"
     summary = {"n_scenarios": 10, "scaffolding_rate": 0.8}
@@ -103,6 +108,7 @@ def test_read_summary_missing_returns_none(tmp_path):
 # ---------------------------------------------------------------------------
 # is_done (resume guard)
 # ---------------------------------------------------------------------------
+
 
 def test_is_done_false_when_neither_exists(tmp_path):
     run_id = "testrun_plain_ds_20260626"
@@ -127,8 +133,7 @@ def test_is_done_false_when_only_score(tmp_path):
 def test_is_done_true_when_both_exist(tmp_path):
     run_id = "testrun_plain_ds_20260626"
     scenario_id = "conv-abc_m1"
-    write_transcript(run_id, scenario_id, {"scenario_id": scenario_id, "completed": True},
-                     results_root=str(tmp_path))
+    write_transcript(run_id, scenario_id, {"scenario_id": scenario_id, "completed": True}, results_root=str(tmp_path))
     write_score(run_id, scenario_id, {"score": 1.0}, results_root=str(tmp_path))
     assert is_done(run_id, scenario_id, results_root=str(tmp_path)) is True
 
@@ -136,6 +141,7 @@ def test_is_done_true_when_both_exist(tmp_path):
 # ---------------------------------------------------------------------------
 # list_runs
 # ---------------------------------------------------------------------------
+
 
 def test_list_runs_empty(tmp_path):
     assert list_runs(results_root=str(tmp_path)) == []

@@ -23,6 +23,7 @@ No module-level SDK imports.
 ASCII console output only (no Unicode / em-dash / box-drawing).
 All file I/O is UTF-8.
 """
+
 import argparse
 import datetime
 import hashlib
@@ -58,6 +59,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Cell expansion + lane scheduling
 # ---------------------------------------------------------------------------
+
 
 def expand_cells(tutors: list[str], modes: list[str]) -> list[dict]:
     """Expand (tutors x modes) into one cell dict per combination.
@@ -144,10 +146,7 @@ def run_sweep(
 
     # Lanes in parallel
     with ThreadPoolExecutor(max_workers=n_lanes) as pool:
-        futs = {
-            pool.submit(_run_lane, lane, lane_cells): lane
-            for lane, lane_cells in by_lane.items()
-        }
+        futs = {pool.submit(_run_lane, lane, lane_cells): lane for lane, lane_cells in by_lane.items()}
         for fut in as_completed(futs):
             all_run_ids.extend(fut.result())
 
@@ -158,11 +157,13 @@ def run_sweep(
 # Lazy module imports (no module-level SDK imports)
 # ---------------------------------------------------------------------------
 
+
 def _import_modules():
     """Import heavy modules lazily to avoid SDK import at module level."""
     from tutor_bench.benchmark import conversation, report, results, scoring
     from tutor_bench.benchmark.config import build_run_config
     from tutor_bench.benchmark.scenarios import load_scenarios
+
     return conversation, scoring, results, report, build_run_config, load_scenarios
 
 
@@ -212,6 +213,7 @@ def _resource_hashes(root: str) -> dict[str, str]:
 # Trials aggregation helpers
 # ---------------------------------------------------------------------------
 
+
 def _mean_spread(values: list) -> tuple[float | None, float | None]:
     """Return (mean, std) for a list of numeric values; None for empty/all-None."""
     nums = [v for v in values if v is not None]
@@ -241,6 +243,7 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
       scaffold_calibrated.{n_clean_yes, n_overscaffold, n_total, score},
       rigor_calibrated.{n_clean_yes, n_total, score}.
     """
+
     def _field(dicts, *keys):
         """Extract a nested field from each dict in dicts."""
         vals = []
@@ -273,11 +276,13 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
 
     # scaffold_calibrated has an extra field
     m_sc, s_sc = _sub_mean_spread(
-        trial_metrics, "scaffold_calibrated",
+        trial_metrics,
+        "scaffold_calibrated",
         ["n_clean_yes", "n_overscaffold", "n_total", "score"],
     )
     m_rc, s_rc = _sub_mean_spread(
-        trial_metrics, "rigor_calibrated",
+        trial_metrics,
+        "rigor_calibrated",
         ["n_clean_yes", "n_total", "score"],
     )
 
@@ -313,6 +318,7 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
 # ---------------------------------------------------------------------------
 # Public API: run_cell
 # ---------------------------------------------------------------------------
+
 
 def run_cell(
     tutor: str,
@@ -359,8 +365,7 @@ def run_cell(
     n_total = len(all_scenarios)
     if n_total == 0:
         raise RuntimeError(
-            f"Dataset '{cfg.dataset}' yielded zero scenarios after sampling; "
-            "refusing to write an empty benchmark run."
+            f"Dataset '{cfg.dataset}' yielded zero scenarios after sampling; refusing to write an empty benchmark run."
         )
     logger.info("Loaded %d scenarios from dataset '%s'", n_total, cfg.dataset)
     dataset_manifest = load_manifest(cfg.dataset)
@@ -384,17 +389,19 @@ def run_cell(
         "reproducibility": {
             "tutor_bench_version": _package_version(),
             "git_commit": _git_commit(),
-            "config_hash": _json_sha256({
-                "student": cfg.student,
-                "scorer": cfg.scorer,
-                "resolved_tutors": cfg.resolved_tutors,
-                "defaults": {
-                    "sample": cfg.sample,
-                    "max_turns": cfg.max_turns,
-                    "trials": cfg.trials,
-                    "seed": cfg.seed,
-                },
-            }),
+            "config_hash": _json_sha256(
+                {
+                    "student": cfg.student,
+                    "scorer": cfg.scorer,
+                    "resolved_tutors": cfg.resolved_tutors,
+                    "defaults": {
+                        "sample": cfg.sample,
+                        "max_turns": cfg.max_turns,
+                        "trials": cfg.trials,
+                        "seed": cfg.seed,
+                    },
+                }
+            ),
             "prompt_hashes": _resource_hashes("prompts"),
             "dataset_manifest": dataset_manifest,
         },
@@ -477,6 +484,7 @@ def run_cell(
                 score_dict = results.read_score(run_id, resume_sid, results_root=results_root)
                 if score_dict is not None:
                     from tutor_bench.benchmark.scoring import Judgment
+
                     try:
                         ann = Judgment(**score_dict)
                         completed_scenarios.append(scenario)
@@ -489,7 +497,11 @@ def run_cell(
                         failed_scenarios.append({"id": sid, "error": str(e), "phase": "resume"})
                         logger.warning(
                             "[trial %d][%d/%d] Could not reload score for %s: %s",
-                            trial_idx, i, n_total, sid, e,
+                            trial_idx,
+                            i,
+                            n_total,
+                            sid,
+                            e,
                         )
                 continue
 
@@ -506,18 +518,14 @@ def run_cell(
                 )
 
                 # Write transcript before scoring (so a score failure doesn't lose it)
-                transcript_dict = (
-                    transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
-                )
+                transcript_dict = transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
                 results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
 
                 # Score
                 judgment = scoring.score(scenario, transcript)
 
                 # Write score
-                judgment_dict = (
-                    judgment.to_dict() if hasattr(judgment, "to_dict") else dict(judgment)
-                )
+                judgment_dict = judgment.to_dict() if hasattr(judgment, "to_dict") else dict(judgment)
                 results.write_score(run_id, resume_sid, judgment_dict, results_root=results_root)
 
                 completed_scenarios.append(scenario)
@@ -623,6 +631,7 @@ def run_cell(
 # ---------------------------------------------------------------------------
 # CLI: argparse
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser."""
@@ -838,6 +847,7 @@ def _cmd_view(args) -> None:
 def _cmd_build_scenarios(args) -> None:
     """Implement the 'dataset build' subcommand: dispatch to scenarios._cli_build."""
     from tutor_bench.benchmark.scenarios import _cli_build
+
     _cli_build(args)
 
 

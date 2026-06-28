@@ -6,6 +6,7 @@ Public API:
     build_student_system_prompt(...) -> str
     resolve_student(student_id) -> dict
 """
+
 import datetime
 import json
 import logging
@@ -78,34 +79,25 @@ def get_dimension_description(persona_dimension: str) -> str:
     not here.
     """
     if persona_dimension not in ALL_DIMENSION_NAMES:
-        raise ValueError(
-            f"Invalid persona dimension: {persona_dimension}. "
-            f"Must be one of: {ALL_DIMENSION_NAMES}"
-        )
+        raise ValueError(f"Invalid persona dimension: {persona_dimension}. Must be one of: {ALL_DIMENSION_NAMES}")
 
     if persona_dimension in [
         "joined",
         "joined_misconceptions_distractedness",
         "joined_misconceptions_affect",
     ]:
-        raise ValueError(
-            f"'{persona_dimension}' should not call get_dimension_description()"
-        )
+        raise ValueError(f"'{persona_dimension}' should not call get_dimension_description()")
 
     if persona_dimension == "all":
         texts = sorted(_load_dimension_text(n) for n in ALL_DIMENSIONS.keys())
         return "\n\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
 
     if persona_dimension == "all_engagement":
-        texts = [
-            get_dimension_description(n) for n in sorted(ALL_ENGAGEMENT_DIMENSIONS.keys())
-        ]
+        texts = [get_dimension_description(n) for n in sorted(ALL_ENGAGEMENT_DIMENSIONS.keys())]
         return "\n\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
 
     if persona_dimension == "all_cognitive":
-        texts = [
-            get_dimension_description(n) for n in sorted(ALL_COGNITIVE_DIMENSIONS.keys())
-        ]
+        texts = [get_dimension_description(n) for n in sorted(ALL_COGNITIVE_DIMENSIONS.keys())]
         return "\n\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
 
     return _load_dimension_text(persona_dimension)
@@ -114,6 +106,7 @@ def get_dimension_description(persona_dimension: str) -> str:
 # ---------------------------------------------------------------------------
 # Adapter (wraps ModelClient)
 # ---------------------------------------------------------------------------
+
 
 class _ModelWrapperAdapter:
     """Thin shim around ModelClient mimicking TraitGenerator's model interface.
@@ -138,9 +131,7 @@ class _ModelWrapperAdapter:
         system_prompt forwarded as cacheable_prefix (prompt cache friendly).
         """
         user_text = "\n\n".join(
-            m.get("content", "")
-            for m in (non_system_messages or [])
-            if m.get("role") in (None, "user")
+            m.get("content", "") for m in (non_system_messages or []) if m.get("role") in (None, "user")
         )
         resp = self._client.generate(
             user_text,
@@ -155,6 +146,7 @@ class _ModelWrapperAdapter:
 # TraitGenerator
 # ---------------------------------------------------------------------------
 
+
 class TraitGenerator:
     """Generate student traits from example conversations.
 
@@ -168,9 +160,7 @@ class TraitGenerator:
     # System / user prompt builders
     # ------------------------------------------------------------------
 
-    def get_trait_system_prompt(
-        self, trait_type: str, num_sentences: int | None = None
-    ) -> str:
+    def get_trait_system_prompt(self, trait_type: str, num_sentences: int | None = None) -> str:
         """Build the system prompt for a single dimension.
 
         Loads prompts/student/trait_generator/system.txt and substitutes
@@ -187,26 +177,18 @@ class TraitGenerator:
         else:
             suffix = " The description should be 1 sentence long."
 
-        return (
-            template
-            .replace("{dimension_description}", dimension_description)
-            .replace("{sentence_count_suffix}", suffix)
+        return template.replace("{dimension_description}", dimension_description).replace(
+            "{sentence_count_suffix}", suffix
         )
 
-    def _get_user_prompt(
-        self, conversation_text: str, num_sentences: int | None = None
-    ) -> str:
+    def _get_user_prompt(self, conversation_text: str, num_sentences: int | None = None) -> str:
         """Build the user prompt for trait generation.
 
         Loads prompts/student/trait_generator/user.txt and substitutes
         {conversation_text} and {num_sentences}.
         """
         template = resource_text(f"{_TRAIT_GEN_DIR}/user.txt").rstrip("\n")
-        return (
-            template
-            .replace("{conversation_text}", conversation_text)
-            .replace("{num_sentences}", str(num_sentences))
-        )
+        return template.replace("{conversation_text}", conversation_text).replace("{num_sentences}", str(num_sentences))
 
     # ------------------------------------------------------------------
     # Parsing
@@ -235,14 +217,11 @@ class TraitGenerator:
 
         if base_trait_type not in ALL_DIMENSION_NAMES:
             raise ValueError(
-                f"Invalid base trait type: {base_trait_type}. "
-                f"Must start with one of: {ALL_DIMENSION_NAMES}"
+                f"Invalid base trait type: {base_trait_type}. Must start with one of: {ALL_DIMENSION_NAMES}"
             )
 
         if num_sentences is not None and num_sentences <= 0:
-            raise ValueError(
-                f"Invalid number of sentences: {num_sentences}. Must be greater than 0."
-            )
+            raise ValueError(f"Invalid number of sentences: {num_sentences}. Must be greater than 0.")
 
         return base_trait_type, num_sentences
 
@@ -293,10 +272,7 @@ class TraitGenerator:
         trait_type, num_sentences = self.parse_trait_type(trait_mode)
 
         if trait_type not in ALL_DIMENSION_NAMES:
-            raise ValueError(
-                f"Invalid trait mode: {trait_mode}. "
-                f"Must start with one of: {ALL_DIMENSION_NAMES}"
-            )
+            raise ValueError(f"Invalid trait mode: {trait_mode}. Must start with one of: {ALL_DIMENSION_NAMES}")
 
         # Joined modes: generate per-dimension, then consolidate.
         if trait_type in [
@@ -338,6 +314,7 @@ class TraitGenerator:
 # ---------------------------------------------------------------------------
 # Module-level convenience wrapper
 # ---------------------------------------------------------------------------
+
 
 def generate_trait(
     transcript_prefix: str,
@@ -537,6 +514,7 @@ def build_student_system_prompt(
 # ---------------------------------------------------------------------------
 # resolve_student
 # ---------------------------------------------------------------------------
+
 
 def resolve_student(student_id: str | None = None) -> dict:
     """Decide what the student is: registered callable or hosted model.

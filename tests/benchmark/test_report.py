@@ -46,6 +46,7 @@ from tutor_bench.benchmark.report import aggregate, leaderboard, leaderboard_row
 # Minimal stubs -- no SDK imports, no I/O
 # ---------------------------------------------------------------------------
 
+
 def _make_scenario(dimension: str) -> SimpleNamespace:
     """Minimal Scenario stub: only .dimension is read by aggregate."""
     return SimpleNamespace(dimension=dimension)
@@ -69,24 +70,25 @@ def _make_judgment(
 # Fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def six_pairs():
     """6 (scenario, judgment) pairs covering all scoring branches."""
     scenarios = [
         _make_scenario("scaffolding"),  # pair 1: clean scaf hit
         _make_scenario("scaffolding"),  # pair 2: right action but over-scaffold
-        _make_scenario("rigor"),        # pair 3: clean rigor hit, pos outcome
-        _make_scenario("rigor"),        # pair 4: rigor miss
-        _make_scenario("both"),         # pair 5: excluded from did-rate denominators
+        _make_scenario("rigor"),  # pair 3: clean rigor hit, pos outcome
+        _make_scenario("rigor"),  # pair 4: rigor miss
+        _make_scenario("both"),  # pair 5: excluded from did-rate denominators
         _make_scenario("scaffolding"),  # pair 6: scaf miss, pos outcome
     ]
     judgments = [
-        _make_judgment("scaffolding", "no_evidence", []),               # pair 1
-        _make_judgment("both",        "no_evidence", ["gave answer"]),  # pair 2: over-scaffold
-        _make_judgment("rigor",       "pos",         []),               # pair 3
-        _make_judgment("neither",     "no_evidence", []),               # pair 4
-        _make_judgment("both",        "no_evidence", []),               # pair 5
-        _make_judgment("neither",     "pos",         []),               # pair 6
+        _make_judgment("scaffolding", "no_evidence", []),  # pair 1
+        _make_judgment("both", "no_evidence", ["gave answer"]),  # pair 2: over-scaffold
+        _make_judgment("rigor", "pos", []),  # pair 3
+        _make_judgment("neither", "no_evidence", []),  # pair 4
+        _make_judgment("both", "no_evidence", []),  # pair 5
+        _make_judgment("neither", "pos", []),  # pair 6
     ]
     return scenarios, judgments
 
@@ -94,6 +96,7 @@ def six_pairs():
 # ---------------------------------------------------------------------------
 # Golden test
 # ---------------------------------------------------------------------------
+
 
 def test_aggregate_golden(six_pairs):
     """aggregate() returns the EXACT metric dict for the golden fixture."""
@@ -105,38 +108,38 @@ def test_aggregate_golden(six_pairs):
 
     # --- scaffolding_did ---
     sd = result["scaffolding_did"]
-    assert sd["n_yes"]   == 2
+    assert sd["n_yes"] == 2
     assert sd["n_total"] == 3
-    assert sd["rate"]    == pytest.approx(2 / 3)
+    assert sd["rate"] == pytest.approx(2 / 3)
 
     # --- rigor_did ---
     rd = result["rigor_did"]
-    assert rd["n_yes"]   == 1
+    assert rd["n_yes"] == 1
     assert rd["n_total"] == 2
-    assert rd["rate"]    == pytest.approx(1 / 2)
+    assert rd["rate"] == pytest.approx(1 / 2)
 
     # --- overscaffold ---
     ov = result["overscaffold"]
-    assert ov["n_yes"]    == 1
-    assert ov["n_total"]  == 6
-    assert ov["rate"]     == pytest.approx(1 / 6)
-    assert ov["available"] is True   # Judgment dataclass always has the field
+    assert ov["n_yes"] == 1
+    assert ov["n_total"] == 6
+    assert ov["rate"] == pytest.approx(1 / 6)
+    assert ov["available"] is True  # Judgment dataclass always has the field
 
     # --- outcome_pos_rate ---
     assert result["outcome_pos_rate"] == pytest.approx(2 / 6)
 
     # --- scaffold_calibrated ---
     sc = result["scaffold_calibrated"]
-    assert sc["n_clean_yes"]   == 1   # pair 1 only (pair 2 has over-scaffold)
-    assert sc["n_overscaffold"]== 1   # pair 2
-    assert sc["n_total"]       == 3
-    assert sc["score"]         == pytest.approx(1 / 3)
+    assert sc["n_clean_yes"] == 1  # pair 1 only (pair 2 has over-scaffold)
+    assert sc["n_overscaffold"] == 1  # pair 2
+    assert sc["n_total"] == 3
+    assert sc["score"] == pytest.approx(1 / 3)
 
     # --- rigor_calibrated ---
     rc = result["rigor_calibrated"]
     assert rc["n_clean_yes"] == 1
-    assert rc["n_total"]     == 2
-    assert rc["score"]       == pytest.approx(1 / 2)
+    assert rc["n_total"] == 2
+    assert rc["score"] == pytest.approx(1 / 2)
 
 
 def test_aggregate_golden_full_dict(six_pairs):
@@ -182,42 +185,43 @@ def test_aggregate_golden_full_dict(six_pairs):
     # Check integer counts exactly
     assert result["n_scenarios"] == expected["n_scenarios"]
     for key in ("scaffolding_did", "rigor_did"):
-        assert result[key]["n_yes"]   == expected[key]["n_yes"]
+        assert result[key]["n_yes"] == expected[key]["n_yes"]
         assert result[key]["n_total"] == expected[key]["n_total"]
     for key in ("scaffold_calibrated", "rigor_calibrated"):
         assert result[key]["n_clean_yes"] == expected[key]["n_clean_yes"]
-        assert result[key]["n_total"]     == expected[key]["n_total"]
+        assert result[key]["n_total"] == expected[key]["n_total"]
     assert result["scaffold_calibrated"]["n_overscaffold"] == expected["scaffold_calibrated"]["n_overscaffold"]
-    assert result["overscaffold"]["n_yes"]   == expected["overscaffold"]["n_yes"]
+    assert result["overscaffold"]["n_yes"] == expected["overscaffold"]["n_yes"]
     assert result["overscaffold"]["n_total"] == expected["overscaffold"]["n_total"]
     assert result["overscaffold"]["available"] == expected["overscaffold"]["available"]
 
     # Check floating-point values approximately
-    assert result["scaffolding_did"]["rate"]     == pytest.approx(expected["scaffolding_did"]["rate"])
-    assert result["rigor_did"]["rate"]           == pytest.approx(expected["rigor_did"]["rate"])
-    assert result["overscaffold"]["rate"]        == pytest.approx(expected["overscaffold"]["rate"])
-    assert result["outcome_pos_rate"]            == pytest.approx(expected["outcome_pos_rate"])
+    assert result["scaffolding_did"]["rate"] == pytest.approx(expected["scaffolding_did"]["rate"])
+    assert result["rigor_did"]["rate"] == pytest.approx(expected["rigor_did"]["rate"])
+    assert result["overscaffold"]["rate"] == pytest.approx(expected["overscaffold"]["rate"])
+    assert result["outcome_pos_rate"] == pytest.approx(expected["outcome_pos_rate"])
     assert result["scaffold_calibrated"]["score"] == pytest.approx(expected["scaffold_calibrated"]["score"])
-    assert result["rigor_calibrated"]["score"]   == pytest.approx(expected["rigor_calibrated"]["score"])
+    assert result["rigor_calibrated"]["score"] == pytest.approx(expected["rigor_calibrated"]["score"])
 
 
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_aggregate_empty():
     """aggregate([],[]) returns all zeros and None rates."""
     result = aggregate([], [])
     assert result["n_scenarios"] == 0
-    assert result["scaffolding_did"]["n_yes"]    == 0
-    assert result["scaffolding_did"]["n_total"]  == 0
-    assert result["scaffolding_did"]["rate"]     is None
-    assert result["rigor_did"]["rate"]           is None
-    assert result["overscaffold"]["rate"]        is None
-    assert result["overscaffold"]["available"]   is False
-    assert result["outcome_pos_rate"]            == 0.0
+    assert result["scaffolding_did"]["n_yes"] == 0
+    assert result["scaffolding_did"]["n_total"] == 0
+    assert result["scaffolding_did"]["rate"] is None
+    assert result["rigor_did"]["rate"] is None
+    assert result["overscaffold"]["rate"] is None
+    assert result["overscaffold"]["available"] is False
+    assert result["outcome_pos_rate"] == 0.0
     assert result["scaffold_calibrated"]["score"] is None
-    assert result["rigor_calibrated"]["score"]   is None
+    assert result["rigor_calibrated"]["score"] is None
 
 
 def test_aggregate_neither_gold_excluded():
@@ -291,13 +295,18 @@ def _make_run_summary(
         "mode": mode,
         "n_scenarios": n,
         "scaffold_calibrated": {"score": scaffold_cal, "n_clean_yes": 0, "n_total": n, "n_overscaffold": 0},
-        "rigor_calibrated":    {"score": rigor_cal,    "n_clean_yes": 0, "n_total": n},
-        "overscaffold":        {"rate": overscaffold_rate, "n_yes": 0, "n_total": n, "available": overscaffold_rate is not None},
-        "outcome_pos_rate":    outcome_pos_rate,
-        "scaffolding_did":     {"rate": did_scaf,    "n_yes": 0, "n_total": n},
-        "rigor_did":           {"rate": did_rig,     "n_yes": 0, "n_total": n},
-        "latency":             {"tutor": {"p50_seconds": tutor_lat_p50, "p95_seconds": tutor_lat_p95, "mean_seconds": 1.0, "n": n}},
-        "tokens":              {"total": {"total_tokens": tokens_total, "input_tokens": 0, "output_tokens": 0}},
+        "rigor_calibrated": {"score": rigor_cal, "n_clean_yes": 0, "n_total": n},
+        "overscaffold": {
+            "rate": overscaffold_rate,
+            "n_yes": 0,
+            "n_total": n,
+            "available": overscaffold_rate is not None,
+        },
+        "outcome_pos_rate": outcome_pos_rate,
+        "scaffolding_did": {"rate": did_scaf, "n_yes": 0, "n_total": n},
+        "rigor_did": {"rate": did_rig, "n_yes": 0, "n_total": n},
+        "latency": {"tutor": {"p50_seconds": tutor_lat_p50, "p95_seconds": tutor_lat_p95, "mean_seconds": 1.0, "n": n}},
+        "tokens": {"total": {"total_tokens": tokens_total, "input_tokens": 0, "output_tokens": 0}},
     }
 
 
@@ -348,10 +357,18 @@ SUMMARY_NONE = _make_run_summary(
 
 
 EXPECTED_COLUMNS = [
-    "tutor_model", "mode", "n",
-    "scaffold_cal", "rigor_cal", "avoids_overscaffold",
-    "outcome_pos", "did_scaf", "did_rig",
-    "tutor_lat_p50", "tutor_lat_p95", "tokens_total",
+    "tutor_model",
+    "mode",
+    "n",
+    "scaffold_cal",
+    "rigor_cal",
+    "avoids_overscaffold",
+    "outcome_pos",
+    "did_scaf",
+    "did_rig",
+    "tutor_lat_p50",
+    "tutor_lat_p95",
+    "tokens_total",
 ]
 
 
@@ -383,7 +400,9 @@ def test_leaderboard_column_order_in_header():
     for col, pos in zip(EXPECTED_COLUMNS, positions, strict=False):
         assert pos != -1, f"Column '{col}' not found in header: {header_line}"
     # Columns must be in ascending order of position
-    assert positions == sorted(positions), f"Columns out of order: {list(zip(EXPECTED_COLUMNS, positions, strict=False))}"
+    assert positions == sorted(positions), (
+        f"Columns out of order: {list(zip(EXPECTED_COLUMNS, positions, strict=False))}"
+    )
 
 
 def test_leaderboard_avoids_overscaffold_formula():
@@ -460,6 +479,7 @@ def test_view_embeds_score_values():
 # Spec S7: leaderboard lat/tokens columns show non-"-" when summary carries blocks
 # ---------------------------------------------------------------------------
 
+
 def test_leaderboard_latency_and_tokens_non_dash():
     """A summary with latency.tutor p50/p95 and tokens.total.total_tokens
     produces non-'-' columns in the leaderboard markdown (spec S7).
@@ -483,5 +503,6 @@ def test_leaderboard_latency_and_tokens_non_dash():
     none_lines = [ln for ln in md_none.split("\n") if "model-gamma" in ln]
     assert len(none_lines) == 1
     # None values -> '-' in markdown
-    assert "| - |" in none_lines[0] or none_lines[0].count("| - ") >= 2, \
+    assert "| - |" in none_lines[0] or none_lines[0].count("| - ") >= 2, (
         f"Expected '-' for None lat/tokens in: {none_lines[0]}"
+    )
