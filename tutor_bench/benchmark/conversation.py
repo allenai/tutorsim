@@ -7,6 +7,7 @@ simulated student, along with token-usage and latency bookkeeping.
 
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from types import SimpleNamespace
 
@@ -368,7 +369,7 @@ def run_conversations_batch(
     tutor_max_tokens: int = 1500,
     student_max_tokens: int = 1000,
     poll_interval: int = 60,
-    save_callback: callable = None,
+    save_callback: Callable | None = None,
     images_by_scenario: dict[str, list[str]] | None = None,
     trait_model_name: str | None = None,
     trait_cache_dir: str = "results/benchmark/_trait_cache",

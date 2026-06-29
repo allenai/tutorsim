@@ -297,10 +297,10 @@ class ModelClient:
         else:
             contents = effective_prompt
 
-        response = self._client.models.generate_content(
+        response = self._client.models.generate_content(  # pyright: ignore[reportAttributeAccessIssue]
             model=f"models/{self.model}",
-            contents=contents,
-            config=config,
+            contents=contents,  # pyright: ignore[reportArgumentType]
+            config=config,  # pyright: ignore[reportArgumentType]
         )
 
         text = response.text or ""
@@ -351,7 +351,7 @@ class ModelClient:
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
 
-        response = self._client.chat.completions.create(**kwargs)
+        response = self._client.chat.completions.create(**kwargs)  # pyright: ignore[reportAttributeAccessIssue]
 
         text = response.choices[0].message.content or ""
         cached = 0
@@ -385,7 +385,7 @@ class ModelClient:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = self._client.chat.completions.create(**kwargs)
+        response = self._client.chat.completions.create(**kwargs)  # pyright: ignore[reportAttributeAccessIssue]
 
         text = response.choices[0].message.content or ""
         if json_mode:
@@ -476,7 +476,7 @@ class ModelClient:
         if effort and self.model and not self.model.startswith("claude-haiku-4-5"):
             kwargs["extra_body"] = {"output_config": {"effort": effort}}
 
-        response = self._client.messages.create(**kwargs)
+        response = self._client.messages.create(**kwargs)  # pyright: ignore[reportAttributeAccessIssue]
 
         # Extract text from content blocks (skip thinking blocks)
         text = _extract_anthropic_text(response.content)
@@ -736,7 +736,7 @@ def build_batch_entry(
     For Gemini and OpenAI batch, the prefix is concatenated into the prompt
     text (auto-cache handles it; Gemini has no explicit batch cache API yet).
     """
-    gen_config = {"max_output_tokens": max_tokens}
+    gen_config: dict[str, object] = {"max_output_tokens": max_tokens}
     if json_mode:
         gen_config["response_mime_type"] = "application/json"
     request = {
@@ -1267,6 +1267,7 @@ def _run_batch_anthropic(
         retry_cfg = get_retry_config()
         max_retries = retry_cfg.get("max_retries", 5)
         base_delay = retry_cfg.get("base_delay", 5)
+        message_batch = None
         for attempt in range(max_retries):
             try:
                 message_batch = anthropic_client.messages.batches.create(requests=requests)
@@ -1280,6 +1281,9 @@ def _run_batch_anthropic(
                     time.sleep(delay)
                 else:
                     raise
+        # The loop above either assigns message_batch (and breaks) or re-raises
+        # on the final attempt, so it is never None here.
+        assert message_batch is not None
         logger.info("Batch created: %s", message_batch.id)
         if on_batch_created:
             on_batch_created(message_batch.id)

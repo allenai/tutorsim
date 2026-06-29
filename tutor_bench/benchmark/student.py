@@ -11,6 +11,7 @@ import datetime
 import json
 import logging
 from pathlib import Path
+from typing import cast
 
 from tutor_bench.benchmark.resources import resource_text
 
@@ -544,7 +545,7 @@ def resolve_student(student_id: str | None = None) -> dict:
             return {"kind": "registered", "fn": registered_fn}
 
     # ELSE: use the hosted student model from config or the explicit id.
-    client = ModelClient(model)
+    client = ModelClient(cast(str, model))
     kwargs = {k: v for k, v in spec.items() if k not in {"model", "mode"}}
     kwargs.setdefault("thinking", False)
     return {

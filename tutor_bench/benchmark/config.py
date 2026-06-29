@@ -4,6 +4,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -285,9 +286,9 @@ def build_run_config(
         modes=modes,
         dataset=dataset,
         sample=sample,
-        trials=trials,
-        seed=seed,
-        max_turns=max_turns,
+        trials=cast(int, trials),
+        seed=cast(int, seed),
+        max_turns=cast(int, max_turns),
         student=student,
         scorer=scorer,
         resolved_tutors=resolved_tutors,

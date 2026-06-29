@@ -518,14 +518,14 @@ def run_cell(
                 )
 
                 # Write transcript before scoring (so a score failure doesn't lose it)
-                transcript_dict = transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
+                transcript_dict = transcript.to_dict()
                 results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
 
                 # Score
                 judgment = scoring.score(scenario, transcript)
 
                 # Write score
-                judgment_dict = judgment.to_dict() if hasattr(judgment, "to_dict") else dict(judgment)
+                judgment_dict = judgment.to_dict()
                 results.write_score(run_id, resume_sid, judgment_dict, results_root=results_root)
 
                 completed_scenarios.append(scenario)
