@@ -1,56 +1,53 @@
-# build artifacts
-.eggs/
-*.egg-info/
-build/
-dist/
-pip-wheel-metadata/
-
-# virtualenvs and local tooling
-.envrc
-.python-version
-.idea/
-.venv/
-.vscode/
-/*.iml
-.claude/settings.local.json
-
-# environment / secret files
+# Secrets
 .env
-.env.*
+.envrc
+env
 
-# notebook and cache artifacts
-.ipynb_checkpoints/
-.cache/
+# Local virtualenv
+.venv/
+venv
+
+# Python
 __pycache__/
 *.pyc
-*.pyo
-
-# local OS/editor noise
-*.swp
+.pytest_cache/
 .DS_Store
+*.egg-info/
 
-# git worktrees
-worktrees/
+# Per-run log files
+logs/
+
+# Local S3 bucket mirror
+s3_bucket/
+
+# All data and results
+data/*
+!data/*.py
+!data/README.md
+data/temp_decompose.py
+results/
+benchmark/results/
+*.jsonl
+!tests/**/*.jsonl
+
+# Claude Code session data (harness state — local only)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
 .claude/worktrees/
 
-# test, lint, typing artifacts
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.coverage
-.coverage*
-htmlcov/
-.benchmarks/
+# Intermediate Outputs
+*.html
+*.pdf
+notes.txt
 
-# docs artifacts
-site/
-docs/build/
-docs/superhuman/
+# Old directory (replaced by annotator/)
+synthetic_annotator/
 
-# local research artifacts (keep only dev log summary)
-logs/
-data/
-output/
-results/
-plans/*
-!plans/_summary.md
+# History archive (restored from git, too large to track)
+history/
+
+# Legacy code archive (untracked; preserved on disk for porting)
+_archive/
+
+# Built scenario datasets are NOT committed -- distributed via HuggingFace.
+scenarios/

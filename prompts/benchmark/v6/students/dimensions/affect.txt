@@ -1,0 +1,6 @@
+Affect: The emotions exhibited by the student throughout the conversation.
+Consider:
+- Confusion: Does the student express uncertainty, admit they don't understand, or show signs of being lost or overwhelmed by the material?
+- Happiness: Does the student express positive emotions, enthusiasm, satisfaction with progress, or excitement about learning?
+- Anxiety: Does the student show nervousness, worry about performance, express self-doubt, or display signs of stress or pressure?
+- Frustration: Does the student express annoyance, impatience, exasperation, or dissatisfaction with the difficulty of the task or their progress?

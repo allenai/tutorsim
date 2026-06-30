@@ -1,0 +1,168 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a rapport-related moment. Your task is to analyze it in detail.
+
+## Research Context
+
+We are studying rapport building behaviors in K-12 math tutoring conversations. For each flagged moment, you will analyze the situation, the tutor's strategy, and how well it worked.
+
+### What Is Rapport?
+
+Rapport is the interpersonal connection between tutor and student that creates a safe, productive learning environment. In tutoring, rapport serves learning -- it is the foundation that makes academic work possible, not an end in itself.
+
+Rapport includes:
+- **Trust and safety**: The student feels comfortable making mistakes, asking questions, and expressing confusion
+- **Genuine interest**: The tutor shows authentic curiosity about the student as a person, not just a learner
+- **Emotional attunement**: The tutor notices and responds to the student's emotional state (frustration, excitement, fatigue, anxiety)
+- **Relational continuity**: The tutor remembers details from prior sessions, follows up on personal sharing, and builds a relationship over time
+
+### Rapport Strategies
+
+Common rapport-building approaches tutors use:
+- **Check-ins**: Asking about the student's day, feelings, or life outside tutoring
+- **Personal sharing**: The tutor shares something about themselves to build reciprocity
+- **Specific praise**: Acknowledging particular effort or growth ("You stuck with that even when it was hard")
+- **Humor and playfulness**: Lightening the mood, making math fun
+- **Emotional validation**: Acknowledging frustration or difficulty ("I get it, this is a tough one")
+- **Interest integration**: Using the student's interests to frame problems or examples
+- **Structured choices**: Giving the student agency ("Want to try angles or fractions next?")
+- **Session management as rapport**: Offering breaks, previewing upcoming work, managing smooth transitions, setting clear expectations -- these professional practices build trust and safety even without explicit rapport language
+- **Patience and steady presence**: Staying calm through repeated errors, not showing frustration, giving the student time to think -- this communicates that the tutor is a safe person to struggle in front of
+- **Accountability and follow-through**: Keeping to time commitments, remembering where the session left off, delivering on promises -- these build reliability-based trust
+
+### Rapport and Learning
+
+The challenge of rapport in tutoring is calibrating it to the student and the moment. A tutor who spends 10 minutes on social conversation builds connection but at the cost of instructional time. A tutor who ignores a student's frustration preserves time but loses engagement. A tutor who exclusively relies on generic praise ('Good job!') session after session, without ever adapting to specific student actions, may plateau in building connection. However, brief generic praise or standard check-ins can be perfectly appropriate in context -- especially during fast-paced problem work, with reserved students, or when the tutor adapts after a minimal response.
+
+### Calibrating Your Assessment
+
+When writing the result, calibrate your assessment against these standards:
+
+- **Effective** does not require extraordinary or creative rapport. A standard check-in that is warm, well-timed, and transitions smoothly IS effective. A professional session closing with a preview of next session IS effective. The bar is: was the tutor's approach reasonable, contextually appropriate, and did it visibly serve the student-tutor relationship? Effective moments show some evidence of connection beyond a purely formulaic exchange — the tutor adapted to the student's response, the student engaged in return, or the tutor did something substantive (reduced pressure, offered agency, normalized struggle) rather than just saying 'Good' or 'Perfect.' A single brief affirmation ('Perfect') after a student confirmation ('Yeah') is normal instruction, not necessarily a rapport success.
+- **Partial** means the tutor made a recognizable attempt but the result was ambiguous or fell clearly short. Examples: a check-in with zero follow-up when the student signaled distress; praise so disconnected it felt random; a rapport attempt that consumed excessive instructional time without payoff; or a reasonable approach where the impact on the relationship is genuinely indiscernible — the student gave no visible reaction, the exchange was purely formulaic, or it is simply too early to tell whether the approach landed. When you honestly cannot determine whether the tutor's approach built rapport, partial is the appropriate rating.
+- **Ineffective** means the tutor missed a clear opportunity with visible negative consequences -- e.g., ignoring a student's emotional bid, creating discomfort, being entirely absent when connection was needed, using a dismissive or exasperated tone, or providing flat/minimal responses through a stretch where the student clearly needed support. Visible negative consequences include: the student becoming defensive or withdrawn, repeated disengagement or random guessing, the student seeking help from someone else (e.g., a parent), or the student's emotional state visibly worsening. When the overall relational impact of the tutor's behavior during the detected moment was negative, the presence of one minor positive element (e.g., a single structured choice or a brief 'you're good') does not elevate the result to partial.
+
+Important: Do not downgrade a result just because a theoretically better alternative existed. Every moment has a better alternative. Rate what the tutor actually did, not the gap between what they did and the ideal. This is especially true in difficult contexts — when there are technical difficulties, a mid-session tutor swap, a highly disengaged student, or other disruptions, the bar for effectiveness is meeting the professional standard given those constraints, not performing as if conditions were ideal. A tutor who handles a tech-disrupted opening by offering a structured choice and moving forward has done well. A substitute tutor who introduces themselves clearly and closes with a continuity update has done well.
+
+## Using Context
+
+The surrounding turns provide context for your analysis. If the turns after the detected moment show the rapport strategy's impact (student opens up, becomes more engaged, or remains withdrawn), you may reference this. When the detected moment involves a transition between tutors or a handoff, evaluate the student's overall experience across the full detected range — including any gap, confusion, or lack of preparation — not just one actor's contribution. The primary question is whether the rapport approach (or lack thereof) was well-calibrated to the student and the moment.
+
+Some students are naturally reserved -- a brief or polite response from the student does not on its own tell you whether the tutor's approach was well-chosen.
+
+Also actively consider the session trajectory. Before writing your result, check: has the tutor's rapport approach changed relative to earlier in the session? If the tutor has been struggling with rapport earlier (e.g., being dismissive, impatient, or absent) and now shows clear improvement (e.g., being more patient, more civil, or more responsive), that improvement is itself effective rapport recovery -- even if the specific moment would be unremarkable or even slightly flawed in isolation. A tutor who was previously dismissive and is now civil has made a meaningful positive shift, and the result should reflect that. Conversely, if rapport has been strong and the tutor does something that damages it, that is more significant than the same action would be at the start of a session.
+
+## Your Task
+
+For the flagged moment, provide:
+
+- **Situation**: First, evaluate whether this was an appropriate moment for rapport building. Consider where you are in the session flow (opening, mid-task, transition, closing) and what the student is currently doing (on-task, idle, struggling, distracted). If the timing was poor -- for example, the tutor interrupted a student who was actively engaged in problem-solving -- say so directly. Then describe the student's emotional or social state and what makes this moment notable.
+- **Action**: What strategy did the tutor use for rapport building? Describe concretely what the tutor said or did. If the tutor missed a rapport opportunity, describe what happened instead.
+- **Result**: How well did the tutor's rapport strategy work? Assess the net impact on the student-tutor relationship. What did the tutor's approach accomplish? What were its weaknesses or costs? Was the approach appropriate for this student and this moment? Did the rapport support the learning or displace it? Be honest about what you observe: if the impact was clearly positive, say so; if it was ambiguous or unclear, say that; if the net impact was negative, say that — even if some individual elements were reasonable. Avoid speculating about alternatives unless the tutor's approach actively caused harm or the student visibly needed something different.
+
+Focus your analysis on the specific strengths and weaknesses of what the tutor did.
+
+## Examples
+
+### Example 1: Tutor recalls a personal detail
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 5,
+  "turn_end": 8,
+  "situation": "Session opening. This is a natural place for rapport building before transitioning to academic work. The tutor remembered the student's baseball award from a previous session.",
+  "action": "The tutor used relational continuity and a specific follow-up: 'So tell me about that baseball award -- what was it for?'",
+  "result": "The approach was genuine rather than formulaic -- the tutor remembered a specific detail and asked an open-ended question about it. The student shared unprompted detail about their values and what the award meant to them, going beyond a simple factual answer. The exchange lasted 3 turns and transitioned naturally into the session's math work without displacing instructional time."
+}
+```
+
+### Example 2: One-sided check-in
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 85,
+  "turn_end": 89,
+  "situation": "Transition between activities -- a natural place for a check-in. The student had been working quietly for several minutes.",
+  "action": "The tutor used a generic check-in: 'How's your day going?' When the student gave a one-word answer ('fine'), the tutor responded warmly ('That's good!') but moved on without probing.",
+  "result": "The check-in was formulaic -- a generic question followed by no adaptation when the student gave a minimal response. The tutor did not follow up with a more specific question, share something about their own day, or try a different angle. The interaction stayed surface-level and did not build connection beyond the routine."
+}
+```
+
+### Example 3: Missed emotional cue
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 145,
+  "turn_end": 158,
+  "situation": "The student was resisting the session duration, repeatedly asking when they could stop. This signals frustration or fatigue -- a moment where emotional attunement is needed.",
+  "action": "The tutor engaged in a 14-turn negotiation about session time ('We still have 10 minutes') rather than acknowledging the student's emotional state.",
+  "result": "The tutor responded to the logistics of time rather than the underlying frustration. The student's resistance continued throughout the exchange and 14 turns were consumed without resolution. An alternative would have been to acknowledge the frustration ('I hear you, this is tough') and offer a structured choice ('Want to try something different, or power through the last problem?')."
+}
+```
+
+### Example 4: Standard but effective session opening
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 1,
+  "turn_end": 10,
+  "situation": "Session opening. The student is reserved, giving one-word answers. This is a recurring session, so the tutor and student have an existing relationship.",
+  "action": "The tutor greeted the student warmly ('Hey, how's it going?'), asked about their day, and when the student gave a minimal response ('Fine'), the tutor validated it ('Cool, nothing wrong with that') and transitioned to the lesson by previewing the topic and asking if the student was ready.",
+  "result": "The check-in used a common format, but the tutor adapted when the student gave a minimal response -- validating rather than pushing for more, which respected the student's reserved disposition. The transition to academics was smooth and timely. The exchange established a warm, low-pressure tone appropriate for a recurring session with a quiet student. Not every session opening needs to be deeply personal to be effective."
+}
+```
+
+### Example 5: Minimal interaction with ambiguous impact
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 45,
+  "turn_end": 48,
+  "situation": "Mid-lesson. The student has just confirmed understanding of a concept. The tutor and student are working through problems.",
+  "action": "The tutor said 'Perfect' after the student confirmed understanding with 'Yeah,' then continued with the next instructional step.",
+  "result": "The tutor's acknowledgment was brief and routine — a standard affirmation that functions as normal instructional flow rather than a distinct rapport-building move. The student showed no visible reaction beyond continuing to listen. While the exchange was pleasant and not harmful, its impact on the student-tutor relationship is indiscernible from ordinary instruction."
+}
+```
+
+### Example 6: Poorly timed rapport -- student actively on task
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 502,
+  "turn_end": 507,
+  "situation": "The student is in the middle of working through a math solution, focused and on task. They are not showing signs of distraction, boredom, or frustration. This is not an appropriate time for rapport building.",
+  "action": "The tutor, inspired by the topic of the math problem, asked the student about their personal likes and dislikes, interrupting the student's problem-solving flow.",
+  "result": "The tutor's interest was genuine, but the timing undermined the interaction. The student answered briefly and redirected back to the math on their own, signaling they were in problem-solving mode. The rapport move interrupted focus without producing meaningful connection. This question would have landed better at a natural transition -- between problems or at session close -- where it would not displace the student's working momentum."
+}
+```
+
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+Read the excerpt carefully, then take it step by step:
+
+1. First, understand the social and emotional context -- what is the student feeling, what is the dynamic between tutor and student at this moment?
+2. Then, identify exactly what the tutor chose to do and what rapport strategy that represents.
+3. Finally, assess how well the tutor's approach fit the moment. Focus on whether the approach was appropriate and supportive given the student's state and the session context. Note visible evidence of impact (positive or negative) in the student's behavior. Do not penalize the tutor for not doing something better unless what they did was clearly inadequate.
+
+For each field (situation, action, result), provide substantive analysis -- not just a summary of what was said. If later turns provide evidence of the strategy's impact, you may cite them. If the detected moment does not contain a meaningful rapport event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "..."
+}
+```

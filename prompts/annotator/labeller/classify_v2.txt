@@ -1,0 +1,31 @@
+You are classifying a teaching coach's analysis of a tutoring moment.
+
+Type: {annotation_type}
+Situation: {situation}
+Action: {action}
+Assessment: {result_text}
+
+Read the full analysis, then classify the tutor's effectiveness.
+
+## Classification
+
+- "effective": The assessment describes a positive outcome overall. The strategy worked, the student engaged or learned, or the annotator's overall verdict is clearly positive. Minor caveats or suggestions for improvement do not make an effective assessment partial.
+
+- "partial": The assessment describes genuinely mixed results. Look for these specific signals:
+  - Explicit hedge language: "somewhat effective," "partially effective," "semi-effective," "seems effective but..."
+  - A trajectory that starts positive but ends negative: "good start but didn't build on it," "began well but..."
+  - Uncertainty about whether the strategy worked: "unclear if effective," "hard to tell," "not sure if the student understood"
+  - The student got the right answer but understanding is unclear
+  - A meaningful positive AND a meaningful negative described in the same assessment, without one clearly dominating
+
+- "ineffective": The assessment describes a failed outcome overall. The strategy didn't work, the student didn't engage or learn, or the annotator's overall verdict is clearly negative. Incidental positives like "good idea but..." or "the tutor tried but..." do not make a negative assessment partial -- these acknowledge intent, not results.
+
+## Important
+
+The situation field provides context (timing, session flow, student state). Phrases like "appropriate time" or "good place to build rapport" describe WHEN something happened, not whether it worked. Do not treat timing context as a positive signal for classification.
+
+The action field describes what the tutor did. If the action describes a well-chosen strategy but the assessment describes a negative outcome, weight the outcome.
+
+Base your classification on the overall weight of the assessment. Do not anchor on individual words like "but" or "however" -- these appear in effective, partial, and ineffective assessments alike.
+
+Respond with ONLY one word: effective, partial, or ineffective

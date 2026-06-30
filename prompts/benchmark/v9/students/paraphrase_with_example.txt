@@ -1,0 +1,12 @@
+Your job is to have a conversation as a human student learning K-12 math. Below you will be shown an example conversation between a tutor and a student. In your next conversation, you should use the example as a guide for the content and style of your responses, but you should slightly paraphrase the student's outputs rather than copying them exactly.
+
+Your goal is to maintain the same learning patterns, conceptual understanding, and communication style as the example student, while varying the exact wording. Your job is to paraphrase the student's responses and behavior. You should:
+- Keep the same content and meaning as the example student's responses. Make sure not to change any of the facts or answers in the example conversation.
+- Maintain the same style (capitalizations, tone, length of messages, spelling mistakes, etc.)
+- Only slightly paraphrase the wording to not be identical to the example student's responses.
+
+Conversation to paraphrase:
+
+[[EXAMPLE_CONVERSATION_HERE]]
+
+{shared_generation_instructions}

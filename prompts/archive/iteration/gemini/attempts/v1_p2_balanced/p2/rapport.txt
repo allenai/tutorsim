@@ -1,0 +1,109 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a rapport-related moment. Your task is to analyze it in detail.
+
+## Rapport (Social-Psychological Support)
+
+Rapport is the connection that creates a safe, conducive learning environment. It involves showing interest in the student as a person, managing emotions, and celebrating success.
+
+- **Goal**: Rapport should **support learning**, not displace it.
+- **Positive Rapport**: Checking in on feelings, validating frustration, using student interests, authentic praise, specific follow-up questions.
+- **Negative/Ineffective Rapport**: Ignoring frustration (missed cue), allowing social chat to consume academic time (displacement), generic/robotic praise, offering open-ended choices without structure.
+
+## Using Context
+
+The surrounding turns provide context for your analysis. If the turns after the detected moment show the rapport strategy's impact (student opens up, becomes more engaged, or remains withdrawn), you may reference this. However, the primary question is whether the tutor's rapport strategy was appropriate and well-executed for the situation.
+
+Some students are naturally reserved — a brief or polite response doesn't automatically make the tutor's strategy poor. However, if the student gives consistently minimal responses throughout a long rapport sequence, the tutor should be adapting their approach rather than continuing the same strategy.
+
+## Effectiveness Criteria
+
+- **effective**: The tutor uses a well-chosen rapport strategy appropriate for the moment. The approach is genuine rather than formulaic — e.g., recalling personal details, responding authentically to emotions, specific rather than generic praise, or using student interests to make content relevant. The student's response shows engagement OR the strategy was clearly the right move for the situation even with a quiet student.
+
+- **partial**: Good intent but the execution is incomplete or one-sided: the tutor asks but doesn't follow up, gives generic praise without specificity, makes one-sided conversation where the student only gives one-word responses, or the interaction stays surface-level. Also: rapport that extends too long and begins displacing academic time, even if the student enjoys it.
+
+- **ineffective**: Ignoring clear frustration or disengagement, robotic/scripted rapport with no genuine connection, rapport activities that consume the session with no academic content or transition back to learning, or missed opportunities where a clearly better alternative exists (e.g., offering open-ended "what do you want to do?" when structured choices would be more effective for the student).
+
+## Critical Check: What Could Be Better?
+
+Before rating, ask yourself: **Is there a clearly better alternative the tutor could have used?** If yes, this limits the rating:
+
+- If the tutor did something reasonable but a much better alternative was available, rate as **partial** at most.
+- If the tutor missed an obvious cue or opportunity that any experienced coach would catch, rate as **ineffective**.
+- If no clearly better alternative exists, the tutor's choice was appropriate.
+
+Common missed opportunities in rapport:
+- **Session wrap-ups** that only preview next session without reflection ("What did you learn today? What was challenging?")
+- **Open-ended questions** when the student needs structured choices ("Do you want to work on angles, fractions, or word problems?" vs. "What do you want to learn?")
+- **Long tutor monologues** packaged as rapport when the student is giving one-word responses — the tutor should be adjusting, not continuing
+
+## Examples
+
+### Example 1: Effective — recalled detail sparks connection
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 5,
+  "turn_end": 8,
+  "situation": "Session start — tutor recalled the student's baseball award.",
+  "action": "Asked an open-ended follow-up about what the award was for.",
+  "result": "Effective. The tutor demonstrated genuine attentiveness by remembering a personal detail and asking a specific follow-up. The student shared unprompted detail about their values — going beyond a simple answer. No clearly better alternative exists.",
+  "effectiveness": "effective"
+}
+```
+
+### Example 2: Partial — warm but one-sided
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 85,
+  "turn_end": 89,
+  "situation": "Transition point — appropriate time for check-in.",
+  "action": "Tutor asked about the student's day, responded warmly to a flat answer, but moved on without probing.",
+  "result": "Partial. The timing was appropriate but the execution was formulaic. The student gave a one-word answer and the tutor didn't follow up. A better approach: share something about their own day first, or ask a more specific question ('Did anything funny happen at school today?').",
+  "effectiveness": "partial"
+}
+```
+
+### Example 3: Ineffective — missed emotional cue
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 145,
+  "turn_end": 158,
+  "situation": "Student resisting the session duration.",
+  "action": "Tutor engaged in a lengthy negotiation about time rather than acknowledging frustration or redirecting to an engaging activity.",
+  "result": "Ineffective. The student clearly signaled frustration, but the tutor responded to logistics rather than emotion. A better approach: acknowledge the frustration ('I hear you, this is tough'), then offer a choice ('Want to try something different, or power through the last problem?'). Instead, 14 turns were consumed without resolution.",
+  "effectiveness": "ineffective"
+}
+```
+
+{annotator_style}## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript.
+2. Determine the situation, action, result, and effectiveness.
+3. Before rating, explicitly consider: is there a clearly better alternative the tutor could have used?
+4. If later turns provide evidence of the strategy's impact, you may cite them. Focus on the quality of the tutor's strategy.
+5. If the detected moment does not contain a meaningful rapport event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "...",
+  "effectiveness": "effective"
+}
+```

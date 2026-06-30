@@ -1,0 +1,168 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a rapport-related moment. Your task is to analyze it in detail.
+
+## Research Context
+
+We are studying rapport building behaviors in K-12 math tutoring conversations. For each flagged moment, you will analyze the situation, the tutor's strategy, and how well it worked.
+
+### What Is Rapport?
+
+Rapport is the interpersonal connection between tutor and student that creates a safe, productive learning environment. In tutoring, rapport serves learning -- it is the foundation that makes academic work possible, not an end in itself.
+
+Rapport includes:
+- **Trust and safety**: The student feels comfortable making mistakes, asking questions, and expressing confusion
+- **Genuine interest**: The tutor shows authentic curiosity about the student as a person, not just a learner
+- **Emotional attunement**: The tutor notices and responds to the student's emotional state (frustration, excitement, fatigue, anxiety)
+- **Relational continuity**: The tutor remembers details from prior sessions, follows up on personal sharing, and builds a relationship over time
+
+### Rapport Strategies
+
+Common rapport-building approaches tutors use:
+- **Check-ins**: Asking about the student's day, feelings, or life outside tutoring
+- **Personal sharing**: The tutor shares something about themselves to build reciprocity
+- **Specific praise**: Acknowledging particular effort or growth ("You stuck with that even when it was hard")
+- **Humor and playfulness**: Lightening the mood, making math fun
+- **Emotional validation**: Acknowledging frustration or difficulty ("I get it, this is a tough one")
+- **Interest integration**: Using the student's interests to frame problems or examples
+- **Structured choices**: Giving the student agency ("Want to try angles or fractions next?")
+
+### Rapport and Learning
+
+The challenge of rapport in tutoring is calibrating it to the student and the moment. Rapport that produces genuine connection and student engagement is valuable even if it takes time -- in K-12 tutoring, a student who feels connected will learn more across sessions than one who is efficiently instructed but emotionally disengaged. A tutor who ignores a student's frustration preserves time but loses engagement. A tutor who gives generic praise ("Good job!") fills the rapport slot without building genuine connection.
+
+Time and timing both matter. A brief, well-timed rapport move can be more effective than an extended conversation at the wrong moment. Two key timing principles:
+
+1. **Student signals override engagement quality.** If the student explicitly redirects to academics ('Can we do math?', 'Can we start?'), this is a signal that the social conversation is unwanted in that moment. Continuing rapport after such a signal is less effective regardless of how warm or genuine the tutor's approach is.
+2. **Academic displacement matters.** A social conversation that occurs during a natural transition (session opening, between activities, session closing) is different from one that interrupts active problem-solving. Extended off-topic tangents during academic time are a real cost, even if the student participates enthusiastically -- especially when such tangents recur throughout the session.
+
+That said, not all extended conversations are bad. A 10-minute social conversation where the student opens up and shares genuinely meaningful personal details at an appropriate moment (session opening, after a hard stretch) can be highly effective. Judge both the quality of what happened AND whether the timing served the student.
+
+## Using Context
+
+The surrounding turns provide context for understanding what led to this moment and its immediate aftermath. You may reference the 3-5 turns immediately following the detected moment if they show the rapport strategy's direct impact (student opens up, becomes more engaged, or remains withdrawn). Do not reach far beyond the detected range to find evidence that upgrades your assessment -- if the detected moment itself did not produce engagement, a positive interaction 20 turns later does not redeem it. Similarly, do not cite the general 'dynamic' or 'broader relationship' to justify a rating that the specific moment does not support.
+
+Some students are naturally reserved -- a brief or polite response from the student does not automatically mean the tutor's approach failed. However, distinguish between **genuine engagement** and **conversational compliance**:
+
+- **Genuine engagement**: The student volunteers information unprompted, asks questions, shares personal details, shows emotion (excitement, vulnerability, humor), self-advocates (asks for help, admits confusion), or elaborates beyond what was asked. Even brief genuine engagement (a single honest admission like 'I need help') counts.
+- **Conversational compliance**: The student gives the minimum socially expected response -- 'yeah,' 'good,' 'mhm,' 'okay' -- without elaboration. This is polite behavior, not evidence of rapport. A student who answers 'Good' to 'How was your day?' and nothing more has not engaged; they have been polite.
+
+When the student gives only compliance responses, the rapport move has not worked, even if the tutor was warm and genuine. When the student actively signals disinterest (changing the subject to academics, ignoring the tutor's comments, giving flat responses to multiple follow-up attempts), that is even stronger evidence the approach is not working.
+
+## Your Task
+
+For the flagged moment, provide:
+
+- **Situation**: First, evaluate whether this was an appropriate moment for rapport building. Consider where you are in the session flow (opening, mid-task, transition, closing) and what the student is currently doing (on-task, idle, struggling, distracted). If the timing was poor -- for example, the tutor interrupted a student who was actively engaged in problem-solving -- say so directly. Then describe the student's emotional or social state and what makes this moment notable.
+- **Action**: What strategy did the tutor use for rapport building? Describe concretely what the tutor said or did. If the tutor missed a rapport opportunity, describe what happened instead.
+- **Result**: How well did the tutor's rapport strategy work? Start with the student's observable response and commit to a verdict based on it. Did the student show genuine engagement (volunteered information, showed trust, reciprocated warmth)? Then the move was effective -- state that clearly and do not undercut it with extensive discussion of what could have been better. Did the student give only polite compliance or remain disengaged? Then the move was ineffective -- state that clearly and do not soften it by praising the tutor's intent.
+
+A simple or brief rapport move (a warm greeting, basic praise, a quick check-in, a comfort check) can be fully effective if the student responds with genuine engagement -- not every moment requires an elaborate strategy. Reserve the label "formulaic" for interactions where the tutor follows a rote script AND fails to adapt when the student's response calls for adjustment. Only suggest what the tutor could have done differently if the move was clearly ineffective or if you are noting a genuine tradeoff for a partially effective moment.
+
+Commit to your assessment. Do not write 'The approach was effective, however...' followed by a paragraph of weaknesses. Do not write 'The approach was ineffective, but the tutor showed warmth...' followed by a paragraph of positives. Lead with and emphasize the verdict the evidence supports.
+
+## Examples
+
+### Example 1: Tutor recalls a personal detail
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 5,
+  "turn_end": 8,
+  "situation": "Session opening. This is a natural place for rapport building before transitioning to academic work. The tutor remembered the student's baseball award from a previous session.",
+  "action": "The tutor used relational continuity and a specific follow-up: 'So tell me about that baseball award -- what was it for?'",
+  "result": "The approach was genuine rather than formulaic -- the tutor remembered a specific detail and asked an open-ended question about it. The student shared unprompted detail about their values and what the award meant to them, going beyond a simple factual answer. The exchange lasted 3 turns and transitioned naturally into the session's math work without displacing instructional time."
+}
+```
+
+### Example 2: One-sided check-in
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 85,
+  "turn_end": 89,
+  "situation": "Transition between activities -- a natural place for a check-in. The student had been working quietly for several minutes.",
+  "action": "The tutor used a generic check-in: 'How's your day going?' When the student gave a one-word answer ('fine'), the tutor responded warmly ('That's good!') but moved on without probing.",
+  "result": "The check-in was formulaic -- a generic question followed by no adaptation when the student gave a minimal response. The tutor did not follow up with a more specific question, share something about their own day, or try a different angle. The interaction stayed surface-level and did not build connection beyond the routine."
+}
+```
+
+### Example 3: Missed emotional cue
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 145,
+  "turn_end": 158,
+  "situation": "The student was resisting the session duration, repeatedly asking when they could stop. This signals frustration or fatigue -- a moment where emotional attunement is needed.",
+  "action": "The tutor engaged in a 14-turn negotiation about session time ('We still have 10 minutes') rather than acknowledging the student's emotional state.",
+  "result": "The tutor responded to the logistics of time rather than the underlying frustration. The student's resistance continued throughout the exchange and 14 turns were consumed without resolution. An alternative would have been to acknowledge the frustration ('I hear you, this is tough') and offer a structured choice ('Want to try something different, or power through the last problem?')."
+}
+```
+
+
+### Example 4: Warm but unreciprocated
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 22,
+  "turn_end": 35,
+  "situation": "Session opening. The tutor attempted to engage the student in conversation about their weekend before starting math.",
+  "action": "The tutor asked several follow-up questions with genuine warmth ('Oh cool, what did you do there?', 'That sounds fun!'). The tutor also shared a personal anecdote about their own weekend to build reciprocity.",
+  "result": "Despite the tutor's genuine warmth and multiple follow-up attempts, the student gave one-word answers throughout ('fine', 'yeah', 'nothing') and then redirected to math ('Can we start?'). The student's redirect signals that the social conversation was not building connection for this student in this moment. The tutor's technique was warm and authentic, but the interaction did not produce engagement or openness."
+}
+```
+
+### Example 5: Poorly timed rapport -- student actively on task
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": 502,
+  "turn_end": 507,
+  "situation": "The student is in the middle of working through a math solution, focused and on task. They are not showing signs of distraction, boredom, or frustration. This is not an appropriate time for rapport building.",
+  "action": "The tutor, inspired by the topic of the math problem, asked the student about their personal likes and dislikes, interrupting the student's problem-solving flow.",
+  "result": "Ineffective. The student's train of thought was interrupted. The student answered the tutor's question briefly but did not engage in the tangent, redirecting back to the solution on their own. The rapport move displaced focus without building meaningful connection. This question would have been appropriate at a natural transition point -- between problems or at session close -- where it would not cost the student their working momentum."
+}
+```
+
+## Calibrating Your Result Assessment
+
+Your result text will be evaluated for whether the rapport moment was effective, partially effective, or ineffective. Use these guidelines to calibrate your language:
+
+- **Effective**: The rapport move achieved its core purpose. The student engaged, showed trust, opened up, or the interaction built genuine connection. A rapport move does not need to be elaborate or flawless to be effective. Markers of effectiveness include: the student answered honestly (e.g., admitted confusion, asked for help), the student volunteered personal information, the student showed comfort or warmth, or the student reciprocated the tutor's bid. If these markers are present, the moment is effective -- even if the tutor's technique was simple, the question was close-ended, or you can imagine a stronger approach. Do NOT downgrade to partial just because you see room for improvement.
+- **Partially effective**: The rapport move had genuinely conflicting outcomes -- a meaningful positive AND a meaningful negative in the same interaction. For example: the student engaged warmly but the conversation consumed excessive academic time and the student signaled wanting to return to work; or the tutor built real connection on one dimension while actively undermining safety on another. Partial should be uncommon. If the student responded positively and the only weakness is that the tutor could have done more, that is effective. If the student did not engage and the only strength is that the tutor's intent was good, that is ineffective.
+- **Ineffective**: The rapport move failed to build connection. The student gave only minimal courtesy responses (one-word answers to direct questions without elaboration), remained withdrawn, or signaled disinterest. Alternatively, the tutor missed a clear rapport opportunity entirely, or the approach actively undermined the learning environment. A warm, genuine attempt that produces no positive student response is still ineffective. A tutor who 'tries' but gets nothing back has not built rapport.
+
+Important: Timing is a factor in effectiveness. A rapport move that is well-executed but occurs when the student has signaled wanting to work, or that displaces significant instructional time without proportionate relational benefit, should be downgraded. A rapport move during a natural transition point (session opening, between topics, session closing) has a lower bar for effectiveness than one that interrupts focused academic work.
+
+Critical principle: **The student's actual response is the primary evidence of effectiveness.** If the student opened up, showed vulnerability, reciprocated warmth, or engaged enthusiastically, weight that heavily -- even if the tutor's technique had flaws. If the student did not engage despite the tutor's good technique, weight that outcome heavily too.
+
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+Read the excerpt carefully, then take it step by step:
+
+1. First, understand the social and emotional context -- what is the student feeling, what is the dynamic between tutor and student at this moment?
+2. Then, identify exactly what the tutor chose to do and what rapport strategy that represents.
+3. Finally, assess the outcome. Start with the student's response -- did the student engage more, show trust, or open up? Then consider whether the tutor's approach fit the moment. Lead your result with the strongest evidence of success or failure, not with a balanced weighing of pros and cons.
+
+For each field (situation, action, result), provide substantive analysis -- not just a summary of what was said. If later turns provide evidence of the strategy's impact, you may cite them. If the detected moment does not contain a meaningful rapport event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "rapport",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "..."
+}
+```

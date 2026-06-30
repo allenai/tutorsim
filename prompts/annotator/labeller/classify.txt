@@ -1,0 +1,17 @@
+You are classifying a teaching coach's analysis of a tutoring moment.
+
+The analysis describes the situation, the tutor's action, and an assessment that may include both strengths and weaknesses. Your job is to weigh the overall quality.
+
+Situation: {situation}
+Action: {action}
+Assessment: {result_text}
+
+Based on the OVERALL weight of the analysis above, classify the tutor's strategy:
+
+- "effective": The strengths clearly outweigh any weaknesses. The strategy was well-chosen and well-executed for the situation. Minor imperfections don't make a good strategy partial.
+- "partial": There are meaningful strengths AND meaningful weaknesses. The strategy had the right idea but execution was notably flawed, or the approach was only partially appropriate.
+- "ineffective": The weaknesses dominate. The strategy was mismatched to the student's need, the tutor missed key cues, or the approach failed to achieve its purpose.
+
+Important: Most balanced analyses mention SOME strength even in poor strategies (e.g., "the tutor at least engaged with the student"). Do not let minor strengths upgrade a fundamentally flawed strategy. Conversely, noting a small area for improvement does not make an otherwise strong strategy partial.
+
+Respond with ONLY one word: effective, partial, or ineffective

@@ -1,0 +1,73 @@
+You are an expert in educational assessment and NLP prompt engineering. You are helping iterate on a prompt used to annotate pedagogical key moments in K-12 tutoring transcripts.
+
+## Task Context
+
+An LLM reads a tutoring transcript excerpt around a detected key moment and produces a situation/action/result analysis. A separate labeler then classifies the result text as effective/partial/ineffective. The same labeler is applied to human annotations. We compare labels using Cohen's kappa.
+
+## Optimization Goal
+
+We are tuning the annotation prompt to match a SPECIFIC annotator archetype: **{annotator_style}**.
+
+The prompt contains a section called `## Annotator Calibration` that is used to shift the LLM's rating perspective toward this archetype. Your primary task is to improve that section. You may also propose changes to the rest of the prompt if they help, but the calibration section is your main lever.
+
+Ground truth labels in the examples below come ONLY from {annotator_style} annotators. We want the LLM to match their specific calibration patterns.
+
+## Current Metrics ({ann_type}, {annotator_style} annotators only)
+
+{current_metrics}
+
+## Current Prompt
+
+```
+{current_prompt}
+```
+
+## Error Statistics
+
+- Total matched pairs: {total_pairs}
+- Agreements: {agreements}
+- Disagreement breakdown: {confusion_summary}
+
+## Examples
+
+Below are examples of both agreements (where the {annotator_style} annotator and LLM match) and disagreements (where they differ). Each shows the transcript excerpt, the human's situation/action/result, and the LLM's situation/action/result.
+
+{error_examples}
+
+## Your Task
+
+Analyze the disagreement examples and identify:
+
+1. **Semantic patterns**: How does the LLM's calibration differ from the {annotator_style} annotators? Is it systematically too harsh or too generous compared to them? On what types of moments?
+
+2. **Root causes**: Trace patterns to specific language in the `## Annotator Calibration` section (or elsewhere in the prompt) that produces the wrong calibration for this archetype.
+
+3. **Proposed changes**: For each root cause, propose a SPECIFIC edit. For changes to the calibration section, quote the exact text to change and provide the replacement. You may rewrite the calibration section entirely, add criteria, sharpen thresholds, or remove hedging language — whatever moves the LLM toward the {annotator_style} pattern.
+
+4. **Directional prediction**: For each change, predict whether it will make the LLM harsher or more generous, and on which type of moment.
+
+Respond in JSON:
+{{
+  "patterns": [
+    {{
+      "name": "pattern name",
+      "direction": "too_harsh | too_generous",
+      "share_of_errors": "approximate % of disagreements this explains",
+      "description": "what the LLM gets wrong vs the {annotator_style} annotator and why",
+      "examples_referenced": ["Disagreement 1", "Disagreement 3"]
+    }}
+  ],
+  "proposed_changes": [
+    {{
+      "target_pattern": "which pattern this addresses",
+      "change_type": "short description (e.g. rewrite calibration section, add threshold guidance, remove hedging)",
+      "current_text": "exact text in prompt to replace (or null for additions)",
+      "proposed_text": "replacement text (or null for deletions)",
+      "rationale": "why this specific change moves LLM toward the {annotator_style} pattern",
+      "directional_effect": "makes LLM harsher | makes LLM more generous | neutral",
+      "expected_impact": "which annotation type benefits and which might regress",
+      "targets_calibration_section": true
+    }}
+  ],
+  "overall_assessment": "1-2 sentence summary of how the LLM differs from {annotator_style} annotators and whether the calibration section can close the gap"
+}}

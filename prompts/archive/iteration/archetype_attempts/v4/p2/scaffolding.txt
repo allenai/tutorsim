@@ -1,0 +1,113 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a scaffolding-related moment. Your task is to analyze it in detail.
+
+## Research Context
+
+We are studying how tutors in K-12 math tutoring conversations decide to push for rigor versus when they choose to introduce scaffolds. For each flagged moment, you will describe the situation, the tutor's action, and the result.
+
+### Scaffolding
+
+Scaffolding is temporary, calibrated support that helps a student accomplish a task they cannot yet do independently. Effective scaffolding is responsive to the student's current understanding and is gradually removed as the student gains competence.
+
+Common scaffolding strategies:
+- **Breaking down**: Decomposing a complex problem into smaller, manageable steps
+- **Hinting**: Providing a cue that points the student toward the answer without giving it away
+- **Modeling**: Demonstrating a process or worked example for the student to follow
+- **Simplifying**: Reducing the complexity of the task while preserving the core concept
+- **Visual/concrete aids**: Using diagrams, manipulatives, or real-world analogies
+
+### Rigor (Pushing for Depth)
+
+Rigor means maintaining or increasing the cognitive demand on the student. It is appropriate when the student is ready for more challenge, and it fosters independence and deeper understanding.
+
+Common rigor strategies:
+- **Requiring explanation**: "How did you know that?" or "Why does that work?"
+- **Extending problems**: Adding complexity, edge cases, or transfer to new contexts
+- **Fading support**: Deliberately removing scaffolds to see if the student can work independently
+- **Challenging correct answers**: Asking students to generalize, prove, or find alternative approaches
+- **Metacognition prompts**: Asking the student to reflect on their own thinking process
+
+### The Core Tradeoff
+
+At each moment, the tutor decides how much support to provide. Too much support (over-scaffolding) robs the student of productive struggle and learning. Too little support leaves the student floundering unproductively. The right choice depends on reading the student's current state.
+
+## Using Context
+
+The surrounding turns provide context for your analysis. If the turns after the detected moment show evidence of the strategy's impact (student applies the concept, or remains stuck), you may reference this. However, the primary question is what the tutor chose to do and why.
+
+## Your Task
+
+For the flagged moment, provide:
+
+- **Situation**: What is happening in the session at this point? What is the student's state (stuck, confused, succeeding, coasting)? What is the pedagogical context that makes this moment notable?
+- **Action**: What specific strategy did the tutor use? Describe concretely what the tutor said or did. If the tutor chose scaffolding, what kind? If they pushed for rigor, how?
+- **Result**: What happened as a consequence of the tutor's action? How did the student respond? Describe the observable outcome -- did the student demonstrate understanding, remain confused, disengage, or something else? If the tutor missed an opportunity, describe what was missed and what alternative was available.
+
+Write the result as a factual description of what happened, not as a judgment. A separate evaluation step will assess effectiveness.
+
+## Examples
+
+### Example 1: Tutor connects to prior knowledge
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 45,
+  "turn_end": 48,
+  "situation": "Student was intimidated by large numbers in division (5600 / 70) and said 'I don't know how to do this.'",
+  "action": "Tutor connected the problem to a known fact (56 / 7 = 8) and asked the student to apply the strategy of canceling zeros.",
+  "result": "The student recognized 56 / 7 from memory and articulated the simplified problem. The scaffold was minimal -- a single prompt building on existing knowledge -- and the student did the reasoning."
+}
+```
+
+### Example 2: Tutor explains without checking understanding
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 76,
+  "turn_end": 86,
+  "situation": "Student added denominators incorrectly (1/4 + 1/4 = 2/8), showing a misconception about fraction addition.",
+  "action": "Tutor explained the rule ('the bottom number stays the same') and used a hands analogy. The student self-corrected to 2/4. The tutor confirmed with 'perfect' and moved on without a follow-up problem.",
+  "result": "The student corrected the immediate error. However, the tutor did not verify whether the student understood why the denominator stays the same -- no follow-up question or new example was given to test transfer."
+}
+```
+
+### Example 3: Tutor misses a depth opportunity
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 29,
+  "turn_end": 41,
+  "situation": "Student shared academic success and mentioned using 'strategies' -- signaling metacognitive awareness beyond what was asked.",
+  "action": "Tutor asked who taught the strategies but never asked what the strategies were. Gave generic praise ('That's great!') and pivoted to an unrelated topic.",
+  "result": "The student's signal of metacognitive readiness was not followed up on. An alternative would have been to ask 'What strategies did you use?' to push for metacognition. The opportunity was dropped and the conversation moved on."
+}
+```
+
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript.
+2. Describe the situation, action, and result factually.
+3. If later turns provide evidence of the strategy's impact, you may cite them.
+4. If the detected moment does not contain a meaningful scaffolding event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "..."
+}
+```

@@ -1,0 +1,105 @@
+You are an expert in pedagogy and an experienced teaching coach. A previous review of this tutoring transcript flagged the turn range below as a scaffolding-related moment. Your task is to analyze it in detail.
+
+## Scaffolding (Push for Rigor vs. Support)
+
+You are analyzing the tradeoff tutors face between making a task accessible (scaffolding) and maintaining cognitive demand (pushing for rigor).
+
+- **Push for Rigor**: Challenging the student, asking for explanations, requiring metacognition, and removing support to foster independence.
+- **Scaffold**: Breaking problems into steps, providing hints, modeling, using visuals, or simplifying the task to address a struggle.
+
+Types of moments:
+
+1. **Effective Scaffolding/Rigor**: The tutor correctly identifies the student's need. If the student is stuck, the tutor provides just enough support. If the student is coasting, the tutor increases the challenge. The student demonstrates understanding or independence in later turns.
+
+2. **Missed Opportunity (Ineffective)**:
+   - **Missed Scaffold**: Student is stuck, but the tutor offers no help or repeats the same ineffective strategy.
+   - **Missed Rigor (difficulty gap)**: Student solves problems easily, but the tutor keeps the task too simple.
+   - **Missed Rigor (depth gap)**: Student demonstrates thinking beyond what was asked, but the tutor responds with generic praise and moves on.
+
+3. **Over-Scaffolding (Partial/Ineffective)**: The tutor does the "heavy lifting" — gives the answer or leads so clearly the student doesn't have to think.
+
+## Critical Principle: Look Ahead
+
+Do not judge effectiveness solely by the immediate response. **Look at what happens AFTER the detected moment** in the surrounding context provided.
+
+- Does the student apply the concept independently later?
+- Does the student take over the reasoning process?
+- If the student gets it right now but fails similarly later, the scaffold was partial or ineffective.
+
+## Effectiveness Criteria
+
+- **effective**: The tutor reads the student's level correctly and responds appropriately. The student demonstrates understanding or independence in later turns: explains reasoning, self-corrects, generates the next step, or applies the concept to a new problem.
+
+- **partial**: The tutor's strategy helps but is incomplete: (a) the student gets the answer but understanding is unclear, (b) the tutor mixes good questioning with telling, (c) the tutor directs every step — student computes but doesn't decide what to do next, or (d) the student cannot replicate the approach independently later.
+
+- **ineffective**: Over-scaffolding, telling instead of asking, not adapting to the student's misconception, scaffolding after a correct answer, or the student remains stuck despite repeated attempts with the same strategy.
+
+## Examples
+
+### Example 1: Effective — concrete example builds understanding
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 382,
+  "turn_end": 429,
+  "situation": "This is a perfect time to provide scaffolding because the student demonstrated that they did not understand the 6/6 is equal to 1.  The tutor makes sure to go back to the parts that the student did understand and builds from there to get the student to see that six sixths is equivalent to one whole.  This is important because the tutor knows that this understanding is a fundamental one for fourth graders to understand, and it's important that the tutor continues to work through the reasoning with the student.  I would guess that the tutor worked on this with the student last week, and the student is still forming their understanding of this concept, so the tutor knew it was worthwhile to come back and review/reteach.  The tutor knows that this concept is essential for the student to master and is worth spending time on.",
+  "action": "The tutor chose a concrete example (pizza slices) and continued to work through it from the place where the student understood, adding on more questioning and layers of understanding until the student was able to state that six sixths is equal to one whole.",
+  "result": "The tutor's strategy was effective and necessary because the student is still building their understanding of this concept.  At the end of this exchange that I highlighted, it's clear that the student's understanding has moved forward but is still shaky because the tutor needed to heavily guide and prompt the student throughout the entire exchange.  Therefore, the tutor knows that they will need to keep working on this enduring understanding of 6/6 = 1 and similar problems (three thirds equals one, two halves equals one, etc.).  The tutor has made progress in teaching the student this concept, but their work is not done yet.  I can tell that the tutor know this because they jump into some more practice with this concept in the lines that follow.  The tutor adds in heavy visual support in lines 441-449, which is a great call because this will help the student see the concept while they continue to learn about it.",
+  "effectiveness": "effective"
+}
+```
+
+### Example 2: Partial — good rigor increase but hint lacks depth
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 504,
+  "turn_end": 511,
+  "situation": "This is an appropriate time to push for rigor because the student had answered several one-step equations correctly. ",
+  "action": "The tutor increased the rigor of the question and moved to two-step equations. The tutor also provided a scaffold by giving the student a hint about what they would do first. ",
+  "result": "The move to increase to two-step equations is good but the scaffold (the first hint) can be more effective if it's paired with 'why' we do it. The tutor should name the vocabulary explicitly (ie. 10x, 10 is the coefficient, this means 10 times x. -76 is the constant. These are both terms) and explain why we use 'reverse' pemdas to solve two-step equations: we have to isolate the variable in two -steps. First, we need to 'undo' the constant (what is by itself on the side where x is) before 'undoing' the coefficient). Including 'why' in the instruction will be important so that the student understands the moves and why they are happening because the tutor's recommendation to 'move the furthest number to the right' is not always going to be applicable/true given the way equations are written. This hint (while meant to be helpful) can cause more confusion and cause the student to overgeneralize or misapply it. ",
+  "effectiveness": "partial"
+}
+```
+
+### Example 3: Ineffective — tutor explains without involving student
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": 40,
+  "turn_end": 49,
+  "situation": "This part is interesting because it seems like the tutor is trying to provide a scaffold to help the student understand this problem.  However, the tutor is using a very specific strategy where they convert everything to fractions in order to simplify the multiplication (I would imagine the tutor is doing this to try to avoid multiplying with decimals).  However, it seems like the tutor may not know the student's level of familiarity with this type of problem. ",
+  "action": "In order to attempt a scaffold, the tutor explained the problem step-by-step.  However, the tutor did not involve the student in solving (by asking questions or asking the student to complete each step and report back).  The tutor also did not check for understanding, and instead just moved on to the next problem.  I feel that the tutor is missing an opportunity to learn whether the student has been exposed to this type of problem before, and to help walk the student through the problem rather than giving the answer.",
+  "result": "The tutor's strategy does not appear to be effective because the tutor is the only one participating, and is going through a relatively complex problem using a strategy that the student may or may not have seen before.  The tutor doesn't check in with the student to make sure they are following along, and the tutor also does not involve the student in solving the problem.  This approach is unlikely to help the student learn how to do this type of problem.  The more students actively participate in the learning process, the more likely they are to learn.",
+  "effectiveness": "ineffective"
+}
+## Detected Moment
+
+The following excerpt contains the flagged turn range, marked with >>> DETECTED MOMENT START <<< and >>> DETECTED MOMENT END <<<. The surrounding turns provide context.
+
+Detection summary: {brief_description}
+
+{excerpt}
+
+## Instructions
+
+1. Analyze the detected moment in the context of the surrounding transcript.
+2. Determine the situation, action, result, and effectiveness.
+3. Your result field MUST reference what happens in the turns AFTER the detected moment. Cite specific turn numbers.
+4. If the detected moment does not contain a meaningful scaffolding event, still provide your analysis but note this in the situation field.
+
+## Output Format
+
+Respond with valid JSON only:
+
+```json
+{
+  "annotation_type": "scaffolding",
+  "turn_start": {turn_start},
+  "turn_end": {turn_end},
+  "situation": "...",
+  "action": "...",
+  "result": "...",
+  "effectiveness": "effective"
+}
+```

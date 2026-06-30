@@ -1,0 +1,14 @@
+{
+  "conversation_id": "conv-ddd",
+  "key_moments": [
+    {
+      "turn_start": 1,
+      "turn_end": 3,
+      "situation_label_agg": "scaffolding",
+      "situation": "Student struggled to recall multiplication facts",
+      "moment_id": "m-004",
+      "annotator_id": "ann-1",
+      "cut_turn": 2
+    }
+  ]
+}
