@@ -1,0 +1,53 @@
+# Secrets
+.env
+.envrc
+env
+
+# Local virtualenv
+.venv/
+venv
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+*.egg-info/
+
+# Per-run log files
+logs/
+
+# Local S3 bucket mirror
+s3_bucket/
+
+# All data and results -- fully gitignored (private/local build inputs & artifacts,
+# never committed). Data schemas are documented at the HuggingFace release
+# (dataset card + *.schema.json), not in-repo.
+data/
+results/
+benchmark/results/
+*.jsonl
+!tests/**/*.jsonl
+temp
+tmp
+
+# Claude Code session data (harness state — local only)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# Intermediate Outputs
+*.html
+*.pdf
+notes.txt
+
+# Old directory (replaced by annotator/)
+synthetic_annotator/
+
+# History archive (restored from git, too large to track)
+history/
+
+# Legacy code archive (untracked; preserved on disk for porting)
+_archive/
+
+# Built scenario datasets are NOT committed -- distributed via HuggingFace.

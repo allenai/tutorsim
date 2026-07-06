@@ -1,0 +1,22 @@
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lcc cc}
+        \toprule
+        & \multicolumn{2}{c}{\textbf{Plain prompt}} & \multicolumn{2}{c}{\textbf{Evaluation-aware prompt}} \\
+        \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+        \textbf{Tutor} & $D_\text{KL}(\text{S} \| \text{R})$ & $D_\text{KL}(\text{R} \| \text{S})$ & $D_\text{KL}(\text{S} \| \text{R})$ & $D_\text{KL}(\text{R} \| \text{S})$ \\
+        \midrule
+        Human tutors       & \gradientwo{0.179} & \gradientwo{0.177} & \gradientwo{0.179} & \gradientwo{0.177} \\
+        \midrule
+        Claude Opus 4.8    & \gradientwo{0.173} & \gradientwo{0.182} & \gradientwo{0.181} & \gradientwo{0.181} \\
+        Claude Sonnet 4.6  & \gradientwo{0.143} & \gradientwo{0.132} & \gradientwo{0.310} & \gradientwo{0.345} \\
+        DeepSeek V4 Pro    & \gradientwo{0.141} & \gradientwo{0.142} & \gradientwo{0.170} & \gradientwo{0.198} \\
+        Gemini 2.5 Pro     & \gradientwo{0.154} & \gradientwo{0.122} & \gradientwo{0.207} & \gradientwo{0.228} \\
+        Gemini 3.5 Flash   & \gradientwo{0.160} & \gradientwo{0.153} & \gradientwo{0.199} & \gradientwo{0.203} \\
+        GPT 5.5            & \gradientwo{0.048} & \gradientwo{0.050} & \gradientwo{0.119} & \gradientwo{0.128} \\
+        GPT 5.4 mini       & \gradientwo{0.128} & \gradientwo{0.143} & \gradientwo{0.147} & \gradientwo{0.153} \\
+        \bottomrule
+    \end{tabular}
+    \caption{KL divergence between scaffolding-appropriate (S) and rigor-appropriate moment (R) distributions, computed in both directions, for human tutors and each LM tutor under plain and evaluation-aware prompts.}
+    \label{tab:kl_divergence}
+\end{table}

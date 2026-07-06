@@ -1,0 +1,11 @@
+{
+  "conversation_id": "conv-ccc",
+  "context": "Grade 6, Science",
+  "turns": [
+    {"turn_number": 1, "role": "STUDENT", "text": "I don't understand evaporation"},
+    {"turn_number": 2, "role": "TUTOR", "text": "What happens to water when it gets hot?"},
+    {"turn_number": 3, "role": "TUTOR", "text": "Think about what you see when you boil water"},
+    {"turn_number": 4, "role": "STUDENT", "text": "It turns into steam?"},
+    {"turn_number": 5, "role": "TUTOR", "text": "Exactly! That's evaporation."}
+  ]
+}

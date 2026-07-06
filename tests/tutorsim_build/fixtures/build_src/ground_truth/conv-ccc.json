@@ -1,0 +1,14 @@
+{
+  "conversation_id": "conv-ccc",
+  "key_moments": [
+    {
+      "turn_start": 2,
+      "turn_end": 4,
+      "situation_label_agg": "scaffolding",
+      "situation": "Tutor guided student step by step",
+      "moment_id": "m-003",
+      "annotator_id": "ann-1",
+      "cut_turn": 3
+    }
+  ]
+}

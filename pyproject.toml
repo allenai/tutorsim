@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tutorsim"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic",
+    "openai",
+    "google-genai",
+    "pyyaml",
+    "python-dotenv",
+    "datasets",
+]
+
+[project.optional-dependencies]
+# maintainer-only dataset construction / release tooling
+build = ["boto3", "jsonschema"]
+# analysis / figures
+taxonomy = ["pandas", "matplotlib", "seaborn"]
+# dev alone runs the runtime tests; add build-dev (+taxonomy) for the full suite
+dev = ["pytest"]
+build-dev = ["tutorsim[build]", "moto[s3]"]
+
+[project.scripts]
+tutorsim = "tutorsim.cli:main"
+tutorsim-build = "tutorsim_build.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["tutorsim*", "tutorsim_build*", "analysis*"]
+
+[tool.setuptools.package-data]
+tutorsim = [
+    "default_config.yaml",
+    "prompts/tutor/*.txt",
+    "prompts/student/*.txt",
+    "prompts/scorer/annotate/*.md",
+    "prompts/scorer/decompose/*.md",
+    "prompts/scorer/structure/*.md",
+]
+tutorsim_build = [
+    "moments.schema.json",
+    "prompts/classify/labeller/*.txt",
+    "prompts/classify/situation_labeller/*.md",
+    "prompts/trait_generator/*.txt",
+    "prompts/trait_generator/dimensions/*.txt",
+]
+analysis = [
+    "prompts/taxonomy/*.md",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]

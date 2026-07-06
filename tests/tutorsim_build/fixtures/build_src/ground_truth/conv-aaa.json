@@ -1,0 +1,32 @@
+{
+  "conversation_id": "conv-aaa",
+  "key_moments": [
+    {
+      "turn_start": 3,
+      "turn_end": 5,
+      "situation_label_agg": "scaffolding",
+      "situation": "Student gave a vague guess about fractions",
+      "moment_id": "m-001",
+      "annotator_id": "ann-1",
+      "cut_turn": 4
+    },
+    {
+      "turn_start": 3,
+      "turn_end": 5,
+      "situation_label_agg": "scaffolding",
+      "situation": "Student gave a vague guess about fractions",
+      "moment_id": "m-001",
+      "annotator_id": "ann-2",
+      "cut_turn": 4
+    },
+    {
+      "turn_start": 3,
+      "turn_end": 5,
+      "situation_label_agg": "scaffolding",
+      "situation": "Student gave a vague guess about fractions",
+      "moment_id": "m-001",
+      "annotator_id": "ann-3",
+      "cut_turn": 5
+    }
+  ]
+}
