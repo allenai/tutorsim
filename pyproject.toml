@@ -18,7 +18,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "anthropic",
+    # >=0.72 exposes output_config as a top-level message param; the batch path
+    # (client._run_batch_anthropic) sets params["output_config"] directly, so an
+    # older SDK would strip effort and silently diverge from the sync path.
+    "anthropic>=0.72",
     "openai",
     "google-genai",
     "pyyaml",
