@@ -294,6 +294,83 @@ def leaderboard(runs: list) -> tuple:
     return markdown, csv_str
 
 
+def format_run_summary(
+    metrics: dict,
+    *,
+    tutor_model: str = "",
+    mode: str = "",
+    run_id: str = "",
+) -> str:
+    """Render a compact, human-readable summary of a single run's metrics.
+
+    Accepts either a single-trial aggregate dict (as written to summary.json
+    when trials==1) or the trials>1 {trials, mean, spread} shape. Uses the same
+    reader-facing metric derivations as the leaderboard (appropriate
+    scaffolding/rigor, avoids-over-scaffolding = 1 - rate), so the end-of-run
+    terminal summary matches what `report` later tabulates. For trials>1 each
+    score is shown as ``mean ± std``.
+    """
+    trials = metrics.get("trials", 1)
+    core = metrics.get("mean", metrics)      # trials>1 nests the aggregate under "mean"
+    spread = metrics.get("spread") or {}
+
+    row = _extract_row({
+        **core,
+        "latency": metrics.get("latency"),
+        "tokens": metrics.get("tokens"),
+        "tutor_model": tutor_model,
+        "mode": mode,
+    })
+
+    def _sub(spread_dict, subkey, field):
+        sub = spread_dict.get(subkey) if isinstance(spread_dict, dict) else None
+        return sub.get(field) if isinstance(sub, dict) else None
+
+    def _fmt_metric(value, std):
+        if value is None:
+            return "-"
+        text = f"{value:.3f}"
+        if trials > 1 and isinstance(std, (int, float)):
+            text += f" ± {std:.3f}"
+        return text
+
+    n = row.get("n") or 0
+    if isinstance(n, float) and n.is_integer():
+        n = int(n)
+    counts = metrics.get("run_counts") or {}
+
+    lines = ["Run summary" + (f": {run_id}" if run_id else "")]
+    ident = f"  tutor={tutor_model or '-'}  mode={mode or '-'}  moments={n}"
+    if trials > 1:
+        ident += f"  trials={trials}"
+    lines.append(ident)
+    lines.append("  " + "-" * 44)
+
+    metric_rows = [
+        ("Appropriate Scaffolding", row.get("appropriate_scaffolding"), _sub(spread, "scaffold_calibrated", "score")),
+        ("Appropriate Rigor",       row.get("appropriate_rigor"),       _sub(spread, "rigor_calibrated", "score")),
+        ("Avoids Over-Scaffolding", row.get("avoids_overscaffold"),     _sub(spread, "overscaffold", "rate")),
+    ]
+    for label, value, std in metric_rows:
+        lines.append(f"  {label:<26} {_fmt_metric(value, std)}")
+
+    if counts:
+        lines.append(
+            f"  {'Moments succeeded':<26} "
+            f"{counts.get('succeeded', 0)}/{counts.get('attempted', 0)} "
+            f"(failed {counts.get('failed', 0)}, resumed {counts.get('resumed', 0)})"
+        )
+    if row.get("tutor_lat_p50") is not None or row.get("tutor_lat_p95") is not None:
+        lines.append(
+            f"  {'Tutor latency p50/p95 (s)':<26} "
+            f"{_fmt_md(row.get('tutor_lat_p50'))} / {_fmt_md(row.get('tutor_lat_p95'))}"
+        )
+    if row.get("tokens_total") is not None:
+        lines.append(f"  {'Total tokens':<26} {_fmt_md(row.get('tokens_total'))}")
+
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # HTML viewer
 # ---------------------------------------------------------------------------
