@@ -30,8 +30,19 @@ def test_infer_provider_unknown_raises():
 
 class TestAnthropicThinkingParam:
     def test_adaptive_models_get_adaptive_shape(self):
-        for m in ("claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-haiku-4-5", "claude-sonnet-4-6", "claude-sonnet-5", "claude-fable-5"):
+        for m in ("claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-5", "claude-fable-5"):
             assert _anthropic_thinking_param(m, 0) == {"type": "adaptive"}
+
+    def test_haiku_4_5_gets_legacy_enabled_shape(self):
+        # Haiku 4.5 is the one current model without adaptive-thinking support
+        # (extended thinking only, per the Anthropic models overview) --
+        # sending {"type": "adaptive"} there would 400.
+        assert _anthropic_thinking_param("claude-haiku-4-5", 4096) == {
+            "type": "enabled", "budget_tokens": 4096,
+        }
+        assert _anthropic_thinking_param("claude-haiku-4-5-20251001", 0) == {
+            "type": "enabled", "budget_tokens": 16384,
+        }
 
     def test_unknown_or_future_model_defaults_to_adaptive(self):
         # A brand-new Anthropic model must work with no code change (README
@@ -223,6 +234,11 @@ from tutorsim.client import (
 
 
 class TestVisionSupport:
+    def test_vision_capable_prefixes_covers_current_anthropic_tutors(self):
+        # Every Anthropic model in the tutor roster must pass the vision gate.
+        validate_vision_support("claude-sonnet-5")
+        validate_vision_support("claude-fable-5")
+
     def test_vision_capable_prefixes_contains_known_models(self):
         # Spot-check a few entries from the source list.
         assert "claude-opus-4" in VISION_CAPABLE_PREFIXES
@@ -438,6 +454,30 @@ def test_run_batch_anthropic_remaps_custom_ids(monkeypatch):
         )
     assert out["kA"]["text"] == "A"
     assert out["kB"]["text"] == "B"
+
+
+def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
+    """Batch requests must carry the same thinking/effort params as sync calls
+    (benchmark fidelity: batch mode may not silently diverge from run_conversation)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with patch("anthropic.Anthropic") as MockAnthropic, \
+         patch("tutorsim.client.time.sleep"):
+        client_obj = MagicMock()
+        batch = MagicMock()
+        batch.id = "b1"
+        batch.processing_status = "ended"
+        client_obj.messages.batches.create.return_value = batch
+        client_obj.messages.batches.retrieve.return_value = batch
+        client_obj.messages.batches.results.return_value = []
+        MockAnthropic.return_value = client_obj
+        c = ModelClient("claude-opus-4-8")
+        run_batch(
+            c, [build_batch_entry("kA", "pA")],
+            poll_interval=0, thinking=True, effort="xhigh",
+        )
+        (submitted,) = client_obj.messages.batches.create.call_args.kwargs["requests"]
+    assert submitted["params"]["thinking"] == {"type": "adaptive"}
+    assert submitted["params"]["output_config"] == {"effort": "xhigh"}
 
 
 def test_run_batch_anthropic_resume_rebuilds_id_map(monkeypatch):

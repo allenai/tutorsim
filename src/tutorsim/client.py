@@ -31,7 +31,7 @@ PROVIDER_PREFIXES = [
 
 
 VISION_CAPABLE_PREFIXES = (
-    "claude-opus-4", "claude-sonnet-4",
+    "claude-opus-4", "claude-sonnet-4", "claude-sonnet-5", "claude-fable-5",
     "gemini-2", "gemini-3",
     "gpt-4o", "gpt-4.1", "gpt-5", "o4",
 )
@@ -83,14 +83,17 @@ TOGETHER_BASE_URL = "https://api.together.xyz/v1"
 
 
 # Adaptive thinking ({"type": "adaptive"}) is the modern default and the shape
-# every current Anthropic model uses. The legacy enabled+budget_tokens shape is
-# needed only by a *closed, frozen set* of pre-adaptive models -- no new model
-# is ever added here. So we default to adaptive and enumerate only the legacy
-# models; a brand-new Anthropic model works with no code change (see README
-# "Running new tutor models"). Adaptive is rejected on nothing current; legacy
-# enabled+budget is rejected on Opus 4.7+/Sonnet 5/Fable 5.
+# every current Opus/Sonnet-tier Anthropic model uses. The legacy
+# enabled+budget_tokens shape is needed only by a *closed, frozen set* of
+# pre-adaptive models -- no new model is ever added here. So we default to
+# adaptive and enumerate only the legacy models; a brand-new Anthropic model
+# works with no code change (see README "Running new tutor models"). Legacy
+# enabled+budget is rejected on Opus 4.7+/Sonnet 5/Fable 5. Haiku 4.5 is the
+# one current model still on the legacy shape (extended thinking only, no
+# adaptive support per the Anthropic models overview).
 _ANTHROPIC_LEGACY_THINKING_MODELS = (
     "claude-3-7-sonnet",
+    "claude-haiku-4-5",
     "claude-opus-4-0", "claude-opus-4-20250514",
     "claude-opus-4-1",
     "claude-opus-4-5",
@@ -750,6 +753,7 @@ def run_batch(client: 'ModelClient', entries: list[dict],
               poll_interval: int = 60,
               thinking: bool = False, thinking_budget: int = 0,
               reasoning_effort: str = "",
+              effort: str = "",
               enable_cache: bool = False,
               existing_batch_id: str | None = None,
               on_batch_created=None) -> dict:
@@ -783,6 +787,7 @@ def run_batch(client: 'ModelClient', entries: list[dict],
     elif provider == "anthropic":
         return _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
                                     thinking, thinking_budget, reasoning_effort,
+                                    effort=effort,
                                     enable_cache=enable_cache,
                                     existing_batch_id=existing_batch_id,
                                     on_batch_created=on_batch_created)
@@ -1072,6 +1077,7 @@ def _run_batch_openai(client, entries, json_mode, display_name, poll_interval,
 
 def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval,
                          thinking=False, thinking_budget=0, reasoning_effort="",
+                         effort="",
                          enable_cache=False,
                          existing_batch_id=None, on_batch_created=None):
     """Anthropic batch: create message batch, poll, stream results.
@@ -1152,6 +1158,10 @@ def _run_batch_anthropic(client, entries, json_mode, display_name, poll_interval
                 )
             if thinking_param is not None:
                 params["thinking"] = thinking_param
+            # effort goes inside output_config, mirroring the sync path
+            # (_generate_anthropic). Haiku 4.5 rejects effort -- skip there.
+            if effort and client.model and not client.model.startswith("claude-haiku-4-5"):
+                params["output_config"] = {"effort": effort}
 
             requests.append(Request(
                 custom_id=f"r{i}",
