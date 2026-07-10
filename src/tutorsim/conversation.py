@@ -383,6 +383,22 @@ def run_conversation(
     return transcript
 
 
+def _batch_gen_kwargs(roster_kwargs: dict) -> dict:
+    """Map roster generation kwargs to the subset run_batch understands.
+
+    run_conversation forwards the full roster kwargs to client.generate();
+    run_batch exposes the same generation knobs as explicit parameters, so
+    pick them out here. Keeping the mapping explicit (rather than **splat)
+    means an unknown roster key fails loudly in sync mode first.
+    """
+    return {
+        "thinking": roster_kwargs.get("thinking", False),
+        "thinking_budget": roster_kwargs.get("thinking_budget", 0),
+        "reasoning_effort": roster_kwargs.get("reasoning_effort", ""),
+        "effort": roster_kwargs.get("effort", ""),
+    }
+
+
 def run_conversations_batch(
     scenarios: list[Moment],
     *,
@@ -450,6 +466,13 @@ def run_conversations_batch(
         )
     student_client = student_res["client"]
 
+    # Generation kwargs from the model roster (thinking/effort/etc.) must be
+    # forwarded to run_batch, mirroring run_conversation's **kwargs merge --
+    # otherwise batch runs silently diverge from sync benchmark runs (e.g.
+    # tutors losing thinking/effort).
+    tutor_gen_kwargs = _batch_gen_kwargs(tutor_res["kwargs"])
+    student_gen_kwargs = _batch_gen_kwargs(student_res["kwargs"])
+
     # Per-scenario state
     transcript_map: dict[str, Transcript] = {}
     transcript_prefix_map: dict[str, str] = {}
@@ -516,6 +539,7 @@ def run_conversations_batch(
             tutor_client, tutor_entries, json_mode=False,
             display_name=f"tutor_round_{round_num + 1}",
             poll_interval=poll_interval,
+            **tutor_gen_kwargs,
         )
 
         failed = []
@@ -595,6 +619,7 @@ def run_conversations_batch(
             student_client, student_entries, json_mode=False,
             display_name=f"student_round_{round_num + 1}",
             poll_interval=poll_interval,
+            **student_gen_kwargs,
         )
 
         failed = []

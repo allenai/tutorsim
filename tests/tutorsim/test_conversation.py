@@ -688,11 +688,14 @@ def _make_scenario_id(sid: str, cut_turn: int = 5) -> "Scenario":
     )
 
 
-def _patch_batch(monkeypatch, tutor_batch_results: list[dict], student_batch_results: list[dict]):
+def _patch_batch(monkeypatch, tutor_batch_results: list[dict], student_batch_results: list[dict],
+                 tutor_kwargs: dict | None = None, student_kwargs: dict | None = None):
     """Patch resolve_tutor, resolve_student, system prompts, trait, and tutorsim.client.run_batch.
 
     tutor_batch_results: list of {sid: {"text": ...}} dicts, one per round.
     student_batch_results: list of {sid: {"text": ...}} dicts, one per round.
+    tutor_kwargs/student_kwargs: roster generation kwargs returned by the
+    patched resolve_* (defaults to {}).
 
     run_batch is called alternately: tutor round 1, student round 1, tutor round 2, ...
     We interleave them in the call sequence.
@@ -704,11 +707,11 @@ def _patch_batch(monkeypatch, tutor_batch_results: list[dict], student_batch_res
 
     monkeypatch.setattr(
         "tutorsim.conversation.resolve_tutor",
-        lambda id: {"kind": "hosted", "client": tutor_client, "kwargs": {}},
+        lambda id: {"kind": "hosted", "client": tutor_client, "kwargs": tutor_kwargs or {}},
     )
     monkeypatch.setattr(
         "tutorsim.conversation.resolve_student",
-        lambda id=None: {"kind": "hosted", "client": student_client, "kwargs": {}},
+        lambda id=None: {"kind": "hosted", "client": student_client, "kwargs": student_kwargs or {}},
     )
     monkeypatch.setattr(
         "tutorsim.conversation.build_tutor_system_prompt",
@@ -771,6 +774,32 @@ def test_batch_two_scenarios_returns_two_transcripts(monkeypatch):
     assert results[0].scenario_id == "sid-1"
     assert results[1].scenario_id == "sid-2"
     assert all(r.completed for r in results)
+
+
+def test_batch_forwards_roster_thinking_and_effort_to_run_batch(monkeypatch):
+    """Benchmark fidelity: batch mode must forward the roster's generation
+    kwargs (thinking/effort/...) to run_batch, exactly as run_conversation
+    merges them into client.generate(). Regression test for the bug where
+    batch tutors silently ran without thinking/effort."""
+    from tutorsim.conversation import run_conversations_batch
+
+    s1 = _make_scenario_id("sid-1", cut_turn=3)
+    tutor_round1 = {"sid-1": {"text": "Hello from tutor"}}
+    student_round1 = {"sid-1": {"text": "Student reply"}}
+
+    run_batch_mock = _patch_batch(
+        monkeypatch, [tutor_round1], [student_round1],
+        tutor_kwargs={"thinking": True, "effort": "xhigh"},
+        student_kwargs={"thinking": False},
+    )
+
+    run_conversations_batch([s1], tutor_id="fake-tutor", max_turns=2, poll_interval=0)
+
+    tutor_call, student_call = run_batch_mock.call_args_list
+    assert tutor_call.kwargs["thinking"] is True
+    assert tutor_call.kwargs["effort"] == "xhigh"
+    assert student_call.kwargs["thinking"] is False
+    assert student_call.kwargs["effort"] == ""
 
 
 def test_batch_ended_via_tracked_per_scenario(monkeypatch):
