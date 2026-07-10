@@ -693,6 +693,12 @@ def run_cell(
             os.path.join(results_root, run_id),
         )
 
+        # Echo the per-run score summary to stdout. The metrics are already in
+        # summary.json; this surfaces them without a separate `report` step
+        # (which stays the cross-run leaderboard). Printed, not logged, so it
+        # shows regardless of --log-level.
+        print(report.format_run_summary(metrics, tutor_model=tutor, mode=mode, run_id=run_id))
+
         return run_id
 
 

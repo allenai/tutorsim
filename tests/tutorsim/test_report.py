@@ -434,3 +434,66 @@ def test_leaderboard_latency_and_tokens_non_dash():
     # None values -> '-' in markdown
     assert "| - |" in none_lines[0] or none_lines[0].count("| - ") >= 2, \
         f"Expected '-' for None lat/tokens in: {none_lines[0]}"
+
+
+# ---------------------------------------------------------------------------
+# format_run_summary() -- the end-of-run terminal summary
+# ---------------------------------------------------------------------------
+
+from tutorsim.report import format_run_summary
+
+
+def test_format_run_summary_single_trial():
+    """Single-trial metrics render the paper's three reader metrics + counts."""
+    metrics = dict(SUMMARY_A)
+    metrics["run_counts"] = {"attempted": 100, "succeeded": 98, "failed": 2, "resumed": 1}
+    out = format_run_summary(metrics, tutor_model="model-alpha", mode="scaffolding_rigor",
+                             run_id="model-alpha_scaffolding_rigor_x")
+
+    assert "Run summary: model-alpha_scaffolding_rigor_x" in out
+    assert "tutor=model-alpha" in out and "mode=scaffolding_rigor" in out
+    assert "moments=100" in out
+    # Reader-facing metrics, 3dp, same derivation as the leaderboard.
+    assert "Appropriate Scaffolding    0.750" in out
+    assert "Appropriate Rigor          0.600" in out
+    assert "Avoids Over-Scaffolding    0.900" in out   # 1 - 0.10
+    assert "98/100" in out and "failed 2" in out and "resumed 1" in out
+    assert "500000" in out
+    # No spread markers for a single trial.
+    assert "±" not in out
+    assert "trials=" not in out
+
+
+def test_format_run_summary_trials_shows_mean_and_spread():
+    """trials>1 uses the mean/spread shape and renders mean ± std."""
+    metrics = {
+        "trials": 3,
+        "mean": {
+            "n_scenarios": 100,
+            "scaffold_calibrated": {"score": 0.75, "n_clean_yes": 0, "n_total": 100, "n_overscaffold": 0},
+            "rigor_calibrated":    {"score": 0.60, "n_clean_yes": 0, "n_total": 100},
+            "overscaffold":        {"rate": 0.10, "n_yes": 0, "n_total": 100, "available": True},
+        },
+        "spread": {
+            "scaffold_calibrated": {"score": 0.02},
+            "rigor_calibrated":    {"score": 0.03},
+            "overscaffold":        {"rate": 0.01},
+        },
+        "latency": {"tutor": {"p50_seconds": 1.2, "p95_seconds": 3.4}},
+        "tokens":  {"total": {"total_tokens": 500000}},
+        "run_counts": {"attempted": 300, "succeeded": 300, "failed": 0, "resumed": 0},
+    }
+    out = format_run_summary(metrics, tutor_model="model-alpha", mode="scaffolding_rigor")
+
+    assert "trials=3" in out
+    assert "0.750 ± 0.020" in out
+    assert "0.600 ± 0.030" in out
+    assert "0.900 ± 0.010" in out   # avoids = 1 - mean rate; std carries through
+
+
+def test_format_run_summary_none_metrics_render_dash():
+    """None scores/latency/tokens render as '-' rather than crashing."""
+    out = format_run_summary(SUMMARY_NONE, tutor_model="model-gamma", mode="scaffolding_only")
+    assert "Appropriate Scaffolding    -" in out
+    assert "Appropriate Rigor          -" in out
+    assert "Avoids Over-Scaffolding    -" in out
