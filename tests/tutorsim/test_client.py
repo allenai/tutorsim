@@ -30,16 +30,23 @@ def test_infer_provider_unknown_raises():
 
 class TestAnthropicThinkingParam:
     def test_adaptive_models_get_adaptive_shape(self):
-        for m in ("claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-haiku-4-5", "claude-sonnet-4-6", "claude-fable-5"):
+        for m in ("claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-haiku-4-5", "claude-sonnet-4-6", "claude-sonnet-5", "claude-fable-5"):
             assert _anthropic_thinking_param(m, 0) == {"type": "adaptive"}
 
-    def test_non_adaptive_model_gets_enabled_with_budget(self):
-        assert _anthropic_thinking_param("claude-3-5-sonnet-20241022", 8192) == {
+    def test_unknown_or_future_model_defaults_to_adaptive(self):
+        # A brand-new Anthropic model must work with no code change (README
+        # "Running new tutor models"). Anything not in the frozen legacy set
+        # gets adaptive.
+        for m in ("claude-opus-5", "claude-sonnet-6", "totally-new-claude"):
+            assert _anthropic_thinking_param(m, 0) == {"type": "adaptive"}
+
+    def test_legacy_model_gets_enabled_with_budget(self):
+        assert _anthropic_thinking_param("claude-sonnet-4-5", 8192) == {
             "type": "enabled", "budget_tokens": 8192,
         }
 
-    def test_non_adaptive_model_zero_budget_defaults_16384(self):
-        assert _anthropic_thinking_param("claude-3-5-sonnet-20241022", 0) == {
+    def test_legacy_model_zero_budget_defaults_16384(self):
+        assert _anthropic_thinking_param("claude-sonnet-4-5", 0) == {
             "type": "enabled", "budget_tokens": 16384,
         }
 
