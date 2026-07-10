@@ -1,6 +1,10 @@
 """Tutor action-facet taxonomy: classify decomposed actions into a 13-letter
-scheme (A-M), compute population-level macro/moment statistics, and render
-the action-distribution and dumbbell figures.
+scheme (A-M) and compute population-level macro/moment statistics.
+
+This is the taxonomy *data-generation* layer, part of the tutorsim runtime.
+Figure *rendering* lives in the analysis notebooks under
+analysis/working-paper-*, which import these symbols
+(`from tutorsim import taxonomy as tx`) and draw from the tables produced here.
 
 Input contracts (use either; both are tutorsim-native, no new file format):
 
@@ -8,27 +12,26 @@ Input contracts (use either; both are tutorsim-native, no new file format):
        {conversation_id, num_turns, key_moments: [...]}.
      Each key_moment carries annotation_type, turn_start, turn_end,
      situation_label_agg, action_decomposed, .... This matches the
-     ground-truth bundle distributed alongside the benchmark.
+     ground-truth bundle distributed alongside the benchmark (the human
+     reference distribution).
 
   2. Tutorsim run results: a directory of per-scenario score files
        results/<run_id>/scores/<scenario_id>.json, where each file is an
        Annotation produced by tutorsim.scoring.score. Pair with the
        scenarios.jsonl used for the run to recover the situation label,
-       model, and prompt for each scenario.
+       model, and prompt for each scenario. (During a run, the LM side is
+       classified in-memory via `facets_from_annotations`.)
 
 Pipeline (each stage idempotent and writable to/readable from disk):
-  load_*  -> Facet stream
+  load_* / facets_from_annotations  -> Facet stream
   build_pool -> kept facets + excluded facets (with reason)
   classify_pool -> {statement -> category letter}, resume-safe via sidecar
   build_headline_tables -> 5 pandas DataFrames (macro/moment)
-  build_figures -> figure_action_distribution.pdf, figure_dumbbell_grid.pdf
 
-Pandas / matplotlib / seaborn are optional extras (install with
-`pip install 'tutorsim[taxonomy]'`). Importing this module never requires
-them; they are checked lazily when the headline or figure stages run.
-
-The legacy unconsolidated working scripts live in analysis/taxonomy/*.py and
-are not used by this module.
+pandas is an optional extra (install with `pip install 'tutorsim[analysis]'`),
+needed only by the headline-table stage. Importing this module never requires
+it; it is checked lazily when the headline stage runs. matplotlib/seaborn are
+not used here -- they belong to the analysis figures.
 """
 
 from __future__ import annotations
@@ -44,12 +47,7 @@ from pathlib import Path
 from string import Template
 from typing import Any, Iterable, Iterator, Optional
 
-from importlib.resources import files as _files
-
-
-def resource_text(relative_path: str) -> str:
-    """Return the text of a resource file inside the analysis package."""
-    return (_files("analysis") / relative_path).read_text(encoding="utf-8")
+from tutorsim.resources import resource_text
 
 logger = logging.getLogger(__name__)
 
@@ -557,9 +555,59 @@ def load_tutorsim_results(
                 annotation_type="scaffolding",
                 situation_label=situation,
                 action_label=ann.get("action_label"),
-                result_label=ann.get("result_label"),
+                # Scored Annotation persists the field as `result` (not
+                # `result_label`); read the correct key.
+                result_label=ann.get("result"),
                 model=model,
                 prompt=prompt,
+                source="tutorsim",
+            )
+
+
+def facets_from_annotations(
+    annotations: Iterable[Any],
+    moments: Iterable[Any],
+    *,
+    model: str,
+    mode: str,
+) -> Iterator[Facet]:
+    """Stream Facets from in-memory scored Annotations + their Moments.
+
+    The in-run equivalent of `load_tutorsim_results` -- no disk round-trip and
+    no `scenarios.jsonl`: the situation label comes from each Moment's
+    `.dimension`. `annotations` and `moments` are parallel (annotation[i]
+    scored moment[i]). Only scaffolding annotations produce facets. `model` and
+    `mode` are recorded on each facet as the tutor/prompt that produced the
+    action (the classifier model is separate; see `classify_pool`).
+    """
+    for ann, moment in zip(annotations, moments):
+        if getattr(ann, "annotation_type", None) != "scaffolding":
+            continue
+        statements = getattr(ann, "action_decomposed", None) or []
+        if not statements:
+            continue
+        scenario_id = getattr(ann, "scenario_id", None) or getattr(moment, "id", "")
+        situation = getattr(moment, "dimension", None) or "unknown"
+        ts = getattr(ann, "turn_start", 0)
+        te = getattr(ann, "turn_end", 0)
+        action_label = getattr(ann, "action_label", None)
+        result_label = getattr(ann, "result", None)
+        for i, stmt in enumerate(statements):
+            if not isinstance(stmt, str):
+                continue
+            yield Facet(
+                moment_id=scenario_id,
+                transcript_id=_transcript_from_scenario(scenario_id),
+                turn_start=ts,
+                turn_end=te,
+                statement_index=i,
+                statement=stmt,
+                annotation_type="scaffolding",
+                situation_label=situation,
+                action_label=action_label,
+                result_label=result_label,
+                model=model,
+                prompt=mode,
                 source="tutorsim",
             )
 
@@ -761,6 +809,9 @@ def classify_pool(
     max_batches: Optional[int] = None,
     first_run_probe: int = CLASSIFIER_FIRST_RUN_PROBE,
     client: Any = None,
+    model: Optional[str] = None,
+    thinking: Optional[bool] = None,
+    batch_size: Optional[int] = None,
 ) -> dict[str, str]:
     """Classify every unique statement in `kept` into A-M.
 
@@ -777,8 +828,12 @@ def classify_pool(
             for sanity probes. If unset and no prior assignments exist, the
             first run stops after `first_run_probe` batches automatically;
             a subsequent re-run with no `max_batches` finishes the pool.
-        client: optional pre-built `anthropic.Anthropic` client. If None
-            we construct one (requires `ANTHROPIC_API_KEY`).
+        client: optional pre-built client exposing `.generate(...)` (a
+            `tutorsim.client.ModelClient` or a compatible test double). If
+            None we build a ModelClient from the `taxonomy` config block
+            (requires the provider API key).
+        model / thinking / batch_size: override the `taxonomy` config block;
+            each falls back to config (then a module default) when None.
 
     Returns:
         Mapping from statement -> category letter, covering every statement
@@ -789,6 +844,24 @@ def classify_pool(
     out_dir.mkdir(parents=True, exist_ok=True)
     assignments_path = out_dir / "assignments.jsonl"
     usage_path = out_dir / "usage_log.jsonl"
+
+    # Resolve model / thinking / batch_size from the taxonomy config block,
+    # honoring explicit overrides. Config import is local so `import
+    # tutorsim.taxonomy` stays lightweight (no client/provider-SDK import
+    # unless we actually classify).
+    spec: dict = {}
+    if client is None or model is None or thinking is None or batch_size is None:
+        try:
+            from tutorsim.config import taxonomy_spec
+            spec = taxonomy_spec()
+        except Exception:
+            spec = {}
+    if model is None:
+        model = spec.get("model", CLASSIFIER_MODEL)
+    if thinking is None:
+        thinking = bool(spec.get("thinking", False))
+    if batch_size is None:
+        batch_size = int(spec.get("batch_size", CLASSIFIER_BATCH_SIZE))
 
     statements = sorted(
         {f.statement.strip() for f in kept if f.statement and f.statement.strip()},
@@ -810,7 +883,7 @@ def classify_pool(
     if not pending:
         return assigned
 
-    total_batches = (len(pending) + CLASSIFIER_BATCH_SIZE - 1) // CLASSIFIER_BATCH_SIZE
+    total_batches = (len(pending) + batch_size - 1) // batch_size
     if max_batches is not None:
         stop_after = max_batches
     elif n_done == 0:
@@ -823,14 +896,14 @@ def classify_pool(
         stop_after = total_batches
 
     if client is None:
-        anthropic = importlib.import_module("anthropic")
-        client = anthropic.Anthropic()
+        from tutorsim.client import ModelClient
+        client = ModelClient(model)
 
-    ask = _make_classifier(client)
+    ask = _make_classifier(client, thinking=bool(thinking))
 
     for bi in range(stop_after):
-        start = bi * CLASSIFIER_BATCH_SIZE
-        batch = pending[start:start + CLASSIFIER_BATCH_SIZE]
+        start = bi * batch_size
+        batch = pending[start:start + batch_size]
         if not batch:
             break
         in_flight = batch
@@ -859,11 +932,12 @@ def classify_pool(
     return assigned
 
 
-def _make_classifier(client: Any):
+def _make_classifier(client: Any, *, thinking: bool = False):
     """Build a `(statements, label) -> ({stmt: letter}, usage_dict)` callable.
 
-    The structured-output schema pins `category` to an enum of A-M so the
-    model cannot return any other letter.
+    `client` exposes `.generate(...)` (a `tutorsim.client.ModelClient` or a
+    compatible test double). The structured-output schema pins `category` to
+    an enum of A-M so the model cannot return any other letter.
     """
     schema = {
         "type": "object", "additionalProperties": False,
@@ -889,14 +963,18 @@ def _make_classifier(client: Any):
             categories_block=cat_block,
             statements_block=statements_block,
         )
-        resp = client.messages.create(
-            model=CLASSIFIER_MODEL,
+        # Route through the shared ModelClient: provider routing, retry, and
+        # usage bookkeeping are shared with the tutor/student/scorer paths, and
+        # the model comes from config. output_schema preserves the enum-
+        # constrained structured output the classifier relies on.
+        resp = client.generate(
+            prompt,
+            json_mode=False,
             max_tokens=4000,
-            thinking={"type": "disabled"},
-            output_config={"format": {"type": "json_schema", "schema": schema}},
-            messages=[{"role": "user", "content": prompt}],
+            thinking=thinking,
+            output_schema=schema,
         )
-        text = next(b.text for b in resp.content if b.type == "text")
+        text = resp.text
         # Structured-output guarantees parseable JSON in the normal case, but the
         # response may still arrive truncated or with leading prose on failures.
         # Returning {} drops the batch through to the retry loop in classify_pool.
@@ -912,8 +990,8 @@ def _make_classifier(client: Any):
             idx = a["id"] - 1
             if 0 <= idx < len(items):
                 out[items[idx]] = a["category"]
-        in_t = resp.usage.input_tokens
-        out_t = resp.usage.output_tokens
+        in_t = resp.usage.get("input_tokens", 0)
+        out_t = resp.usage.get("output_tokens", 0)
         usage = {
             "label": label,
             "input_tokens": in_t,
@@ -981,6 +1059,45 @@ def read_classified_csv(path: Path) -> list[Facet]:
     return list(_read_facets_csv(Path(path)))
 
 
+def read_paper_distribution(csv_path: Path, series: str = "human"):
+    """Load one series from a precomputed action-distribution CSV.
+
+    Reads the paper's frozen distribution values (e.g.
+    ``analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv``),
+    which store, per category letter, ``{series}__macro_mean_pct`` plus
+    ``__ci_low`` / ``__ci_high``. Use this to reuse the published **human
+    reference** distribution instead of re-classifying the ground truth.
+
+    Args:
+        csv_path: path to the distribution CSV.
+        series: column-group prefix -- ``"human"`` (default) for the human
+            reference, or a ``"<model>__<mode>"`` key (e.g.
+            ``"claude_opus_4_8__plain"``) for a specific model cell.
+
+    Returns:
+        A pandas DataFrame indexed by ``letter`` with columns ``name``,
+        ``orientation``, ``mean_pct``, ``ci_low``, ``ci_high``. Requires the
+        ``analysis`` extra (pandas).
+    """
+    _require_analysis_extras()
+    pd = importlib.import_module("pandas")
+    df = pd.read_csv(Path(csv_path))
+    col = f"{series}__macro_mean_pct"
+    if col not in df.columns:
+        raise KeyError(
+            f"series '{series}' not found in {csv_path} "
+            f"(expected column '{col}')"
+        )
+    return pd.DataFrame({
+        "letter": df["letter"],
+        "name": df["name"],
+        "orientation": df["orientation"],
+        "mean_pct": df[col],
+        "ci_low": df[f"{series}__ci_low"],
+        "ci_high": df[f"{series}__ci_high"],
+    }).set_index("letter")
+
+
 # ============================================================================
 # 6. Headline analysis (macro/moment tables)
 # ============================================================================
@@ -993,18 +1110,18 @@ def read_classified_csv(path: Path) -> list[Facet]:
 # Pandas is required from here down. Importing this module without pandas
 # is fine; only these functions raise if it's missing.
 
-def _require_taxonomy_extras() -> None:
-    """Raise ImportError with an install hint if optional deps are missing."""
-    missing: list[str] = []
-    for mod in ("pandas", "matplotlib", "seaborn"):
-        try:
-            importlib.import_module(mod)
-        except ImportError:
-            missing.append(mod)
-    if missing:
+def _require_analysis_extras() -> None:
+    """Raise ImportError with an install hint if pandas is missing.
+
+    The headline tables use pandas only; matplotlib/seaborn are needed by the
+    analysis figures (notebooks + benchmark_perf_cost.py), not by this module.
+    """
+    try:
+        importlib.import_module("pandas")
+    except ImportError:
         raise ImportError(
-            f"tutorsim taxonomy headline/figures require {', '.join(missing)}. "
-            f"Install with: pip install 'tutorsim[taxonomy]'"
+            "tutorsim taxonomy headline tables require pandas. "
+            "Install with: pip install 'tutorsim[analysis]'"
         )
 
 
@@ -1014,7 +1131,7 @@ def facets_to_dataframe(facets: Iterable[Facet]):
     Adds an `orientation` column derived from `category` so headline
     functions don't have to re-derive it on every groupby.
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     pd = importlib.import_module("pandas")
     df = pd.DataFrame([f.to_dict() for f in facets])
     if "category" in df.columns:
@@ -1056,7 +1173,7 @@ def macro_distribution(df, group_keys: tuple[str, ...] = ()):
     averaged across moments. Returns a long-format DataFrame with columns
     `*group_keys, letter, n_moments, mean_pct, ci_low, ci_high`.
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     pd = importlib.import_module("pandas")
     out_rows = []
     grouper = df.groupby(list(group_keys)) if group_keys else [((), df)]
@@ -1085,7 +1202,7 @@ def macro_orientation(df, group_keys: tuple[str, ...] = ()):
     Same shape as `macro_distribution` but with an `orientation` column
     instead of `letter`.
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     pd = importlib.import_module("pandas")
     out_rows = []
     orients = ["scaffolding", "rigor", "neutral"]
@@ -1116,7 +1233,7 @@ def macro_appropriateness(df, group_keys: tuple[str, ...] = ()):
     scaffolding-oriented; in rigor moments, the macro % that are
     rigor-oriented. A well-calibrated tutor scores high on both.
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     pd = importlib.import_module("pandas")
     out_rows = []
     grouper = df.groupby(list(group_keys)) if group_keys else [((), df)]
@@ -1150,7 +1267,7 @@ def prompt_effect_deltas(lm_df, model_col: str = "model",
     Returns a DataFrame indexed by model with columns
     `d_scaffolding, d_rigor, d_neutral` (percentage points).
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     pd = importlib.import_module("pandas")  # used to build the final DataFrame
     orient = macro_orientation(lm_df, group_keys=(model_col, prompt_col))
     pivot = orient.pivot_table(index=[model_col, "orientation"],
@@ -1190,7 +1307,7 @@ def js_divergence_to_human(human_df, lm_df,
     Returns a DataFrame with `*group_keys, n_moments, js_divergence` sorted
     by divergence ascending (closest to human first).
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     pd = importlib.import_module("pandas")  # used at return
     h = macro_distribution(human_df)
     human_vec = (h.set_index("letter")["mean_pct"]
@@ -1218,7 +1335,7 @@ def build_headline_tables(human_facets: Iterable[Facet],
       distribution, orientation_rollup, appropriateness, prompt_effect,
       js_divergence_to_human.
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     human_df = facets_to_dataframe(human_facets)
     lm_df = facets_to_dataframe(lm_facets)
     human_df["cell"] = "human"
@@ -1244,7 +1361,7 @@ def write_headline_csvs(tables: dict[str, Any], out_dir: Path) -> None:
 
     Uses atomic write-and-rename so a crash mid-write never leaves a partial CSV.
     """
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     import os
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1257,7 +1374,7 @@ def write_headline_csvs(tables: dict[str, Any], out_dir: Path) -> None:
 
 def read_headline_csvs(in_dir: Path) -> dict[str, Any]:
     """Load every table written by `write_headline_csvs`."""
-    _require_taxonomy_extras()
+    _require_analysis_extras()
     pd = importlib.import_module("pandas")
     in_dir = Path(in_dir)
     out: dict[str, Any] = {}
@@ -1350,6 +1467,76 @@ def run_all(human_input: InputSpec, lm_input: InputSpec,
         return {}
     tables = run_headline(human_classified, lm_classified, out_dir / "headline")
     return {"headline": tables}
+
+
+def classify_run(
+    annotations: Iterable[Any],
+    moments: Iterable[Any],
+    out_dir: Path,
+    *,
+    model: str,
+    mode: str,
+    client: Any = None,
+) -> dict[str, Any]:
+    """Classify a completed run's tutor actions; write the taxonomy artifacts.
+
+    This is the in-run entrypoint (called on every `tutorsim run`). `model`
+    and `mode` are the tutor/prompt recorded on the facets; the classifier
+    model comes from the `taxonomy` config block (see `classify_pool`).
+
+    Writes into `out_dir`: pool.csv, excluded.csv, assignments.jsonl,
+    usage_log.jsonl, classified.csv. Resume-safe via the assignments sidecar
+    (a resumed run reclassifies nothing). Classification runs to completion
+    (the sanity-probe cap is disabled here).
+
+    Returns a summary dict:
+      {scheme_version, counts: {letter: n}, n_facets, excluded, usage}.
+    """
+    out_dir = Path(out_dir)
+    facets = list(facets_from_annotations(annotations, moments, model=model, mode=mode))
+    kept, excluded = build_pool(facets)
+    write_pool_csv(kept, excluded, out_dir)
+    # first_run_probe disabled: an integrated run classifies to completion in
+    # one invocation rather than stopping for a manual re-run.
+    assignments = classify_pool(
+        kept, out_dir, client=client, first_run_probe=10 ** 9,
+    )
+    classified = attach_categories(kept, assignments)
+    write_classified_csv(classified, out_dir / "classified.csv")
+
+    from collections import Counter
+    counts = Counter(f.category for f in classified)
+
+    # Roll categories up to their orientation (scaffolding / rigor / neutral)
+    # for a compact, interpretable mix in the run summary.
+    orientation = Counter()
+    for letter, n in counts.items():
+        orientation[ORIENTATION_BY_LETTER.get(letter, "neutral")] += n
+
+    # Sum per-batch usage from the sidecar for the run's token bookkeeping.
+    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    usage_path = out_dir / "usage_log.jsonl"
+    if usage_path.exists():
+        for line in usage_path.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            for k in usage:
+                usage[k] += int(rec.get(k, 0) or 0)
+
+    return {
+        "scheme_version": SCHEME_VERSION,
+        "counts": dict(sorted(counts.items())),
+        "orientation": {
+            "scaffolding": orientation.get("scaffolding", 0),
+            "rigor": orientation.get("rigor", 0),
+            "neutral": orientation.get("neutral", 0),
+        },
+        "n_facets": len(classified),
+        "excluded": len(excluded),
+        "usage": usage,
+    }
 
 
 # ============================================================================

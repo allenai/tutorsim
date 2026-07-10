@@ -321,6 +321,27 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
 # Public API: run_cell
 # ---------------------------------------------------------------------------
 
+def _classify_run_taxonomy(run_dir, annotations, scenarios, *, tutor, mode):
+    """Run the always-on action-taxonomy classification for a completed cell.
+
+    Returns the taxonomy summary dict, or ``{"error": ...}`` on any failure --
+    a taxonomy failure (missing API key, classifier error) must never discard
+    the run's primary metrics. `tutor`/`mode` are recorded on the facets; the
+    classifier model comes from the `taxonomy` config block.
+    """
+    from tutorsim import taxonomy
+    out_dir = os.path.join(run_dir, "taxonomy")
+    try:
+        return taxonomy.classify_run(
+            annotations, scenarios, out_dir, model=tutor, mode=mode,
+        )
+    except Exception as e:  # best-effort: never fail the run on taxonomy
+        logger.warning(
+            "Taxonomy classification failed (run metrics unaffected): %s", e
+        )
+        return {"error": str(e)}
+
+
 def run_cell(
     tutor: str,
     mode: str,
@@ -615,13 +636,18 @@ def run_cell(
             metrics["run_counts"] = counts
             if failed_scenarios:
                 metrics["failed_scenarios"] = failed_scenarios
-            return metrics, completed_transcripts, counts
+            return (metrics, completed_transcripts, counts,
+                    completed_scenarios, completed_annotations)
 
         # Run all trials
         trial_results = [_run_trial(t) for t in range(1, n_trials + 1)]
-        trial_metrics = [m for m, _, _ in trial_results]
-        trial_counts = [c for _, _, c in trial_results]
-        all_trial_transcripts = [t for _, ts, _ in trial_results for t in ts]
+        trial_metrics = [m for m, _, _, _, _ in trial_results]
+        trial_counts = [c for _, _, c, _, _ in trial_results]
+        all_trial_transcripts = [t for _, ts, _, _, _ in trial_results for t in ts]
+        # Pooled (scenario, annotation) pairs across trials for taxonomy
+        # classification; dedup by statement text happens in classify_pool.
+        all_trial_scenarios = [s for _, _, _, scs, _ in trial_results for s in scs]
+        all_trial_annotations = [a for _, _, _, _, anns in trial_results for a in anns]
 
         # Build latency + token blocks from all completed transcripts
         tutor_lat_samples: list = []
@@ -682,6 +708,21 @@ def run_cell(
         metrics = dict(metrics)
         metrics["latency"] = latency_block
         metrics["tokens"] = token_block
+
+        # Always-on action-taxonomy classification (LM side): a first-class run
+        # output alongside the headline metrics. A failure here (missing API
+        # key, classifier error) must never discard the run's primary metrics.
+        run_dir = os.path.join(results_root, run_id)
+        tax = _classify_run_taxonomy(
+            run_dir, all_trial_annotations, all_trial_scenarios, tutor=tutor, mode=mode,
+        )
+        metrics["taxonomy"] = tax
+        tax_usage = (tax or {}).get("usage") or {}
+        if tax_usage:
+            metrics["tokens"]["taxonomy"] = tax_usage
+            total = metrics["tokens"]["total"]
+            for k in ("input_tokens", "output_tokens", "total_tokens"):
+                total[k] = total.get(k, 0) + int(tax_usage.get(k, 0) or 0)
 
         results.write_summary(run_id, metrics, results_root=results_root)
         run_counts = metrics["run_counts"]
@@ -825,6 +866,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output HTML file (default: viewer.html)",
     )
 
+    # taxonomy: standalone (re)generation of action-taxonomy data and headline
+    # tables from a run dir or the ground-truth bundle. All args after
+    # `taxonomy` are forwarded to tutorsim.taxonomy.cli_dispatch (which has its
+    # own classify/headline/run subcommands).
+    tax_p = subs.add_parser(
+        "taxonomy",
+        help="Action-taxonomy data: classify / headline / run (see 'taxonomy -h')",
+        add_help=False,
+    )
+    tax_p.add_argument("args", nargs=argparse.REMAINDER)
+
     return parser
 
 
@@ -904,6 +956,12 @@ def main(argv=None) -> None:
     if args.command is None:
         parser.print_help()
         sys.exit(0)
+
+    # taxonomy delegates to its own dispatcher (with its own logging); it has
+    # no shared --log-level/--log-file args, so handle it before setup_logging.
+    if args.command == "taxonomy":
+        from tutorsim import taxonomy
+        sys.exit(taxonomy.cli_dispatch(args.args))
 
     setup_logging(level=args.log_level, log_file=args.log_file)
     logger.info("Command: tutorsim %s", " ".join(argv if argv is not None else sys.argv[1:]))

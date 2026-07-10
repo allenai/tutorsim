@@ -27,6 +27,12 @@ models:          # tutor roster; provider inferred from id
 student: { model: claude-opus-4-6, mode: oracle, thinking: false }
 scorer:  { model: claude-opus-4-6, thinking: adaptive }
 
+# Action-taxonomy classification. Runs on every `tutorsim run` (writes
+# results/<run_id>/taxonomy/classified.csv + a taxonomy block in summary.json)
+# and backs the dev `tutorsim taxonomy` command. Pinned to opus-4-8 with
+# thinking disabled for reproducibility of the published action distribution.
+taxonomy: { model: claude-opus-4-8, thinking: false, batch_size: 50 }
+
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }
 batch:    { timeout: 86400 }

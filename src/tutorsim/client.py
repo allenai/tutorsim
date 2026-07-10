@@ -168,9 +168,18 @@ class ModelClient:
                  effort: str = "",
                  enable_cache: bool = False,
                  *,
+                 output_schema: dict | None = None,
                  cacheable_prefix: str | None = None) -> "ModelResponse":
-        """Generate a response from the model with retry logic."""
+        """Generate a response from the model with retry logic.
+
+        output_schema: optional JSON Schema for structured output. When set,
+        the Anthropic path constrains the response via output_config.format
+        (json_schema). Only supported on the anthropic provider today.
+        """
         from tutorsim.config import get_retry_config
+
+        if output_schema is not None and self.provider != "anthropic":
+            raise ValueError("output_schema is only supported on the anthropic provider")
 
         if max_tokens <= 0:
             max_tokens = MAX_OUTPUT_TOKENS.get(self.provider, 8192)
@@ -200,6 +209,7 @@ class ModelClient:
                                                      effort=effort,
                                                      images=images,
                                                      enable_cache=enable_cache,
+                                                     output_schema=output_schema,
                                                      cacheable_prefix=cacheable_prefix)
                 elif self.provider == "together":
                     resp = self._generate_together(prompt, json_mode, max_tokens, timeout,
@@ -351,6 +361,7 @@ class ModelClient:
                             thinking=False, thinking_budget=0,
                             reasoning_effort="", effort="",
                             images=None, enable_cache=False,
+                            output_schema: dict | None = None,
                             cacheable_prefix: str | None = None):
         """Anthropic API call via anthropic SDK."""
         system_parts = []
@@ -406,13 +417,19 @@ class ModelClient:
                 if kwargs["max_tokens"] < budget + 64:
                     kwargs["max_tokens"] = budget + 64
 
-        # effort goes inside output_config and is only valid on adaptive
-        # thinking models that support the effort parameter. Haiku 4.5 will
-        # 400 if effort is sent -- skip there.
+        # effort and structured-output format both live under output_config.
+        # effort is only valid on adaptive-thinking models that support it
+        # (Haiku 4.5 400s if effort is sent -- skip there). output_schema
+        # constrains the response via output_config.format (json_schema).
         # SDK <= 0.71 doesn't expose output_config as a top-level kwarg, so
         # we forward it via extra_body. The server accepts it either way.
+        output_config: dict = {}
         if effort and self.model and not self.model.startswith("claude-haiku-4-5"):
-            kwargs["extra_body"] = {"output_config": {"effort": effort}}
+            output_config["effort"] = effort
+        if output_schema is not None:
+            output_config["format"] = {"type": "json_schema", "schema": output_schema}
+        if output_config:
+            kwargs["extra_body"] = {"output_config": output_config}
 
         response = self._client.messages.create(**kwargs)
 

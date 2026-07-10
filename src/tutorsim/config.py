@@ -194,6 +194,16 @@ def scorer_spec(config_path: str | os.PathLike | None = None) -> dict:
     return load_config(config_path)["scorer"]
 
 
+def taxonomy_spec(config_path: str | os.PathLike | None = None) -> dict:
+    """Return the taxonomy classifier spec block from config.
+
+    Returns:
+        Dict with model, thinking, and batch_size keys. Used by the action
+        classifier that runs on every run and by `tutorsim taxonomy`.
+    """
+    return load_config(config_path)["taxonomy"]
+
+
 def get_groundtruth_phase_config(config_path: str | os.PathLike | None = None) -> dict:
     """Return the ground-truth build phase config block.
 

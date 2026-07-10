@@ -360,6 +360,22 @@ def format_run_summary(
             f"{counts.get('succeeded', 0)}/{counts.get('attempted', 0)} "
             f"(failed {counts.get('failed', 0)}, resumed {counts.get('resumed', 0)})"
         )
+
+    # Action taxonomy (present when a run classified its tutor actions). Skip
+    # cleanly if it was disabled/failed (no n_facets) -- never break the summary.
+    tax = metrics.get("taxonomy") or {}
+    n_facets = tax.get("n_facets")
+    if isinstance(n_facets, int) and n_facets > 0:
+        lines.append(
+            f"  {'Actions classified':<26} {n_facets} ({tax.get('excluded', 0)} excluded)"
+        )
+        orient = tax.get("orientation") or {}
+        parts = []
+        for key in ("scaffolding", "rigor", "neutral"):
+            pct = 100.0 * orient.get(key, 0) / n_facets
+            parts.append(f"{key} {pct:.0f}%")
+        lines.append(f"  {'Action mix':<26} {'  '.join(parts)}")
+
     if row.get("tutor_lat_p50") is not None or row.get("tutor_lat_p95") is not None:
         lines.append(
             f"  {'Tutor latency p50/p95 (s)':<26} "

@@ -111,6 +111,15 @@ def _load_result(moments):
         "content_hash": "0" * 64,
     })
 _CFG_PATCH = "tutorsim.cli.build_run_config"
+# The always-on taxonomy classification hook makes LLM calls; patch it out in
+# run_cell tests so the suite never hits the network. Zero usage keeps the
+# token-total assertions unaffected.
+_TAX_PATCH = "tutorsim.cli._classify_run_taxonomy"
+_TAX_RESULT = {
+    "scheme_version": "lm_extended_v1", "counts": {}, "n_facets": 0,
+    "excluded": 0,
+    "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+}
 
 
 def _make_run_config(sample=2, dataset="test_ds", max_turns=4):
@@ -154,6 +163,7 @@ def test_run_cell_writes_all_files(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)) as mock_load,
         patch(_CONV_PATCH, side_effect=transcripts) as mock_conv,
         patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)) as mock_score,
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
             tutor="claude-opus-4-8",
@@ -251,6 +261,7 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, side_effect=transcripts),
         patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
             tutor="claude-opus-4-8",
@@ -305,6 +316,7 @@ def test_run_cell_resumes(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, side_effect=list(transcripts)),
         patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
             tutor="claude-opus-4-8",
@@ -320,6 +332,7 @@ def test_run_cell_resumes(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH) as mock_conv2,
         patch(_SCORE_PATCH) as mock_score2,
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id2 = run_cell(
             tutor="claude-opus-4-8",
@@ -368,6 +381,7 @@ def test_run_cell_skips_on_score_error(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, side_effect=[good_transcript, bad_transcript]),
         patch(_SCORE_PATCH, side_effect=_score_batch_side_effect),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
             tutor="claude-opus-4-8",
@@ -413,6 +427,7 @@ def test_run_cell_raises_when_all_scenarios_fail(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, side_effect=transcripts),
         patch(_SCORE_PATCH, side_effect=RuntimeError("Scorer exploded!")),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         with pytest.raises(RuntimeError, match="No scenarios completed"):
             run_cell(
@@ -557,6 +572,7 @@ def test_trials_3_calls_conversation_n_times(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, new=conv_mock),
         patch(_SCORE_PATCH, new=score_mock),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
             tutor="claude-opus-4-8",
@@ -590,6 +606,7 @@ def test_trials_summary_has_mean_and_spread(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, side_effect=transcripts),
         patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
             tutor="claude-opus-4-8",
@@ -630,6 +647,7 @@ def test_trials_1_summary_matches_single_run(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, side_effect=transcripts),
         patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
             tutor="claude-opus-4-8",
@@ -783,6 +801,7 @@ def test_main_run_smoke(tmp_path):
         patch(_LOAD_PATCH, return_value=_load_result([scenario])),
         patch(_CONV_PATCH, return_value=transcript),
         patch(_SCORE_PATCH, return_value={annotation.scenario_id: annotation}),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
         patch("tutorsim.cli.run_sweep") as mock_sweep,
     ):
         # run_sweep returns a list of run_ids; stub it so we test main() wiring
@@ -991,3 +1010,41 @@ def test_run_cell_transcript_without_score_resumes_into_pool(tmp_path):
     assert (tmp_path / run_id / "scores" / f"{needs_score.id}.json").exists()
     summary = json.loads((tmp_path / run_id / "summary.json").read_text())
     assert summary["run_counts"]["succeeded"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Taxonomy integration: the always-on hook folds into summary.json
+# ---------------------------------------------------------------------------
+
+def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
+    """The always-on taxonomy hook's result lands in summary.json, and its
+    token usage is added into tokens.total."""
+    from tutorsim.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    transcripts = [_make_transcript(s.id) for s in scenarios]
+    annotations = [_make_annotation(s.id) for s in scenarios]
+    cfg_mock = _make_run_config(sample=2)
+
+    tax_result = {
+        "scheme_version": "lm_extended_v1",
+        "counts": {"A": 3, "E": 1},
+        "n_facets": 4, "excluded": 1,
+        "usage": {"input_tokens": 700, "output_tokens": 300, "total_tokens": 1000},
+    }
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=transcripts),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=tax_result) as mock_tax,
+    ):
+        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                          date="20260626", results_root=str(tmp_path))
+
+    assert mock_tax.called
+    summary = json.loads((tmp_path / run_id / "summary.json").read_text(encoding="utf-8"))
+    assert summary["taxonomy"] == tax_result
+    # taxonomy usage folded into the token bookkeeping
+    assert summary["tokens"]["taxonomy"] == tax_result["usage"]
+    assert summary["tokens"]["total"]["total_tokens"] >= 1000

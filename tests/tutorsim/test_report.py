@@ -464,6 +464,32 @@ def test_format_run_summary_single_trial():
     assert "trials=" not in out
 
 
+def test_format_run_summary_renders_taxonomy_block():
+    """A taxonomy block renders the count + orientation-mix lines."""
+    metrics = dict(SUMMARY_A)
+    metrics["run_counts"] = {"attempted": 100, "succeeded": 100, "failed": 0, "resumed": 0}
+    metrics["taxonomy"] = {
+        "scheme_version": "lm_extended_v1",
+        "counts": {"A": 10},
+        "orientation": {"scaffolding": 250, "rigor": 90, "neutral": 60},
+        "n_facets": 400, "excluded": 38,
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+    }
+    out = format_run_summary(metrics, tutor_model="model-alpha", mode="plain")
+    assert "Actions classified         400 (38 excluded)" in out
+    # 250/400=62%, 90/400=22%, 60/400=15%
+    assert "scaffolding 62%" in out and "rigor 22%" in out and "neutral 15%" in out
+
+
+def test_format_run_summary_skips_taxonomy_when_absent_or_failed():
+    """No taxonomy lines when the block is missing or carries only an error."""
+    metrics = dict(SUMMARY_A)
+    metrics["run_counts"] = {"attempted": 1, "succeeded": 1, "failed": 0, "resumed": 0}
+    assert "Action mix" not in format_run_summary(metrics)
+    metrics["taxonomy"] = {"error": "no API key"}
+    assert "Action mix" not in format_run_summary(metrics)
+
+
 def test_format_run_summary_trials_shows_mean_and_spread():
     """trials>1 uses the mean/spread shape and renders mean ± std."""
     metrics = {
