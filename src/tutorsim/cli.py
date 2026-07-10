@@ -421,6 +421,9 @@ def run_cell(
             "sample": cfg.sample,
             "max_turns": cfg.max_turns,
             "trials": cfg.trials,
+            # Informational only: replay concurrency does not affect results, so
+            # it is deliberately kept out of reproducibility.config_hash below.
+            "replay_concurrency": getattr(cfg, "replay_concurrency", None),
             "student": cfg.student,
             "scorer": cfg.scorer,
             "resolved_tutors": cfg.resolved_tutors,
@@ -447,6 +450,7 @@ def run_cell(
         logger.info("Run id: %s", run_id)
 
         n_trials = getattr(cfg, "trials", 1) or 1
+        replay_concurrency = getattr(cfg, "replay_concurrency", 1) or 1
 
         # Step 3: per-scenario loop
         # For trials>1: collect per-trial aggregate metrics; for trials=1: single pass.
@@ -510,13 +514,25 @@ def run_cell(
             to_score = []  # (scenario, transcript, resume_sid) awaiting pooled scoring
 
             # ---- Phase 1: Replay -- generate conversations (with per-moment resume) ----
+            # Three stages keep replay result-identical to the serial version while
+            # overlapping only the (independent) LLM round-trips:
+            #   1. sequential planning pass -- cheap disk reads; resolve resume vs
+            #      needs-run; all counts/list mutation for resumed moments happens here.
+            #   2. bounded ThreadPoolExecutor over needs-run moments -- workers call
+            #      ONLY run_conversation (no shared state, no disk writes).
+            #   3. single-threaded collection in original index order -- transcript
+            #      writes + counts/to_score mutation, so no locks are needed and
+            #      to_score is byte-identical regardless of completion order.
             logger.info(
-                "Starting Replay (trial %d/%d): %d moments, student=%s (%s), max_turns=%s",
+                "Starting Replay (trial %d/%d): %d moments, student=%s (%s), max_turns=%s, concurrency=%d",
                 trial_idx, n_trials, n_total,
                 (cfg.student or {}).get("model"),
                 (cfg.student or {}).get("mode", "oracle"),
-                cfg.max_turns,
+                cfg.max_turns, replay_concurrency,
             )
+
+            # ---- Stage 1: sequential planning pass (resume decisions) ----
+            pending = []  # (i, scenario, resume_sid) needing a fresh conversation
             for i, scenario in enumerate(all_scenarios, 1):
                 sid = scenario.id
 
@@ -559,30 +575,55 @@ def run_cell(
                     to_score.append((scenario, conversation.Transcript.from_dict(transcript_dict), resume_sid))
                     continue
 
-                try:
-                    logger.info("[trial %d][%d/%d] Replaying %s", trial_idx, i, n_total, sid)
-                    transcript = conversation.run_conversation(
-                        scenario,
-                        tutor_id=tutor,
-                        tutor_mode=mode if mode else None,
-                        student_id=(cfg.student or {}).get("model"),
-                        student_mode=(cfg.student or {}).get("mode", "oracle"),
-                        max_turns=cfg.max_turns,
-                    )
+                pending.append((i, scenario, resume_sid))
 
-                    # Write transcript before scoring (so a score failure doesn't lose it)
-                    transcript_dict = (
-                        transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
-                    )
-                    results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
-                    to_score.append((scenario, transcript, resume_sid))
-                    logger.info("[trial %d][%d/%d] replay OK: %s", trial_idx, i, n_total, sid)
+            # ---- Stage 2: concurrent replay of needs-run moments ----
+            # outcome[i] = ("ok", transcript) | ("err", exception); index-keyed so
+            # Stage 3 can reassemble in canonical order.
+            outcome: dict = {}
 
-                except Exception as e:
+            def _replay_one(scenario):
+                return conversation.run_conversation(
+                    scenario,
+                    tutor_id=tutor,
+                    tutor_mode=mode if mode else None,
+                    student_id=(cfg.student or {}).get("model"),
+                    student_mode=(cfg.student or {}).get("mode", "oracle"),
+                    max_turns=cfg.max_turns,
+                )
+
+            if pending:
+                workers = max(1, min(replay_concurrency, len(pending)))
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    fut_to_idx = {
+                        pool.submit(_replay_one, scenario): (i, scenario.id)
+                        for i, scenario, _ in pending
+                    }
+                    for fut in as_completed(fut_to_idx):
+                        idx, sid = fut_to_idx[fut]
+                        try:
+                            outcome[idx] = ("ok", fut.result())
+                        except Exception as e:  # noqa: BLE001 -- per-moment isolation
+                            outcome[idx] = ("err", e)
+
+            # ---- Stage 3: deterministic, single-threaded collection ----
+            for i, scenario, resume_sid in pending:
+                sid = scenario.id
+                status, payload = outcome[i]
+                if status == "err":
                     counts["failed"] += 1
-                    failed_scenarios.append({"id": sid, "error": str(e), "phase": "run"})
-                    logger.error("[trial %d][%d/%d] SKIP %s: %s", trial_idx, i, n_total, sid, e)
+                    failed_scenarios.append({"id": sid, "error": str(payload), "phase": "run"})
+                    logger.error("[trial %d][%d/%d] SKIP %s: %s", trial_idx, i, n_total, sid, payload)
                     continue
+
+                transcript = payload
+                # Write transcript before scoring (so a score failure doesn't lose it)
+                transcript_dict = (
+                    transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
+                )
+                results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
+                to_score.append((scenario, transcript, resume_sid))
+                logger.info("[trial %d][%d/%d] replay OK: %s", trial_idx, i, n_total, sid)
 
             # ---- Phase 2: Classification -- pooled scoring (one 3-pass batch pipeline) ----
             if to_score:
@@ -826,6 +867,16 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Max turns per conversation (default: from config)",
     )
+    run_p.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        dest="replay_concurrency",
+        metavar="N",
+        help="Concurrent per-moment replays within a cell (default: from config, "
+             "typically 4). Result-preserving; lower it on smaller API tiers that "
+             "hit rate limits.",
+    )
     # -- report subcommand ----------------------------------------------------
     report_p = subs.add_parser(
         "report",
@@ -978,6 +1029,7 @@ def main(argv=None) -> None:
             sample=args.sample,
             trials=args.trials,
             max_turns=args.max_turns,
+            replay_concurrency=args.replay_concurrency,
             config_path=args.config,
         )
         date = datetime.date.today().strftime("%Y%m%d")
