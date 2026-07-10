@@ -82,32 +82,34 @@ class ModelResponse:
 TOGETHER_BASE_URL = "https://api.together.xyz/v1"
 
 
-# Models that use the new adaptive thinking API (no budget_tokens, no
-# output_config in the current SDK). Older models still use enabled+budget.
-# Haiku 4.5 + the Opus 4.x family are all on the modern API; legacy enabled+
-# budget_tokens is rejected on these.
-_ANTHROPIC_ADAPTIVE_THINKING_MODELS = (
-    "claude-opus-4-8",
-    "claude-opus-4-7",
-    "claude-opus-4-6",      # 4-6 accepts both adaptive and legacy enabled+budget_tokens;
-                            # adaptive is the non-deprecated path.
-    "claude-haiku-4-5",
-    "claude-sonnet-4-6",
-    "claude-fable-5",
+# Adaptive thinking ({"type": "adaptive"}) is the modern default and the shape
+# every current Anthropic model uses. The legacy enabled+budget_tokens shape is
+# needed only by a *closed, frozen set* of pre-adaptive models -- no new model
+# is ever added here. So we default to adaptive and enumerate only the legacy
+# models; a brand-new Anthropic model works with no code change (see README
+# "Running new tutor models"). Adaptive is rejected on nothing current; legacy
+# enabled+budget is rejected on Opus 4.7+/Sonnet 5/Fable 5.
+_ANTHROPIC_LEGACY_THINKING_MODELS = (
+    "claude-3-7-sonnet",
+    "claude-opus-4-0", "claude-opus-4-20250514",
+    "claude-opus-4-1",
+    "claude-opus-4-5",
+    "claude-sonnet-4-0", "claude-sonnet-4-20250514",
+    "claude-sonnet-4-5",
 )
 
 
 def _anthropic_thinking_param(model: str, thinking_budget: int) -> dict:
     """Return the right `thinking` kwarg shape for the given model.
 
-    - Newer models (Opus 4.8+) require {"type": "adaptive"}; legacy
-      enabled+budget_tokens is rejected.
-    - Older models (Opus 4.6 / 4.7) accept the enabled+budget form.
+    Defaults to adaptive ({"type": "adaptive"}), which every current Anthropic
+    model requires. Only the frozen pre-adaptive models in
+    _ANTHROPIC_LEGACY_THINKING_MODELS get the enabled+budget_tokens form.
     """
-    if model and any(model.startswith(prefix) for prefix in _ANTHROPIC_ADAPTIVE_THINKING_MODELS):
-        return {"type": "adaptive"}
-    budget = thinking_budget if thinking_budget > 0 else 16384
-    return {"type": "enabled", "budget_tokens": budget}
+    if model and any(model.startswith(prefix) for prefix in _ANTHROPIC_LEGACY_THINKING_MODELS):
+        budget = thinking_budget if thinking_budget > 0 else 16384
+        return {"type": "enabled", "budget_tokens": budget}
+    return {"type": "adaptive"}
 
 
 class ModelClient:

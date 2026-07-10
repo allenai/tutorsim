@@ -6,10 +6,12 @@ def test_packaged_default_config_parses_and_has_expected_roster():
     cfg = cfgmod.load_config()
     assert set(cfg["providers"]) == {"anthropic", "openai", "gemini", "together"}
     assert set(cfg["models"]) == {
-        "claude-opus-4-8", "claude-sonnet-4-6", "gemini-2.5-pro", "gemini-3.5-flash",
+        "claude-opus-4-8", "claude-sonnet-4-6", "claude-sonnet-5",
+        "gemini-2.5-pro", "gemini-3.5-flash",
         "gpt-5.4-mini-2026-03-17", "gpt-5.5-2026-04-23", "deepseek-ai/DeepSeek-V4-Pro",
     }
     assert cfg["models"]["claude-opus-4-8"] == {"thinking": True, "effort": "xhigh"}
+    assert cfg["models"]["claude-sonnet-5"] == {"thinking": "adaptive", "effort": "xhigh"}
     assert cfg["models"]["deepseek-ai/DeepSeek-V4-Pro"] == {}
     assert cfg["student"] == {"model": "claude-opus-4-6", "mode": "oracle", "thinking": False}
     assert cfg["scorer"] == {"model": "claude-opus-4-6", "thinking": "adaptive"}
