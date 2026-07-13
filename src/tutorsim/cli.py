@@ -161,6 +161,7 @@ import tutorsim.results as results
 import tutorsim.report as report
 from tutorsim.config import build_run_config
 from tutorsim.logging_setup import (
+    bind_worker_logging,
     log_context,
     logging_args_parent,
     per_run_log_file,
@@ -321,6 +322,27 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
 # Public API: run_cell
 # ---------------------------------------------------------------------------
 
+def _classify_run_taxonomy(run_dir, annotations, scenarios, *, tutor, mode):
+    """Run the always-on action-taxonomy classification for a completed cell.
+
+    Returns the taxonomy summary dict, or ``{"error": ...}`` on any failure --
+    a taxonomy failure (missing API key, classifier error) must never discard
+    the run's primary metrics. `tutor`/`mode` are recorded on the facets; the
+    classifier model comes from the `taxonomy` config block.
+    """
+    from tutorsim import taxonomy
+    out_dir = os.path.join(run_dir, "taxonomy")
+    try:
+        return taxonomy.classify_run(
+            annotations, scenarios, out_dir, model=tutor, mode=mode,
+        )
+    except Exception as e:  # best-effort: never fail the run on taxonomy
+        logger.warning(
+            "Taxonomy classification failed (run metrics unaffected): %s", e
+        )
+        return {"error": str(e)}
+
+
 def run_cell(
     tutor: str,
     mode: str,
@@ -381,11 +403,12 @@ def run_cell(
 
     # Everything below is also captured in the run's own log file,
     # kept next to config.json / summary.json for reproducibility.
-    # The handler is keyed to this thread so parallel lanes don't mix.
+    # The handler is keyed to this thread (plus replay-pool workers registered
+    # via bind_worker_logging) so parallel lanes don't mix.
     # log_context tags records with [tutor/mode] for programmatic callers;
     # under run_sweep the lane already set the same tag.
     run_log_path = os.path.join(results_root, run_id, "run.log")
-    with per_run_log_file(run_log_path), log_context(f"{tutor}/{mode}"):
+    with per_run_log_file(run_log_path) as run_log, log_context(f"{tutor}/{mode}"):
         config_dict = {
             "tutor": tutor,
             "mode": mode,
@@ -400,6 +423,9 @@ def run_cell(
             "sample": cfg.sample,
             "max_turns": cfg.max_turns,
             "trials": cfg.trials,
+            # Informational only: replay concurrency does not affect results, so
+            # it is deliberately kept out of reproducibility.config_hash below.
+            "replay_concurrency": getattr(cfg, "replay_concurrency", None),
             "student": cfg.student,
             "scorer": cfg.scorer,
             "resolved_tutors": cfg.resolved_tutors,
@@ -426,6 +452,7 @@ def run_cell(
         logger.info("Run id: %s", run_id)
 
         n_trials = getattr(cfg, "trials", 1) or 1
+        replay_concurrency = getattr(cfg, "replay_concurrency", 1) or 1
 
         # Step 3: per-scenario loop
         # For trials>1: collect per-trial aggregate metrics; for trials=1: single pass.
@@ -489,13 +516,28 @@ def run_cell(
             to_score = []  # (scenario, transcript, resume_sid) awaiting pooled scoring
 
             # ---- Phase 1: Replay -- generate conversations (with per-moment resume) ----
+            # Three stages keep replay result-identical to the serial version while
+            # overlapping only the (independent) LLM round-trips:
+            #   1. sequential planning pass -- cheap disk reads; resolve resume vs
+            #      needs-run; all counts/list mutation for resumed moments happens here.
+            #   2. bounded ThreadPoolExecutor over needs-run moments -- workers call
+            #      ONLY run_conversation (no shared state, no disk writes). The
+            #      main thread writes each transcript as its future completes, so
+            #      a killed run keeps everything already finished (per-moment
+            #      resume durability, matching the serial version).
+            #   3. single-threaded collection in original index order --
+            #      counts/failed/to_score mutation, so no locks are needed and
+            #      to_score is byte-identical regardless of completion order.
             logger.info(
-                "Starting Replay (trial %d/%d): %d moments, student=%s (%s), max_turns=%s",
+                "Starting Replay (trial %d/%d): %d moments, student=%s (%s), max_turns=%s, concurrency=%d",
                 trial_idx, n_trials, n_total,
                 (cfg.student or {}).get("model"),
                 (cfg.student or {}).get("mode", "oracle"),
-                cfg.max_turns,
+                cfg.max_turns, replay_concurrency,
             )
+
+            # ---- Stage 1: sequential planning pass (resume decisions) ----
+            pending = []  # (i, scenario, resume_sid) needing a fresh conversation
             for i, scenario in enumerate(all_scenarios, 1):
                 sid = scenario.id
 
@@ -538,30 +580,68 @@ def run_cell(
                     to_score.append((scenario, conversation.Transcript.from_dict(transcript_dict), resume_sid))
                     continue
 
-                try:
-                    logger.info("[trial %d][%d/%d] Replaying %s", trial_idx, i, n_total, sid)
-                    transcript = conversation.run_conversation(
-                        scenario,
-                        tutor_id=tutor,
-                        tutor_mode=mode if mode else None,
-                        student_id=(cfg.student or {}).get("model"),
-                        student_mode=(cfg.student or {}).get("mode", "oracle"),
-                        max_turns=cfg.max_turns,
-                    )
+                pending.append((i, scenario, resume_sid))
 
-                    # Write transcript before scoring (so a score failure doesn't lose it)
-                    transcript_dict = (
-                        transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
-                    )
-                    results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
-                    to_score.append((scenario, transcript, resume_sid))
-                    logger.info("[trial %d][%d/%d] replay OK: %s", trial_idx, i, n_total, sid)
+            # ---- Stage 2: concurrent replay of needs-run moments ----
+            # outcome[i] = ("ok", transcript) | ("err", exception); index-keyed so
+            # Stage 3 can reassemble in canonical order.
+            outcome: dict = {}
 
-                except Exception as e:
+            def _replay_one(scenario):
+                return conversation.run_conversation(
+                    scenario,
+                    tutor_id=tutor,
+                    tutor_mode=mode if mode else None,
+                    student_id=(cfg.student or {}).get("model"),
+                    student_mode=(cfg.student or {}).get("mode", "oracle"),
+                    max_turns=cfg.max_turns,
+                )
+
+            if pending:
+                workers = max(1, min(replay_concurrency, len(pending)))
+                cell_tag = f"{tutor}/{mode}"
+                with ThreadPoolExecutor(
+                    max_workers=workers,
+                    # Workers must adopt this run's log file + [tutor/mode] tag:
+                    # the run.log handler filters by registered thread ids, and
+                    # contextvars don't cross thread boundaries.
+                    initializer=bind_worker_logging,
+                    initargs=(run_log, cell_tag),
+                ) as pool:
+                    fut_to_idx = {
+                        pool.submit(_replay_one, scenario): (i, scenario.id, resume_sid)
+                        for i, scenario, resume_sid in pending
+                    }
+                    for fut in as_completed(fut_to_idx):
+                        idx, sid, resume_sid = fut_to_idx[fut]
+                        try:
+                            transcript = fut.result()
+                        except Exception as e:  # noqa: BLE001 -- per-moment isolation
+                            outcome[idx] = ("err", e)
+                            continue
+                        # Persist immediately (main thread), in completion order:
+                        # transcripts are per-sid files, so write order doesn't
+                        # affect the final file set, and a killed run keeps every
+                        # conversation that already finished (resume durability).
+                        # Written before scoring so a score failure doesn't lose it.
+                        transcript_dict = (
+                            transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
+                        )
+                        results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
+                        outcome[idx] = ("ok", transcript)
+                        logger.info("[trial %d][%d/%d] replay OK: %s", trial_idx, idx, n_total, sid)
+
+            # ---- Stage 3: deterministic, single-threaded collection ----
+            for i, scenario, resume_sid in pending:
+                sid = scenario.id
+                status, payload = outcome[i]
+                if status == "err":
                     counts["failed"] += 1
-                    failed_scenarios.append({"id": sid, "error": str(e), "phase": "run"})
-                    logger.error("[trial %d][%d/%d] SKIP %s: %s", trial_idx, i, n_total, sid, e)
+                    failed_scenarios.append({"id": sid, "error": str(payload), "phase": "run"})
+                    logger.error("[trial %d][%d/%d] SKIP %s: %s", trial_idx, i, n_total, sid, payload)
                     continue
+
+                to_score.append((scenario, payload, resume_sid))
 
             # ---- Phase 2: Classification -- pooled scoring (one 3-pass batch pipeline) ----
             if to_score:
@@ -615,13 +695,18 @@ def run_cell(
             metrics["run_counts"] = counts
             if failed_scenarios:
                 metrics["failed_scenarios"] = failed_scenarios
-            return metrics, completed_transcripts, counts
+            return (metrics, completed_transcripts, counts,
+                    completed_scenarios, completed_annotations)
 
         # Run all trials
         trial_results = [_run_trial(t) for t in range(1, n_trials + 1)]
-        trial_metrics = [m for m, _, _ in trial_results]
-        trial_counts = [c for _, _, c in trial_results]
-        all_trial_transcripts = [t for _, ts, _ in trial_results for t in ts]
+        trial_metrics = [m for m, _, _, _, _ in trial_results]
+        trial_counts = [c for _, _, c, _, _ in trial_results]
+        all_trial_transcripts = [t for _, ts, _, _, _ in trial_results for t in ts]
+        # Pooled (scenario, annotation) pairs across trials for taxonomy
+        # classification; dedup by statement text happens in classify_pool.
+        all_trial_scenarios = [s for _, _, _, scs, _ in trial_results for s in scs]
+        all_trial_annotations = [a for _, _, _, _, anns in trial_results for a in anns]
 
         # Build latency + token blocks from all completed transcripts
         tutor_lat_samples: list = []
@@ -682,6 +767,21 @@ def run_cell(
         metrics = dict(metrics)
         metrics["latency"] = latency_block
         metrics["tokens"] = token_block
+
+        # Always-on action-taxonomy classification (LM side): a first-class run
+        # output alongside the headline metrics. A failure here (missing API
+        # key, classifier error) must never discard the run's primary metrics.
+        run_dir = os.path.join(results_root, run_id)
+        tax = _classify_run_taxonomy(
+            run_dir, all_trial_annotations, all_trial_scenarios, tutor=tutor, mode=mode,
+        )
+        metrics["taxonomy"] = tax
+        tax_usage = (tax or {}).get("usage") or {}
+        if tax_usage:
+            metrics["tokens"]["taxonomy"] = tax_usage
+            total = metrics["tokens"]["total"]
+            for k in ("input_tokens", "output_tokens", "total_tokens"):
+                total[k] = total.get(k, 0) + int(tax_usage.get(k, 0) or 0)
 
         results.write_summary(run_id, metrics, results_root=results_root)
         run_counts = metrics["run_counts"]
@@ -785,6 +885,16 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Max turns per conversation (default: from config)",
     )
+    run_p.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        dest="replay_concurrency",
+        metavar="N",
+        help="Concurrent per-moment replays within a cell (default: from config, "
+             "typically 4). Result-preserving; lower it on smaller API tiers that "
+             "hit rate limits.",
+    )
     # -- report subcommand ----------------------------------------------------
     report_p = subs.add_parser(
         "report",
@@ -824,6 +934,17 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Output HTML file (default: viewer.html)",
     )
+
+    # taxonomy: standalone (re)generation of action-taxonomy data and headline
+    # tables from a run dir or the ground-truth bundle. All args after
+    # `taxonomy` are forwarded to tutorsim.taxonomy.cli_dispatch (which has its
+    # own classify/headline/run subcommands).
+    tax_p = subs.add_parser(
+        "taxonomy",
+        help="Action-taxonomy data: classify / headline / run (see 'taxonomy -h')",
+        add_help=False,
+    )
+    tax_p.add_argument("args", nargs=argparse.REMAINDER)
 
     return parser
 
@@ -905,6 +1026,12 @@ def main(argv=None) -> None:
         parser.print_help()
         sys.exit(0)
 
+    # taxonomy delegates to its own dispatcher (with its own logging); it has
+    # no shared --log-level/--log-file args, so handle it before setup_logging.
+    if args.command == "taxonomy":
+        from tutorsim import taxonomy
+        sys.exit(taxonomy.cli_dispatch(args.args))
+
     setup_logging(level=args.log_level, log_file=args.log_file)
     logger.info("Command: tutorsim %s", " ".join(argv if argv is not None else sys.argv[1:]))
 
@@ -920,6 +1047,7 @@ def main(argv=None) -> None:
             sample=args.sample,
             trials=args.trials,
             max_turns=args.max_turns,
+            replay_concurrency=args.replay_concurrency,
             config_path=args.config,
         )
         date = datetime.date.today().strftime("%Y%m%d")

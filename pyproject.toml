@@ -32,9 +32,10 @@ dependencies = [
 [project.optional-dependencies]
 # maintainer-only dataset construction / release tooling
 build = ["boto3", "jsonschema"]
-# analysis / figures
-taxonomy = ["pandas", "matplotlib", "seaborn"]
-# dev alone runs the runtime tests; add build-dev (+taxonomy) for the full suite
+# analysis / figures layer: pandas for taxonomy headline tables, matplotlib/seaborn
+# for the notebooks + benchmark_perf_cost.py (was misnamed "taxonomy")
+analysis = ["pandas", "matplotlib", "seaborn"]
+# dev alone runs the runtime tests; add build-dev (+analysis) for the full suite
 dev = ["pytest"]
 build-dev = ["tutorsim[build]", "moto[s3]"]
 
@@ -54,6 +55,7 @@ tutorsim = [
     "prompts/scorer/annotate/*.md",
     "prompts/scorer/decompose/*.md",
     "prompts/scorer/structure/*.md",
+    "prompts/taxonomy/*.md",
 ]
 tutorsim_build = [
     "moments.schema.json",
@@ -61,9 +63,6 @@ tutorsim_build = [
     "prompts/classify/situation_labeller/*.md",
     "prompts/trait_generator/*.txt",
     "prompts/trait_generator/dimensions/*.txt",
-]
-analysis = [
-    "prompts/taxonomy/*.md",
 ]
 
 [tool.pytest.ini_options]

@@ -1,4 +1,4 @@
-"""Tests for analysis.taxonomy.
+"""Tests for tutorsim.taxonomy.
 
 Covers the pure functions (filter regexes, normal-approx CI, JS divergence),
 the input adapters, pool + CSV round-trips, the LLM classifier with a fake
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from analysis import taxonomy as tx
+from tutorsim import taxonomy as tx
 
 
 # ---------------------------------------------------------------------------
@@ -270,42 +270,29 @@ def test_macro_distribution_averages_per_moment(monkeypatch):
 # 6. Classifier wiring + resume + json-error handling + total_tokens
 # ---------------------------------------------------------------------------
 
-class _FakeUsage:
-    def __init__(self, in_t=100, out_t=50):
-        self.input_tokens = in_t
-        self.output_tokens = out_t
-
-
-class _FakeBlock:
-    type = "text"
-
-    def __init__(self, text: str):
+class _FakeModelResponse:
+    def __init__(self, text: str, usage: dict):
         self.text = text
-
-
-class _FakeResp:
-    def __init__(self, payload: str, in_t=100, out_t=50):
-        self.content = [_FakeBlock(payload)]
-        self.usage = _FakeUsage(in_t, out_t)
+        self.usage = usage
+        self.latency_seconds = 0.0
 
 
 class _FakeClient:
-    """Records every messages.create call; returns a queued response or
-    a canned default."""
+    """Records every generate() call; returns a queued payload or a canned
+    default. Mimics tutorsim.client.ModelClient.generate()."""
 
     def __init__(self, payloads: list[str] | None = None):
         self.calls: list[dict] = []
         self._payloads = list(payloads or [])
 
-    @property
-    def messages(self):
-        return self
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
+    def generate(self, prompt, **kwargs):
+        self.calls.append({"prompt": prompt, **kwargs})
         payload = (self._payloads.pop(0) if self._payloads
                    else '{"assignments": [{"id":1,"category":"A"}]}')
-        return _FakeResp(payload)
+        return _FakeModelResponse(
+            payload,
+            {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        )
 
 
 def test_classifier_records_total_tokens(tmp_path):
@@ -327,7 +314,7 @@ def test_classifier_handles_unparseable_json(tmp_path, caplog):
     facets = [_mk_facet("The tutor asks a guiding question.")]
     # Every response is junk -> retries exhausted -> statement forced to LAST_LETTER.
     client = _FakeClient(payloads=["not valid json"] * 8)
-    with caplog.at_level("WARNING", logger="analysis.taxonomy"):
+    with caplog.at_level("WARNING", logger="tutorsim.taxonomy"):
         assignments = tx.classify_pool(
             facets, tmp_path, client=client, max_batches=1)
     assert assignments[facets[0].statement.strip()] == tx.LAST_LETTER
@@ -356,12 +343,12 @@ def test_classifier_resume_skips_completed_batches(tmp_path):
 # 7. CLI extras guard
 # ---------------------------------------------------------------------------
 
-def test_require_taxonomy_extras_passes_when_pandas_present():
+def test_require_analysis_extras_passes_when_pandas_present():
     pytest.importorskip("pandas")
-    tx._require_taxonomy_extras()  # should NOT raise
+    tx._require_analysis_extras()  # should NOT raise
 
 
-def test_require_taxonomy_extras_message_mentions_install(monkeypatch):
+def test_require_analysis_extras_message_mentions_install(monkeypatch):
     """If pandas import raises, the error message tells the user how to install."""
     import importlib
 
@@ -374,5 +361,100 @@ def test_require_taxonomy_extras_message_mentions_install(monkeypatch):
 
     monkeypatch.setattr(importlib, "import_module", fake)
     with pytest.raises(ImportError) as ei:
-        tx._require_taxonomy_extras()
-    assert "tutorsim[taxonomy]" in str(ei.value)
+        tx._require_analysis_extras()
+    assert "tutorsim[analysis]" in str(ei.value)
+
+
+# ---------------------------------------------------------------------------
+# 8. In-run classification: facets_from_annotations + classify_run
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+
+def _ann(**kw):
+    base = dict(
+        scenario_id="c1__0_2", annotation_type="scaffolding",
+        action_decomposed=["The tutor asks a guiding question."],
+        turn_start=0, turn_end=2, action_label="scaffolding", result="ok",
+    )
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def _moment(id="c1__0_2", dimension="scaffolding"):
+    return SimpleNamespace(id=id, dimension=dimension)
+
+
+def test_facets_from_annotations_uses_moment_dimension():
+    facets = list(tx.facets_from_annotations(
+        [_ann()], [_moment(dimension="rigor")],
+        model="claude-sonnet-5", mode="plain",
+    ))
+    assert len(facets) == 1
+    f = facets[0]
+    assert f.situation_label == "rigor"          # from Moment.dimension
+    assert f.result_label == "ok"                # from Annotation.result (not result_label)
+    assert f.model == "claude-sonnet-5" and f.prompt == "plain"
+    assert f.annotation_type == "scaffolding"
+
+
+def test_facets_from_annotations_skips_non_scaffolding():
+    facets = list(tx.facets_from_annotations(
+        [_ann(annotation_type="rapport")], [_moment()], model="m", mode="plain",
+    ))
+    assert facets == []
+
+
+def test_classify_run_writes_classified_and_counts(tmp_path):
+    anns = [
+        _ann(scenario_id="c1__0_2", action_decomposed=["The tutor asks a guiding question."]),
+        _ann(scenario_id="c2__0_2", action_decomposed=["The tutor offers a hint."]),
+    ]
+    moments = [_moment(id="c1__0_2"), _moment(id="c2__0_2")]
+    client = _FakeClient(payloads=[
+        '{"assignments":[{"id":1,"category":"A"},{"id":2,"category":"E"}]}',
+    ])
+    out = tmp_path / "taxonomy"
+    summary = tx.classify_run(
+        anns, moments, out, model="claude-sonnet-5", mode="plain", client=client,
+    )
+    assert (out / "classified.csv").exists()
+    assert summary["scheme_version"] == tx.SCHEME_VERSION
+    assert summary["n_facets"] == 2
+    assert summary["counts"] == {"A": 1, "E": 1}
+    # A and E are both scaffolding-oriented categories
+    assert summary["orientation"] == {"scaffolding": 2, "rigor": 0, "neutral": 0}
+    assert summary["usage"]["total_tokens"] > 0
+
+
+def test_taxonomy_spec_reads_config():
+    from tutorsim import config as cfgmod
+    cfgmod._reset_config_cache()
+    spec = cfgmod.taxonomy_spec()
+    assert spec["model"] == "claude-opus-4-8"
+    assert spec["thinking"] is False
+    assert spec["batch_size"] == 50
+
+
+def test_read_paper_distribution_selects_series(tmp_path):
+    pytest.importorskip("pandas")
+    csv = tmp_path / "dist.csv"
+    csv.write_text(
+        "letter,name,orientation,"
+        "human__n_moments,human__macro_mean_pct,human__ci_low,human__ci_high,"
+        "claude_opus_4_8__plain__n_moments,claude_opus_4_8__plain__macro_mean_pct,"
+        "claude_opus_4_8__plain__ci_low,claude_opus_4_8__plain__ci_high\n"
+        "A,Guiding,scaffolding,514,10.18,8.60,11.75,100,20.27,16.59,23.94\n"
+        "B,Steps,scaffolding,514,2.01,1.38,2.63,100,7.83,5.46,10.21\n",
+        encoding="utf-8",
+    )
+    human = tx.read_paper_distribution(csv, "human")
+    assert human.loc["A", "mean_pct"] == pytest.approx(10.18)
+    assert human.loc["A", "orientation"] == "scaffolding"
+    assert set(human.columns) >= {"name", "orientation", "mean_pct", "ci_low", "ci_high"}
+    # A model series selects its own column group
+    model = tx.read_paper_distribution(csv, "claude_opus_4_8__plain")
+    assert model.loc["A", "mean_pct"] == pytest.approx(20.27)
+    with pytest.raises(KeyError):
+        tx.read_paper_distribution(csv, "nonexistent_series")

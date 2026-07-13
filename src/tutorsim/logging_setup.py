@@ -146,6 +146,37 @@ def _file_only_record(handler: logging.Handler, message: str) -> None:
     handler.emit(record)
 
 
+class RunLogHandle:
+    """Handle yielded by per_run_log_file for adopting worker threads.
+
+    The run-log filter passes only registered thread ids (initially just the
+    thread that opened the log). A worker-pool thread that should log into
+    this run's file calls register_current_thread() -- typically via
+    bind_worker_logging() in a ThreadPoolExecutor initializer.
+    """
+
+    def __init__(self, thread_ids: set):
+        self._thread_ids = thread_ids
+
+    def register_current_thread(self) -> None:
+        # set.add is atomic under the GIL; the filter only reads membership.
+        self._thread_ids.add(threading.get_ident())
+
+
+def bind_worker_logging(handle: "RunLogHandle | None", tag: str) -> None:
+    """Adopt a run's log file and cell tag on a pool worker thread.
+
+    Intended as (part of) a ThreadPoolExecutor initializer: registers the
+    worker with the run-log thread filter so its records reach run.log, and
+    sets the [tag] contextvar (contextvars don't cross thread boundaries, so
+    the spawning thread's log_context() tag is otherwise lost). The worker
+    thread dies with the pool, so neither needs undoing.
+    """
+    if handle is not None:
+        handle.register_current_thread()
+    _cell_tag.set(tag)
+
+
 @contextmanager
 def per_run_log_file(
     log_file: str,
@@ -157,14 +188,20 @@ def per_run_log_file(
 
     Backs the automatic per-run log (e.g. results/<run_id>/run.log). With
     current_thread_only (the default), only records emitted by the calling
-    thread are written -- parallel sweep lanes in one process each keep
-    their own run log. The file appends, matching resume semantics.
+    thread -- plus any worker threads registered via the yielded
+    RunLogHandle (see bind_worker_logging) -- are written, so parallel
+    sweep lanes in one process each keep their own run log. The file
+    appends, matching resume semantics.
 
     Args:
         log_file: Path to the log file; parent directories are created.
-        current_thread_only: Restrict capture to the calling thread.
+        current_thread_only: Restrict capture to the calling thread and
+            explicitly registered worker threads.
         header: Optional line written to the file only (not the console),
             e.g. the invoked command line.
+
+    Yields:
+        RunLogHandle for registering worker threads (None-safe to ignore).
     """
     parent_dir = os.path.dirname(log_file)
     if parent_dir:
@@ -172,9 +209,9 @@ def per_run_log_file(
     handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     handler.setFormatter(logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT))
     handler.addFilter(_CellTagFilter())
+    thread_ids = {threading.get_ident()}
     if current_thread_only:
-        thread_id = threading.get_ident()
-        handler.addFilter(lambda record: record.thread == thread_id)
+        handler.addFilter(lambda record: record.thread in thread_ids)
     if header:
         _file_only_record(handler, header)
 
@@ -192,7 +229,7 @@ def per_run_log_file(
     root = logging.getLogger()
     root.addHandler(handler)
     try:
-        yield
+        yield RunLogHandle(thread_ids)
     finally:
         root.removeHandler(handler)
         handler.close()

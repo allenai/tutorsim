@@ -208,6 +208,39 @@ def test_generate_anthropic_json_mode_adds_system_message(monkeypatch):
         assert "JSON" in call_kwargs["system"]
 
 
+def test_generate_anthropic_output_schema_sets_format(monkeypatch):
+    """output_schema must reach the request as output_config.format json_schema.
+
+    This is the reproducibility guard for the taxonomy classifier rewire: the
+    enum-constrained structured output must be preserved through ModelClient.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with patch("anthropic.Anthropic") as MockAnthropic:
+        client_obj = MagicMock()
+        client_obj.messages.create.return_value = _fake_anthropic_message('{"x":1}', 5, 2)
+        MockAnthropic.return_value = client_obj
+        c = ModelClient("claude-opus-4-8")
+        schema = {
+            "type": "object",
+            "properties": {"x": {"type": "integer"}},
+            "required": ["x"],
+            "additionalProperties": False,
+        }
+        c.generate("Q", json_mode=False, output_schema=schema)
+        call_kwargs = client_obj.messages.create.call_args[1]
+        oc = call_kwargs["extra_body"]["output_config"]
+        assert oc["format"]["type"] == "json_schema"
+        assert oc["format"]["schema"] == schema
+
+
+def test_generate_output_schema_rejected_for_non_anthropic(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    with patch("openai.OpenAI"):
+        c = ModelClient("gpt-5.5-2026-04-23")
+        with pytest.raises(ValueError):
+            c.generate("Q", output_schema={"type": "object"})
+
+
 def test_get_retry_config_values():
     from tutorsim.config import get_retry_config, get_batch_timeout
     cfg = get_retry_config()

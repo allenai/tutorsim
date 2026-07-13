@@ -9,6 +9,7 @@ The implemented metrics are:
 - Appropriate Scaffolding: How often does the LM tutor introduce scaffolds that make content more accessible in moments when expert teachers think that scaffolding should occur, without over-scaffolding
 - Appropriate Rigor: How often does the LM tutor push for rigor by increasing the cognitive demands of the task in moments when expert teachers think that pushes for rigor should occur (without over-scaffolding)
 - Avoids Over-Scaffolding: How often does the LM avoid introducing more supports than needed given the student's state?
+- Action Taxonomy: How do the tutor's move differ from human tutor moves?
 
 ## Installation
 
@@ -77,6 +78,7 @@ results/<run_id>/
   transcripts/<scenario_id>.json
   scores/<scenario_id>.json
   summary.json
+  taxonomy/                 action-taxonomy classification: classified.csv + sidecars
 ```
 
 Each run's `config.json` records the dataset source (id, revision or local
@@ -86,31 +88,23 @@ the dataset manifest when running from a local release dir. A run is
 reproducible from: pinned dataset revision + content hash and the resolved
 config (up to LLM sampling nondeterminism).
 
-### Logging
+## Reports And Viewers
 
-Both CLIs (`tutorsim` and `tutorsim-build`) log progress to the console at
-INFO level, and every run automatically writes its own log file — nothing to
-enable:
+Aggregate completed run summaries into leaderboard files:
 
-- `tutorsim run` writes `results/<run_id>/run.log` per cell, next to
-  `config.json` and `summary.json`. The run directory is the complete record
-  of the run: what ran, what was resumed, and which moments failed.
-- `tutorsim-build dataset build` / `build-from-run` / `build-ground-truth`
-  write a `build.log` into their output directory (skipped on `--dry-run`).
+```bash
+tutorsim report --results-root results --out leaderboard
+```
 
-Log files append, so a resumed run continues the same log. In a multi-tutor
-sweep, parallel lanes each write only to their own run's log, and every
-console line is tagged with its cell (e.g. `[gpt-5-4/plain]`) so interleaved
-lanes stay readable. Logs narrate the two phases of each run: Replay
-(generating tutor/student continuations) and Classification (the 3-pass
-batch scorer).
+This writes `leaderboard.md` and `leaderboard.csv`.
 
-Two optional knobs: `--log-level DEBUG|INFO|WARNING|ERROR` controls
-verbosity, and `--log-file FILE` additionally writes one combined log for the
-whole invocation — useful for watching a sweep across lanes, or for the
-subcommands without an output directory (`report`, `view`, `validate`).
-`TUTORSIM_LOG_LEVEL` / `TUTORSIM_LOG_FILE` environment variables set defaults
-for the flags.
+Build a self-contained HTML viewer:
+
+```bash
+tutorsim view --results-root results --out viewer.html
+```
+
+The report and viewer commands read `summary.json` files from run directories.
 
 ## Running new tutor models
 
@@ -211,23 +205,6 @@ records the set name, version, schema version, record count,
 a record-level `content_hash` (comparable across the HF and local load
 paths), a file-level `file_sha256`, creation date, and provenance.
 
-## Reports And Viewers
-
-Aggregate completed run summaries into leaderboard files:
-
-```bash
-tutorsim report --results-root results --out leaderboard
-```
-
-This writes `leaderboard.md` and `leaderboard.csv`.
-
-Build a self-contained HTML viewer:
-
-```bash
-tutorsim view --results-root results --out viewer.html
-```
-
-The report and viewer commands read `summary.json` files from run directories.
 
 ## Scoring
 
@@ -244,20 +221,70 @@ These are the three metrics the paper reports; all are higher-is-better and
 appear in the leaderboard as `appropriate_scaffolding`, `appropriate_rigor`,
 and `avoids_overscaffold`.
 
-## Analysis
+## Action taxonomy
 
-Paper notebooks, plots, and the action-taxonomy classifier live under
-`analysis/` — interpretation layers over results, not part of the runtime.
-Install the `taxonomy` extra (pandas/matplotlib), then:
+The action taxonomy classifies each decomposed tutor action into a 13-letter
+scheme and produces the tables behind the paper's action-distribution figures.
+The *data generation* lives in the runtime (`tutorsim.taxonomy` +
+`tutorsim taxonomy`); the *figures* are rendered by the notebooks under
+`analysis/working-paper-*`, which import `from tutorsim import taxonomy`.
+
+**Every `tutorsim run` classifies its own LM-side actions** — alongside the
+headline metrics — writing `results/<run_id>/taxonomy/classified.csv` and a
+`taxonomy` block (raw category counts) into `summary.json`. This adds an LLM
+classification pass per run (model set by the `taxonomy` config block, default
+`claude-opus-4-8`); it is resume-safe and never fails the run.
+
+The comparison figures plot each LM against a fixed **human reference**
+distribution. That reference is the paper's frozen, published distribution —
+[`analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv`](analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv)
+— so you do **not** re-classify the ground truth; the figure notebooks load it
+by default via `tutorsim.taxonomy.read_paper_distribution(...)`. Only the LM
+side comes from your run. Rendering the figures needs pandas + matplotlib —
+install the `analysis` extra:
 
 ```bash
-python -m analysis.taxonomy classify --kind key_moments --input key_moments.jsonl --output ./human
-python -m analysis.taxonomy classify --kind tutorsim --input results/<run_id>/ \
-  --scenarios data/balanced_520_release/moments.jsonl --output ./lm
-python -m analysis.taxonomy headline --human ./human/classified.csv --lm ./lm/classified.csv --output ./headline
+pip install -e ".[analysis]"
 ```
 
-`python -m analysis.taxonomy run` chains all three.
+Then point a figure notebook's `LM_CLASSIFIED` at your run's
+`results/<run_id>/taxonomy/classified.csv` and run it — the human baseline is
+already wired to the paper distribution.
+
+Regenerating (optional): to rebuild the human reference from scratch, or to
+produce the full headline tables from classified facets:
+
+```bash
+# Regenerate the human reference from the ground-truth bundle:
+tutorsim taxonomy classify --kind key_moments --input key_moments.jsonl --output ./human
+
+# Re-classify a completed run's LM side (normally emitted by the run itself):
+tutorsim taxonomy classify --kind tutorsim --input results/<run_id>/ \
+  --scenarios data/balanced_520_release/moments.jsonl --output ./lm
+
+# Headline tables from classified facets (needs a classified human side):
+tutorsim taxonomy headline --human ./human/classified.csv --lm ./lm/classified.csv --output ./headline
+```
+
+## Repository Layout
+
+```text
+.
+├── pyproject.toml
+├── configs/
+│   └── local.example.yaml
+├── src/tutorsim/            installable benchmark runtime
+├── tutorsim_build/           maintainer-only dataset construction + release tooling
+├── analysis/                paper notebooks, plots, taxonomy figures
+├── data/                    local datasets and release dirs, gitignored
+├── results/                 run outputs, gitignored
+└── tests/                   tutorsim/ (runtime), tutorsim_build/, analysis/
+```
+
+The core rule: code needed to run or score the benchmark lives in
+`src/tutorsim/`; code that creates the dataset lives in `tutorsim_build/`;
+code that explains or visualizes results lives in `analysis/`. Build and
+analysis code may import the runtime; the runtime never imports them.
 
 ## Configuration
 
@@ -284,25 +311,31 @@ Config files have these top-level sections:
 | `batch` | Batch API polling timeout for scorer/provider paths that use batch APIs. |
 
 
-## Repository Layout
+## Logging
 
-```text
-.
-├── pyproject.toml
-├── configs/
-│   └── local.example.yaml
-├── src/tutorsim/            installable benchmark runtime
-├── tutorsim_build/           maintainer-only dataset construction + release tooling
-├── analysis/                paper notebooks, plots, taxonomy
-├── data/                    local datasets and release dirs, gitignored
-├── results/                 run outputs, gitignored
-└── tests/                   tutorsim/ (runtime), tutorsim_build/, analysis/
-```
+Both CLIs (`tutorsim` and `tutorsim-build`) log progress to the console at
+INFO level, and every run automatically writes its own log file — nothing to
+enable:
 
-The core rule: code needed to run or score the benchmark lives in
-`src/tutorsim/`; code that creates the dataset lives in `tutorsim_build/`;
-code that explains or visualizes results lives in `analysis/`. Build and
-analysis code may import the runtime; the runtime never imports them.
+- `tutorsim run` writes `results/<run_id>/run.log` per cell, next to
+  `config.json` and `summary.json`. The run directory is the complete record
+  of the run: what ran, what was resumed, and which moments failed.
+- `tutorsim-build dataset build` / `build-from-run` / `build-ground-truth`
+  write a `build.log` into their output directory (skipped on `--dry-run`).
+
+Log files append, so a resumed run continues the same log. In a multi-tutor
+sweep, parallel lanes each write only to their own run's log, and every
+console line is tagged with its cell (e.g. `[gpt-5-4/plain]`) so interleaved
+lanes stay readable. Logs narrate the two phases of each run: Replay
+(generating tutor/student continuations) and Classification (the 3-pass
+batch scorer).
+
+Two optional knobs: `--log-level DEBUG|INFO|WARNING|ERROR` controls
+verbosity, and `--log-file FILE` additionally writes one combined log for the
+whole invocation — useful for watching a sweep across lanes, or for the
+subcommands without an output directory (`report`, `view`, `validate`).
+`TUTORSIM_LOG_LEVEL` / `TUTORSIM_LOG_FILE` environment variables set defaults
+for the flags.
 
 ## Development
 
@@ -311,7 +344,7 @@ Maintainer extras (not needed to run the benchmark):
 ```bash
 pip install -e ".[dev]"                    # + pytest (runtime tests)
 pip install -e ".[build,build-dev]"        # + dataset construction tooling
-pip install -e ".[taxonomy]"               # + pandas/matplotlib for analysis
+pip install -e ".[analysis]"               # + pandas/matplotlib for analysis figures
 ```
 
 Run from a local directory
@@ -328,7 +361,7 @@ Run the runtime test suite without real API calls:
 
 ```bash
 pytest tests/tutorsim -q          # runtime only (needs [dev])
-pytest tests -q                   # full suite (needs [dev,build-dev,taxonomy]; missing extras skip)
+pytest tests -q                   # full suite (needs [dev,build-dev,analysis]; missing extras skip)
 ```
 
 

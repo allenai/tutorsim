@@ -194,6 +194,16 @@ def scorer_spec(config_path: str | os.PathLike | None = None) -> dict:
     return load_config(config_path)["scorer"]
 
 
+def taxonomy_spec(config_path: str | os.PathLike | None = None) -> dict:
+    """Return the taxonomy classifier spec block from config.
+
+    Returns:
+        Dict with model, thinking, and batch_size keys. Used by the action
+        classifier that runs on every run and by `tutorsim taxonomy`.
+    """
+    return load_config(config_path)["taxonomy"]
+
+
 def get_groundtruth_phase_config(config_path: str | os.PathLike | None = None) -> dict:
     """Return the ground-truth build phase config block.
 
@@ -230,6 +240,8 @@ class RunConfig:
         sample: Number of samples from dataset (None = use all).
         trials: Number of trials per tutor/mode/sample.
         max_turns: Maximum turns per conversation.
+        replay_concurrency: Number of per-moment replays to run concurrently
+            within a cell. Result-preserving (only overlaps network round-trips).
         student: Student spec dict (model, mode, thinking).
         scorer: Scorer spec dict (model, thinking).
         resolved_tutors: Dict[model_id -> kwargs dict] for resolved tutors.
@@ -244,6 +256,7 @@ class RunConfig:
     sample: int | None
     trials: int
     max_turns: int
+    replay_concurrency: int
     student: dict
     scorer: dict
     resolved_tutors: dict[str, dict]
@@ -261,6 +274,7 @@ def build_run_config(
     sample: int | None = None,
     trials: int | None = None,
     max_turns: int | None = None,
+    replay_concurrency: int | None = None,
     config_path: str | os.PathLike | None = None,
 ) -> RunConfig:
     """Build a RunConfig from CLI arguments and config defaults.
@@ -277,6 +291,8 @@ def build_run_config(
         sample: Number of samples to draw. Default: None (use all).
         trials: Number of trials. Default: read from config defaults.
         max_turns: Max turns per conversation. Default: read from config defaults.
+        replay_concurrency: Concurrent per-moment replays within a cell.
+            Default: read from config `execution.replay_concurrency`, then 4.
         config_path: Optional explicit config path.
 
     Returns:
@@ -302,6 +318,9 @@ def build_run_config(
         trials = d["trials"]
     if max_turns is None:
         max_turns = d["max_turns"]
+    if replay_concurrency is None:
+        # Fall back to 4 if the execution block is absent (older configs).
+        replay_concurrency = (cfg.get("execution") or {}).get("replay_concurrency", 4)
 
     # Resolve tutors (check registry first, then roster)
     resolved_tutors = {}
@@ -328,6 +347,7 @@ def build_run_config(
         sample=sample,
         trials=trials,
         max_turns=max_turns,
+        replay_concurrency=replay_concurrency,
         student=student,
         scorer=scorer,
         resolved_tutors=resolved_tutors,

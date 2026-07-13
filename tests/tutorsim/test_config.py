@@ -15,6 +15,7 @@ def test_packaged_default_config_parses_and_has_expected_roster():
     assert cfg["models"]["deepseek-ai/DeepSeek-V4-Pro"] == {}
     assert cfg["student"] == {"model": "claude-opus-4-6", "mode": "oracle", "thinking": False}
     assert cfg["scorer"] == {"model": "claude-opus-4-6", "thinking": "adaptive"}
+    assert cfg["taxonomy"] == {"model": "claude-opus-4-8", "thinking": False, "batch_size": 50}
     assert cfg["defaults"] == {"trials": 1, "max_turns": 5}
     assert cfg["retry"] == {"max_retries": 5, "base_delay": 5}
     assert cfg["batch"] == {"timeout": 86400}

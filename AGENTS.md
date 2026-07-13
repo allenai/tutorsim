@@ -12,7 +12,9 @@ layout.
   and scores a released dataset. Everything a run needs ships in the package.
 - `tutorsim_build/` — maintainer-only dataset construction (`tutorsim-build`
   CLI): ground-truth building and release writing.
-- `analysis/` — paper notebooks, plots, and the action taxonomy.
+- `analysis/` — paper notebooks and plots (incl. the taxonomy figures). The
+  taxonomy *data generation* lives in the runtime (`tutorsim.taxonomy`); these
+  notebooks render its tables.
 - `tests/` — `tutorsim/` (runtime), `tutorsim_build/`, `analysis/`.
 
 Import rule: build and analysis code may import `tutorsim`; the runtime never
@@ -39,7 +41,7 @@ imports them.
 
 ```bash
 pytest tests/tutorsim -q   # runtime only (needs the [dev] extra)
-pytest tests -q            # full suite (needs [dev,build-dev,taxonomy]; missing extras skip)
+pytest tests -q            # full suite (needs [dev,build-dev,analysis]; missing extras skip)
 ```
 
 The suite runs without real API calls. New features and bug fixes need
