@@ -4,6 +4,7 @@ All tests mock run_conversation and score so there are no network calls.
 Uses tmp_path as results_root so nothing writes to the real results/ directory.
 """
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -1212,3 +1213,65 @@ def test_replay_concurrency_resume(tmp_path):
     assert summary["run_counts"]["resumed"] == 1
     assert summary["run_counts"]["succeeded"] == 3
     assert summary["run_counts"]["failed"] == 0
+
+
+def test_replay_concurrency_transcripts_survive_interrupt(tmp_path):
+    """Transcripts are written as each replay completes (main thread, in
+    completion order): if the run is killed mid-pool, every already-finished
+    conversation is on disk for resume instead of being lost."""
+    from tutorsim.cli import run_cell
+
+    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 3)]
+    fast, doomed = scenarios
+
+    def _conv(scenario, **kwargs):
+        if scenario.id == doomed.id:
+            time.sleep(0.5)  # let the fast moment complete + persist first
+            raise KeyboardInterrupt()
+        return _make_transcript(scenario.id)
+
+    cfg = _make_run_config(sample=len(scenarios), replay_concurrency=2)
+    with (
+        patch(_CFG_PATCH, return_value=cfg),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=_conv),
+        patch(_SCORE_PATCH, side_effect=AssertionError("scoring must not run")),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                 date="20260626", results_root=str(tmp_path))
+
+    # The completed moment was persisted before the interrupt; the doomed one
+    # never produced a transcript.
+    written = sorted(p.stem for p in tmp_path.glob("*/transcripts/*.json"))
+    assert written == [fast.id]
+
+
+def test_replay_concurrency_worker_logs_reach_run_log(tmp_path):
+    """Records logged inside run_conversation on pool worker threads (e.g.
+    client retry warnings) are captured in results/<run_id>/run.log."""
+    from tutorsim.cli import run_cell
+
+    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 4)]
+
+    def _conv(scenario, **kwargs):
+        logging.getLogger("tutorsim.client").warning(
+            "simulated retry for %s", scenario.id)
+        return _make_transcript(scenario.id)
+
+    cfg = _make_run_config(sample=len(scenarios), replay_concurrency=3)
+    anns = [_make_annotation(s.id) for s in scenarios]
+    with (
+        patch(_CFG_PATCH, return_value=cfg),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=_conv),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(anns)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                          date="20260626", results_root=str(tmp_path))
+
+    content = (tmp_path / run_id / "run.log").read_text(encoding="utf-8")
+    for s in scenarios:
+        assert f"simulated retry for {s.id}" in content

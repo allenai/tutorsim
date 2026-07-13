@@ -236,3 +236,31 @@ def test_cli_run_parser_accepts_log_flags():
     args = _build_parser().parse_args(["report"])
     assert args.log_level is None
     assert args.log_file is None
+
+
+def test_per_run_log_file_registered_worker_thread_captured(tmp_path):
+    """A pool worker registered via bind_worker_logging reaches run.log with
+    the cell tag; an unregistered thread stays filtered out."""
+    from tutorsim.logging_setup import bind_worker_logging
+
+    setup_logging()
+    log_file = tmp_path / "run.log"
+    log = logging.getLogger("tutorsim.client")
+
+    with per_run_log_file(str(log_file)) as handle:
+        def worker():
+            bind_worker_logging(handle, "tutor-x/plain")
+            log.warning("retry warning from worker")
+
+        def stranger():
+            log.warning("record from unregistered thread")
+
+        for target in (worker, stranger):
+            t = threading.Thread(target=target)
+            t.start()
+            t.join()
+
+    content = log_file.read_text(encoding="utf-8")
+    assert "retry warning from worker" in content
+    assert "[tutor-x/plain]" in content
+    assert "record from unregistered thread" not in content

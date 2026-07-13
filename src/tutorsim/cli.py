@@ -161,6 +161,7 @@ import tutorsim.results as results
 import tutorsim.report as report
 from tutorsim.config import build_run_config
 from tutorsim.logging_setup import (
+    bind_worker_logging,
     log_context,
     logging_args_parent,
     per_run_log_file,
@@ -402,11 +403,12 @@ def run_cell(
 
     # Everything below is also captured in the run's own log file,
     # kept next to config.json / summary.json for reproducibility.
-    # The handler is keyed to this thread so parallel lanes don't mix.
+    # The handler is keyed to this thread (plus replay-pool workers registered
+    # via bind_worker_logging) so parallel lanes don't mix.
     # log_context tags records with [tutor/mode] for programmatic callers;
     # under run_sweep the lane already set the same tag.
     run_log_path = os.path.join(results_root, run_id, "run.log")
-    with per_run_log_file(run_log_path), log_context(f"{tutor}/{mode}"):
+    with per_run_log_file(run_log_path) as run_log, log_context(f"{tutor}/{mode}"):
         config_dict = {
             "tutor": tutor,
             "mode": mode,
@@ -519,9 +521,12 @@ def run_cell(
             #   1. sequential planning pass -- cheap disk reads; resolve resume vs
             #      needs-run; all counts/list mutation for resumed moments happens here.
             #   2. bounded ThreadPoolExecutor over needs-run moments -- workers call
-            #      ONLY run_conversation (no shared state, no disk writes).
-            #   3. single-threaded collection in original index order -- transcript
-            #      writes + counts/to_score mutation, so no locks are needed and
+            #      ONLY run_conversation (no shared state, no disk writes). The
+            #      main thread writes each transcript as its future completes, so
+            #      a killed run keeps everything already finished (per-moment
+            #      resume durability, matching the serial version).
+            #   3. single-threaded collection in original index order --
+            #      counts/failed/to_score mutation, so no locks are needed and
             #      to_score is byte-identical regardless of completion order.
             logger.info(
                 "Starting Replay (trial %d/%d): %d moments, student=%s (%s), max_turns=%s, concurrency=%d",
@@ -594,17 +599,37 @@ def run_cell(
 
             if pending:
                 workers = max(1, min(replay_concurrency, len(pending)))
-                with ThreadPoolExecutor(max_workers=workers) as pool:
+                cell_tag = f"{tutor}/{mode}"
+                with ThreadPoolExecutor(
+                    max_workers=workers,
+                    # Workers must adopt this run's log file + [tutor/mode] tag:
+                    # the run.log handler filters by registered thread ids, and
+                    # contextvars don't cross thread boundaries.
+                    initializer=bind_worker_logging,
+                    initargs=(run_log, cell_tag),
+                ) as pool:
                     fut_to_idx = {
-                        pool.submit(_replay_one, scenario): (i, scenario.id)
-                        for i, scenario, _ in pending
+                        pool.submit(_replay_one, scenario): (i, scenario.id, resume_sid)
+                        for i, scenario, resume_sid in pending
                     }
                     for fut in as_completed(fut_to_idx):
-                        idx, sid = fut_to_idx[fut]
+                        idx, sid, resume_sid = fut_to_idx[fut]
                         try:
-                            outcome[idx] = ("ok", fut.result())
+                            transcript = fut.result()
                         except Exception as e:  # noqa: BLE001 -- per-moment isolation
                             outcome[idx] = ("err", e)
+                            continue
+                        # Persist immediately (main thread), in completion order:
+                        # transcripts are per-sid files, so write order doesn't
+                        # affect the final file set, and a killed run keeps every
+                        # conversation that already finished (resume durability).
+                        # Written before scoring so a score failure doesn't lose it.
+                        transcript_dict = (
+                            transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
+                        )
+                        results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
+                        outcome[idx] = ("ok", transcript)
+                        logger.info("[trial %d][%d/%d] replay OK: %s", trial_idx, idx, n_total, sid)
 
             # ---- Stage 3: deterministic, single-threaded collection ----
             for i, scenario, resume_sid in pending:
@@ -616,14 +641,7 @@ def run_cell(
                     logger.error("[trial %d][%d/%d] SKIP %s: %s", trial_idx, i, n_total, sid, payload)
                     continue
 
-                transcript = payload
-                # Write transcript before scoring (so a score failure doesn't lose it)
-                transcript_dict = (
-                    transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
-                )
-                results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
-                to_score.append((scenario, transcript, resume_sid))
-                logger.info("[trial %d][%d/%d] replay OK: %s", trial_idx, i, n_total, sid)
+                to_score.append((scenario, payload, resume_sid))
 
             # ---- Phase 2: Classification -- pooled scoring (one 3-pass batch pipeline) ----
             if to_score:
