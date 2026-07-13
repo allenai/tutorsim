@@ -4,7 +4,9 @@ All tests mock run_conversation and score so there are no network calls.
 Uses tmp_path as results_root so nothing writes to the real results/ directory.
 """
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
@@ -122,7 +124,7 @@ _TAX_RESULT = {
 }
 
 
-def _make_run_config(sample=2, dataset="test_ds", max_turns=4):
+def _make_run_config(sample=2, dataset="test_ds", max_turns=4, replay_concurrency=1):
     """Build a fake RunConfig-like object."""
     cfg = MagicMock()
     cfg.dataset = dataset
@@ -134,6 +136,7 @@ def _make_run_config(sample=2, dataset="test_ds", max_turns=4):
     cfg.tutors = ["claude-opus-4-8"]
     cfg.modes = ["plain"]
     cfg.trials = 1
+    cfg.replay_concurrency = replay_concurrency
     cfg.student = {"model": "claude-haiku", "mode": "oracle", "thinking": "adaptive"}
     cfg.scorer = {"model": "claude-opus-4-6", "thinking": "adaptive"}
     cfg.resolved_tutors = {"claude-opus-4-8": {}}
@@ -532,7 +535,8 @@ def test_scheduler_multiple_lanes_all_cells_run(tmp_path):
 # Test 6: --trials N -- conversation+score called N times; summary has mean+spread
 # ---------------------------------------------------------------------------
 
-def _make_run_config_trials(n_trials: int, sample=2, dataset="test_ds", max_turns=4):
+def _make_run_config_trials(n_trials: int, sample=2, dataset="test_ds", max_turns=4,
+                            replay_concurrency=1):
     cfg = MagicMock()
     cfg.dataset = dataset
     cfg.data_path = None
@@ -543,6 +547,7 @@ def _make_run_config_trials(n_trials: int, sample=2, dataset="test_ds", max_turn
     cfg.tutors = ["claude-opus-4-8"]
     cfg.modes = ["plain"]
     cfg.trials = n_trials
+    cfg.replay_concurrency = replay_concurrency
     cfg.student = {"model": "claude-haiku", "mode": "oracle", "thinking": "adaptive"}
     cfg.scorer = {"model": "claude-opus-4-6", "thinking": "adaptive"}
     cfg.resolved_tutors = {"claude-opus-4-8": {}}
@@ -1048,3 +1053,225 @@ def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
     # taxonomy usage folded into the token bookkeeping
     assert summary["tokens"]["taxonomy"] == tax_result["usage"]
     assert summary["tokens"]["total"]["total_tokens"] >= 1000
+
+
+# ---------------------------------------------------------------------------
+# Replay concurrency (result-preserving parallel replay of moments)
+# ---------------------------------------------------------------------------
+
+def _conv_by_sid(scenarios, delays=None, fail_ids=()):
+    """run_conversation fake that returns the right transcript for its scenario.
+
+    Keyed by scenario, so it is robust to the nondeterministic call order that
+    threads introduce (a list side_effect would mis-assign under concurrency).
+    Optional per-sid delays shuffle completion order; fail_ids raise.
+    """
+    delays = delays or {}
+    tmap = {s.id: _make_transcript(s.id) for s in scenarios}
+
+    def _fake(scenario, **kwargs):
+        d = delays.get(scenario.id, 0)
+        if d:
+            time.sleep(d)
+        if scenario.id in fail_ids:
+            raise RuntimeError(f"boom {scenario.id}")
+        return tmap[scenario.id]
+
+    return _fake
+
+
+def test_replay_concurrency_matches_serial(tmp_path):
+    """Concurrency=4 yields byte-identical summary + file set to concurrency=1,
+    even when completion order is shuffled (reverse per-sid delays)."""
+    from tutorsim.cli import run_cell
+
+    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 6)]
+    # Reverse delays: last-submitted finishes first under concurrency, so
+    # completion order != submission order -- exercises index-order reassembly.
+    delays = {s.id: 0.02 * (len(scenarios) - i) for i, s in enumerate(scenarios)}
+
+    def _run(root, concurrency):
+        cfg = _make_run_config(sample=len(scenarios), replay_concurrency=concurrency)
+        anns = [_make_annotation(s.id) for s in scenarios]
+        with (
+            patch(_CFG_PATCH, return_value=cfg),
+            patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+            patch(_CONV_PATCH, side_effect=_conv_by_sid(scenarios, delays)),
+            patch(_SCORE_PATCH, side_effect=_score_batch_from(anns)),
+            patch(_TAX_PATCH, return_value=_TAX_RESULT),
+        ):
+            return run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                            date="20260626", results_root=str(root))
+
+    root_serial = tmp_path / "serial"
+    root_conc = tmp_path / "concurrent"
+    rid_serial = _run(root_serial, 1)
+    rid_conc = _run(root_conc, 4)
+
+    assert rid_serial == rid_conc  # run_id is concurrency-independent
+
+    def _summary(root, rid):
+        return json.loads((root / rid / "summary.json").read_text(encoding="utf-8"))
+
+    def _files(root, rid):
+        base = root / rid
+        return sorted(
+            p.relative_to(base).as_posix()
+            for sub in ("transcripts", "scores")
+            for p in (base / sub).glob("*.json")
+        )
+
+    assert _summary(root_serial, rid_serial) == _summary(root_conc, rid_conc)
+    assert _files(root_serial, rid_serial) == _files(root_conc, rid_conc)
+
+
+def test_replay_concurrency_error_isolation(tmp_path):
+    """Under concurrency, a single failing replay is isolated: it is counted as
+    failed with phase 'run', no score file is written for it, and every other
+    moment still succeeds."""
+    from tutorsim.cli import run_cell
+
+    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 5)]
+    bad = scenarios[1]
+    good = [s for s in scenarios if s.id != bad.id]
+
+    cfg = _make_run_config(sample=len(scenarios), replay_concurrency=4)
+    anns = [_make_annotation(s.id) for s in good]
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=_conv_by_sid(scenarios, fail_ids={bad.id})),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(anns)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                          date="20260626", results_root=str(tmp_path))
+
+    run_dir = tmp_path / run_id
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert summary["run_counts"] == {
+        "attempted": len(scenarios),
+        "succeeded": len(good),
+        "failed": 1,
+        "resumed": 0,
+    }
+    failed = summary["failed_scenarios"]
+    assert len(failed) == 1
+    assert failed[0]["id"] == bad.id
+    assert failed[0]["phase"] == "run"
+
+    # Bad moment: no score written. Every good moment: transcript + score written.
+    assert not (run_dir / "scores" / f"{bad.id}.json").exists()
+    for s in good:
+        assert (run_dir / "transcripts" / f"{s.id}.json").exists()
+        assert (run_dir / "scores" / f"{s.id}.json").exists()
+
+
+def test_replay_concurrency_resume(tmp_path):
+    """With concurrency>1, resume still only replays never-run moments and counts
+    the already-done ones as resumed."""
+    from tutorsim.cli import run_cell
+
+    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 4)]
+
+    # First run: complete only the first moment (sample=1).
+    cfg1 = _make_run_config(sample=1, replay_concurrency=4)
+    with (
+        patch(_CFG_PATCH, return_value=cfg1),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios[:1])),
+        patch(_CONV_PATCH, side_effect=_conv_by_sid(scenarios[:1])),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from([_make_annotation(scenarios[0].id)])),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                          date="20260626", results_root=str(tmp_path))
+
+    # Second run: all 3 moments; only the 2 new ones should be replayed.
+    called_ids = []
+
+    def _tracking_conv(scenario, **kwargs):
+        called_ids.append(scenario.id)
+        return _make_transcript(scenario.id)
+
+    cfg2 = _make_run_config(sample=3, replay_concurrency=4)
+    with (
+        patch(_CFG_PATCH, return_value=cfg2),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=_tracking_conv),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from([_make_annotation(s.id) for s in scenarios[1:]])),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id2 = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                           date="20260626", results_root=str(tmp_path))
+
+    assert run_id2 == run_id
+    assert sorted(called_ids) == [scenarios[1].id, scenarios[2].id]
+
+    summary = json.loads((tmp_path / run_id2 / "summary.json").read_text(encoding="utf-8"))
+    assert summary["run_counts"]["resumed"] == 1
+    assert summary["run_counts"]["succeeded"] == 3
+    assert summary["run_counts"]["failed"] == 0
+
+
+def test_replay_concurrency_transcripts_survive_interrupt(tmp_path):
+    """Transcripts are written as each replay completes (main thread, in
+    completion order): if the run is killed mid-pool, every already-finished
+    conversation is on disk for resume instead of being lost."""
+    from tutorsim.cli import run_cell
+
+    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 3)]
+    fast, doomed = scenarios
+
+    def _conv(scenario, **kwargs):
+        if scenario.id == doomed.id:
+            time.sleep(0.5)  # let the fast moment complete + persist first
+            raise KeyboardInterrupt()
+        return _make_transcript(scenario.id)
+
+    cfg = _make_run_config(sample=len(scenarios), replay_concurrency=2)
+    with (
+        patch(_CFG_PATCH, return_value=cfg),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=_conv),
+        patch(_SCORE_PATCH, side_effect=AssertionError("scoring must not run")),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                 date="20260626", results_root=str(tmp_path))
+
+    # The completed moment was persisted before the interrupt; the doomed one
+    # never produced a transcript.
+    written = sorted(p.stem for p in tmp_path.glob("*/transcripts/*.json"))
+    assert written == [fast.id]
+
+
+def test_replay_concurrency_worker_logs_reach_run_log(tmp_path):
+    """Records logged inside run_conversation on pool worker threads (e.g.
+    client retry warnings) are captured in results/<run_id>/run.log."""
+    from tutorsim.cli import run_cell
+
+    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 4)]
+
+    def _conv(scenario, **kwargs):
+        logging.getLogger("tutorsim.client").warning(
+            "simulated retry for %s", scenario.id)
+        return _make_transcript(scenario.id)
+
+    cfg = _make_run_config(sample=len(scenarios), replay_concurrency=3)
+    anns = [_make_annotation(s.id) for s in scenarios]
+    with (
+        patch(_CFG_PATCH, return_value=cfg),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=_conv),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(anns)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
+                          date="20260626", results_root=str(tmp_path))
+
+    content = (tmp_path / run_id / "run.log").read_text(encoding="utf-8")
+    for s in scenarios:
+        assert f"simulated retry for {s.id}" in content
